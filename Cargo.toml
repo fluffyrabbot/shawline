@@ -1,0 +1,24 @@
+[workspace]
+resolver = "3"
+members = ["crates/*"]
+
+[workspace.package]
+version = "0.0.1"
+edition = "2024"
+rust-version = "1.85"
+publish = false
+
+[workspace.dependencies]
+shawline-grid = { path = "crates/shawline-grid" }
+shawline-shape = { path = "crates/shawline-shape" }
+shawline-word = { path = "crates/shawline-word" }
+shawline-syntax = { path = "crates/shawline-syntax" }
+shawline-ir = { path = "crates/shawline-ir" }
+shawline-vm = { path = "crates/shawline-vm" }
+shawline-fmt = { path = "crates/shawline-fmt" }
+shawline-glyph = { path = "crates/shawline-glyph" }
+shawline-render = { path = "crates/shawline-render" }
+shawline-font = { path = "crates/shawline-font" }
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
