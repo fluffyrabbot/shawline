@@ -229,7 +229,7 @@ Done by one mind, because this is where conceptual integrity is set.
 - [ ] The extension inside VS Code: the `code` CLI isn't on this machine, so installing the `.vsix` is the user's step.
 - Decided: no custom `semanticTokenColors`. The server uses standard token types (`function`, `parameter`, `number`, `string`, `enumMember`, `comment`), which every theme already colours.
 
-### P5: Aesthetic and correctness gate (once)
+### P5: Aesthetic and correctness gate (once) ✅
 
 - The user reviews the gallery (every corpus program rendered in the playground). Lint thresholds and canonical spacing get tuned from that review.
 - One audit pass, with lenses picked via the `agent-fleet` skill (at most two; likely `dijkstra-correctness-auditor` on VM/IR and `data-integrity-architect` on formatter round-trips). The lead triages and batches the fixes.
@@ -265,7 +265,7 @@ Progress:
   - Agent F built near boxes (`BoxShape::slips`, `S012`) and `shawline_fmt::fix`. The lead added `shawline fmt --fix` and the `fix.shaw` stage, and reworded `S012` to give a direction instead of a zero-based coordinate.
   - Proof of the recovery: each near box's wires and syntax tree are identical to its intact original.
   - Gate: 195 tests, clippy clean, playground build and Node checks green, all under `scripts/capped`.
-- [ ] Gallery review and lint tuning.
+- [x] Gallery review: the user passed every corpus program's render (light and dark), the near-box before/after pairs and the font sample. No lint thresholds changed. **P5 closed.**
 
 ### P6: Shawline Studio spike (after P5 closes)
 
