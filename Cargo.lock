@@ -393,6 +393,10 @@ dependencies = [
 [[package]]
 name = "shawline-fmt"
 version = "0.0.1"
+dependencies = [
+ "shawline-grid",
+ "shawline-shape",
+]
 
 [[package]]
 name = "shawline-font"
