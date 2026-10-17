@@ -9,6 +9,7 @@ publish.workspace = true
 shawline-grid.workspace = true
 shawline-shape.workspace = true
 shawline-cli.workspace = true
+shawline-edit.workspace = true
 
 [lints]
 workspace = true

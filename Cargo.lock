@@ -571,6 +571,15 @@ name = "shawline-corpus"
 version = "0.0.1"
 dependencies = [
  "shawline-cli",
+ "shawline-edit",
+ "shawline-grid",
+ "shawline-shape",
+]
+
+[[package]]
+name = "shawline-edit"
+version = "0.0.1"
+dependencies = [
  "shawline-grid",
  "shawline-shape",
 ]

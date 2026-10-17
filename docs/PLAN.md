@@ -271,6 +271,7 @@ Progress:
 
 The interaction model for a visual editor is designed in the [Shawline Studio doc](https://claude.ai/code/artifact/923d6730-3f54-4722-8a46-ea15abf1dd1f). It calls for a grid-native drag-and-drop editor whose every gesture is one checked edit to the `.shaw` text. Its first step, approved by the user, is a spike that proves the model before any UI is built around it:
 
+- [x] Lead: the `shawline-edit` contract (`move_box`, `route`, `Refusal`; checked-edit semantics on the signatures) and the gate test `crates/shawline-corpus/tests/edit_moves.rs`. The gate is red until the spike lands.
 - [ ] `crates/shawline-edit`, a new crate for wasm: a best-first router over free cells, costed by bends, crossings and clearance, with a search budget. Plus the move gesture, which moves a box and re-routes only the wire stretches that must change. Every edit is validated with the formatter's recognize-and-fingerprint check.
 - [ ] Wired into the existing playground: drag a box on the drawing, watch its wires follow.
 - [ ] Spike gate: every node box in the corpus's valid programs can be moved one cell in each direction, and the result keeps every corpus check, or is refused with a reason.

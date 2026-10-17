@@ -20,6 +20,7 @@ shawline-glyph = { path = "crates/shawline-glyph" }
 shawline-render = { path = "crates/shawline-render" }
 shawline-font = { path = "crates/shawline-font" }
 shawline-cli = { path = "crates/shawline-cli" }
+shawline-edit = { path = "crates/shawline-edit" }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
