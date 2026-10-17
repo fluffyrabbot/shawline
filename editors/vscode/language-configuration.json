@@ -1,0 +1,15 @@
+{
+  "comments": {
+    "lineComment": "※"
+  },
+  "brackets": [
+    ["«", "»"]
+  ],
+  "autoClosingPairs": [
+    { "open": "«", "close": "»" }
+  ],
+  "surroundingPairs": [
+    ["«", "»"]
+  ],
+  "wordPattern": "·?(?:\\uD801[\\uDC50-\\uDC7F])+|[0-9]+"
+}

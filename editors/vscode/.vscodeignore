@@ -1,0 +1,8 @@
+src/**
+out/**/*.map
+tsconfig.json
+.gitignore
+*.vsix
+node_modules/**/*.d.ts
+node_modules/**/*.map
+node_modules/**/*.md
