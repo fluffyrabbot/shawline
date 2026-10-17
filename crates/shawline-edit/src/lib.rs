@@ -18,7 +18,17 @@
 //! and the same diagnostic codes. If not, the edit is refused and the sheet is
 //! unchanged.
 
-use shawline_grid::Pos;
+mod check;
+mod mover;
+mod router;
+mod sheet;
+
+use std::collections::HashSet;
+
+use shawline_grid::{Dir, Grid, Pos};
+use shawline_shape::{Diagram, recognize};
+
+use router::{BUDGET, CELL, CLEARANCE, Cell, Start, Terrain};
 
 /// Why an edit was refused. The sheet is unchanged.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -28,6 +38,12 @@ pub struct Refusal {
     /// A sentence the UI can show as is, such as "no free path for the wire
     /// from 𐑐; insert a column?".
     pub reason: String,
+}
+
+impl Refusal {
+    pub(crate) fn new(at: Pos, reason: impl Into<String>) -> Self {
+        Self { at, reason: reason.into() }
+    }
 }
 
 /// Moves the box whose top-left corner is at `corner` by `dr` rows and `dc`
@@ -44,8 +60,7 @@ pub struct Refusal {
 ///   another box or leave its parent, or a wire can't be re-routed within the
 ///   search budget.
 pub fn move_box(src: &str, corner: Pos, dr: isize, dc: isize) -> Result<String, Refusal> {
-    let _ = (src, corner, dr, dc);
-    todo!("P6: agent E")
+    mover::move_box(src, corner, dr, dc)
 }
 
 /// The cheapest orthogonal path for a wire from cell `from` to cell `to`,
@@ -57,6 +72,69 @@ pub fn move_box(src: &str, corner: Pos, dr: isize, dc: isize) -> Result<String, 
 /// The search is best-first with a fixed budget of expanded cells. `None`
 /// when no path exists or the budget runs out, so a caller can't hang.
 pub fn route(src: &str, from: Pos, to: Pos) -> Option<Vec<Pos>> {
-    let _ = (src, from, to);
-    todo!("P6: agent E")
+    let grid = Grid::parse(src).ok()?;
+    let diagram = recognize(&grid);
+    let sheet = Plain::new(&grid, &diagram, from, to);
+    if sheet.cell(from) != Cell::Free || sheet.cell(to) != Cell::Free {
+        return None;
+    }
+    if from == to {
+        return Some(vec![from]);
+    }
+    let start = Start { pos: from, heading: None, straight: false };
+    router::search(&sheet, start, BUDGET).map(|found| found.path)
 }
+
+/// A sheet as [`route`] sees it: blank cells are free except where a new
+/// stroke would touch an existing wire end, port or text gap, straight
+/// wire lines may be crossed, and box borders (title gaps included) wall
+/// regions off.
+struct Plain<'a> {
+    grid: &'a Grid,
+    diagram: &'a Diagram,
+    walls: HashSet<Pos>,
+    /// The ends may sit where a wire meets a port.
+    ends: [Pos; 2],
+}
+
+impl<'a> Plain<'a> {
+    fn new(grid: &'a Grid, diagram: &'a Diagram, from: Pos, to: Pos) -> Self {
+        let mut walls = sheet::borders(diagram);
+        walls.extend(sheet::keep_clear(grid, diagram, |_, _| false).into_iter().map(|(_, p)| p));
+        Self { grid, diagram, walls, ends: [from, to] }
+    }
+
+    fn stroke(&self, p: Pos) -> bool {
+        self.diagram.strokes.get(p).is_some()
+    }
+}
+
+impl Terrain for Plain<'_> {
+    fn cell(&self, p: Pos) -> Cell {
+        if p.row >= self.grid.height()
+            || p.col >= self.grid.width()
+            || (self.walls.contains(&p) && !self.ends.contains(&p))
+        {
+            return Cell::Blocked;
+        }
+        match self.grid.get(p) {
+            ' ' => Cell::Free,
+            '─' | '-' => Cell::Line(true),
+            '│' | '|' => Cell::Line(false),
+            _ => Cell::Blocked,
+        }
+    }
+
+    fn extra(&self, p: Pos) -> u32 {
+        let near =
+            Dir::ALL.into_iter().filter_map(|d| p.step(d)).filter(|&q| self.stroke(q)).count();
+        near as u32 * CLEARANCE
+    }
+
+    fn goal(&self, p: Pos, _heading: Dir) -> Option<u32> {
+        (p == self.ends[1]).then(|| CELL + self.extra(p))
+    }
+}
+
+#[cfg(test)]
+mod tests;

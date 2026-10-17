@@ -228,11 +228,42 @@ main {
 
 /* Drawn at the editor's scale and pulled up and left by the renderer's
    margin, so each row of the drawing sits level with its source row. */
-#drawing { overflow: auto; font: var(--cell)/0 var(--mono); }
+#drawing { position: relative; overflow: auto; font: var(--cell)/0 var(--mono); }
 #drawing svg { display: block; margin: -0.5em 0 0 -1ch; max-width: calc(100% + 1ch); height: auto; cursor: text; }
 #drawing svg.stale { opacity: 0.35; transition: opacity 0.2s; }
 #drawing .cell { fill: var(--ink); opacity: 0.22; transition: opacity 0.15s; }
 #drawing .cell.hot { opacity: 0.45; }
+
+/* Moving a box: a grab cursor over boxes, a dashed ghost where the box
+   would land, and a brief note by the cell a refused move is about. */
+#drawing svg.over-box { cursor: grab; }
+#drawing.dragging svg { cursor: grabbing; user-select: none; }
+#drawing .ghost {
+  fill: color-mix(in srgb, var(--wire) 7%, transparent);
+  stroke: var(--wire);
+  stroke-width: 50;
+  stroke-dasharray: 150 110;
+}
+#drawing .refused { fill: var(--error); opacity: 0.3; }
+.refusal {
+  position: absolute;
+  z-index: 1;
+  max-width: 36ch;
+  margin-top: 6px;
+  padding: 6px 10px;
+  font: 13px/1.4 var(--sans);
+  color: var(--background);
+  background: var(--text);
+  border-left: 3px solid var(--error);
+  border-radius: 6px;
+  pointer-events: none;
+  animation: refusal 2.8s ease forwards;
+}
+@keyframes refusal {
+  0% { opacity: 0; transform: translateY(-4px); }
+  8%, 80% { opacity: 1; transform: none; }
+  100% { opacity: 0; }
+}
 
 /* Diagnostics and output */
 

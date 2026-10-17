@@ -6,7 +6,7 @@
 
 use js_sys::{Array, Object, Reflect};
 use shawline_cli::Theme;
-use shawline_grid::Diagnostic;
+use shawline_grid::{Diagnostic, Dir, Pos};
 use wasm_bindgen::prelude::*;
 
 #[wasm_bindgen]
@@ -79,6 +79,60 @@ pub fn format(src: &str) -> Option<String> {
 #[wasm_bindgen]
 pub fn render(src: &str, dark: bool) -> Option<String> {
     shawline_cli::render(src, if dark { Theme::DARK } else { Theme::LIGHT }).ok()
+}
+
+/// The node and definition boxes of `src`, for hit-testing: an array of
+/// `{ top, left, bottom, right, kind }` (inclusive cell rectangles, `kind`
+/// `"node"` or `"definition"`), empty when the text has grid errors.
+#[wasm_bindgen]
+pub fn boxes(src: &str) -> Array {
+    let Ok(grid) = shawline_grid::Grid::parse(src) else { return Array::new() };
+    let diagram = shawline_shape::recognize(&grid);
+    diagram
+        .boxes
+        .iter()
+        .filter_map(|b| {
+            let kind = match b.parent {
+                None => "definition",
+                // A switch has dividers or a selector on its top edge.
+                Some(_) if b.dividers.is_empty() && !b.ports.iter().any(|p| p.side == Dir::N) => {
+                    "node"
+                }
+                Some(_) => return None,
+            };
+            let o = Object::new();
+            set(&o, "top", &(b.rect.top as u32).into());
+            set(&o, "left", &(b.rect.left as u32).into());
+            set(&o, "bottom", &(b.rect.bottom as u32).into());
+            set(&o, "right", &(b.rect.right as u32).into());
+            set(&o, "kind", &kind.into());
+            Some(JsValue::from(o))
+        })
+        .collect()
+}
+
+/// Moves the box whose top-left corner is at `row`, `col` by `dr` rows and
+/// `dc` columns, as one checked edit (`shawline_edit::move_box`). Returns
+/// `{ ok: true, text }` with the new canonical text, or `{ ok: false, row,
+/// col, reason }` saying where and why the move was refused; then the sheet
+/// is unchanged.
+#[wasm_bindgen]
+pub fn move_box(src: &str, row: u32, col: u32, dr: i32, dc: i32) -> Object {
+    let result = Object::new();
+    let corner = Pos::new(row as usize, col as usize);
+    match shawline_edit::move_box(src, corner, dr as isize, dc as isize) {
+        Ok(text) => {
+            set(&result, "ok", &true.into());
+            set(&result, "text", &text.into());
+        }
+        Err(refusal) => {
+            set(&result, "ok", &false.into());
+            set(&result, "row", &(refusal.at.row as u32).into());
+            set(&result, "col", &(refusal.at.col as u32).into());
+            set(&result, "reason", &refusal.reason.into());
+        }
+    }
+    result
 }
 
 /// The transliteration table (SPEC §13) as an array of `[keys, letter]`.
