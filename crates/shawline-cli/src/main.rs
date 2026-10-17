@@ -11,7 +11,8 @@ const USAGE: &str = "usage: shawline <command> [flags] <file.shaw>
 commands:
   check     report diagnostics
   run       check, then run ·𐑥𐑱𐑯 and print its outputs
-  fmt       print the canonical form (--write: rewrite the file in place)
+  fmt       print the canonical form (--fix: also move slipped border cells
+            home; --write: rewrite the file in place)
   render    print an SVG drawing (--dark: the dark theme)
   diagram   print the recognized diagram
   ast       print the syntax tree
@@ -29,7 +30,7 @@ fn main() -> ExitCode {
         return ExitCode::from(2);
     };
     let known = match command.as_str() {
-        "fmt" => flags.iter().all(|f| *f == "--write"),
+        "fmt" => flags.iter().all(|f| *f == "--write" || *f == "--fix"),
         "render" => flags.iter().all(|f| *f == "--dark"),
         c => COMMANDS.contains(&c) && flags.is_empty(),
     };
@@ -52,7 +53,7 @@ fn main() -> ExitCode {
     };
 
     match command.as_str() {
-        "fmt" => match shawline_cli::format(&src) {
+        "fmt" => match if flag("--fix") { shawline_cli::fix(&src) } else { shawline_cli::format(&src) } {
             Ok(text) if flag("--write") => {
                 if text != src
                     && let Err(e) = replace(path, &text)

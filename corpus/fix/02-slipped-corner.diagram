@@ -1,0 +1,8 @@
+box 0 rounded 2:0-6:20
+  port 4:20 side E arrow E
+  slip 7:20 home 6:20
+text comment 0:0 "𐑣𐑧𐑤𐑴"
+text word 2:3 "·𐑥𐑱𐑯" title 0
+text literal 4:2 "𐑣𐑧𐑤𐑴 𐑢𐑻𐑤𐑛" in 0
+text word 4:22 "𐑬"
+diagnostic 7:20 S012: border cell is one cell out of line; it belongs one cell up (`shawline fmt --fix` moves it)

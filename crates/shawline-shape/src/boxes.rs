@@ -126,7 +126,17 @@ pub(crate) fn slips(boxes: &[BoxShape]) -> Vec<Diagnostic> {
         .iter()
         .flat_map(|b| &b.slips)
         .map(|s| {
-            let message = format!("border cell slipped off its line; it belongs at {}", s.home);
+            // A direction, not a coordinate: positions in messages would be
+            // zero-based while the CLI prints one-based locations.
+            let way = match (s.home.row.cmp(&s.at.row), s.home.col.cmp(&s.at.col)) {
+                (std::cmp::Ordering::Less, _) => "up",
+                (std::cmp::Ordering::Greater, _) => "down",
+                (_, std::cmp::Ordering::Less) => "left",
+                _ => "right",
+            };
+            let message = format!(
+                "border cell is one cell out of line; it belongs one cell {way} (`shawline fmt --fix` moves it)"
+            );
             Diagnostic::new(s.at, "S012", message)
         })
         .collect()

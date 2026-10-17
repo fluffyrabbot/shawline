@@ -55,6 +55,12 @@ pub const STAGES: &[Stage] = &[
         selective: true,
     },
     Stage {
+        name: "fix.shaw",
+        run: |src| shawline_cli::fix(src).unwrap_or_else(|errors| lines(&errors)),
+        fallback: None,
+        selective: true,
+    },
+    Stage {
         name: "svg",
         run: |src| shawline_cli::render(src, Theme::LIGHT).unwrap_or_else(|errors| lines(&errors)),
         fallback: None,

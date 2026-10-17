@@ -73,6 +73,13 @@ pub fn format(src: &str) -> Result<String, Vec<Diagnostic>> {
     Ok(shawline_fmt::format(&grid, &shawline_shape::recognize(&grid)))
 }
 
+/// The canonical form of `src` with every slipped border cell moved home
+/// (SPEC §3, §11 rule 6).
+pub fn fix(src: &str) -> Result<String, Vec<Diagnostic>> {
+    let grid = grid(src)?;
+    Ok(shawline_fmt::fix(&grid, &shawline_shape::recognize(&grid)))
+}
+
 /// `src` drawn as a standalone SVG.
 pub fn render(src: &str, theme: Theme) -> Result<String, Vec<Diagnostic>> {
     Ok(shawline_render::render(&grid(src)?, theme))

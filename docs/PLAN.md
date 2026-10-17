@@ -248,13 +248,23 @@ Progress:
   - **The lead added `I001`:** `check` guarantees a program whenever there are no errors, so the CLI and playground can't panic.
   - **Deviation accepted:** `·𐑥𐑱𐑯`'s own calls are never tail calls.
   - **Lesson:** the lead ran case 84 through a stale prebuilt binary, uncapped, and it reached 5.1 GB. The rule now requires `cargo run` under `scripts/capped`.
-- [ ] Formatter audit (`data-integrity-architect`): still running, re-run under the cap; it is triaging its 18 fuzzed "meaning changed" mutants.
+- [x] Formatter audit (`data-integrity-architect`), re-run under the cap.
+  - All 18 earlier fuzzed candidates were false positives. Across about 400 000 inputs, meaning, determinism and text integrity held.
+  - Five findings were fixed by agent F:
+    - corners keep their roundedness (SPEC §11 rules 1–2);
+    - the phases run to a fixpoint (two idempotence bugs);
+    - each blank-line edit is verified separately;
+    - the fingerprint gains box style and syntax codes.
+  - The lead made `fmt --write` atomic and added `fmt_mutations` (seeded mutants, never run).
 - [x] Design for `fmt --fix`, recorded in SPEC §3 (near boxes), §11 rule 6 and §14 (`S012`), with cases in `corpus/fix/`. While designing it, it turned out that one slipped border cell made the whole box unrecognizable and produced 24 cascading diagnostics, none at the cause. Near boxes therefore become an error-recovery feature of the shape stage: the box is still recognized, its slipped cells are recorded, and the user gets one `S012` at the slipped cell. `fmt --fix` then moves recorded slips into place.
-- [ ] Wave P5 (after audit triage). The formatter keeps a single writer.
+- [x] Wave P5 (after audit triage). The formatter keeps a single writer.
   - **F**, one agent owning `shawline-shape` (outside `wire.rs`) and `shawline-fmt`, does three things: near-box recognition (slips recorded on `BoxShape`, excluded from wire tracing, `S012`), `fix` and `fmt --fix`, and the confirmed formatter audit findings.
   - **V** fixes the confirmed VM/IR findings in `shawline-vm`/`shawline-ir`, if there are any.
   - The lead then registers the `fix.shaw` stage, blesses the `fix/` dumps after reading them, and runs the gate.
-- [ ] `fmt --fix`.
+- [x] `fmt --fix` and P5 gate.
+  - Agent F built near boxes (`BoxShape::slips`, `S012`) and `shawline_fmt::fix`. The lead added `shawline fmt --fix` and the `fix.shaw` stage, and reworded `S012` to give a direction instead of a zero-based coordinate.
+  - Proof of the recovery: each near box's wires and syntax tree are identical to its intact original.
+  - Gate: 195 tests, clippy clean, playground build and Node checks green, all under `scripts/capped`.
 - [ ] Gallery review and lint tuning.
 
 ### P6: Shawline Studio spike (after P5 closes)
