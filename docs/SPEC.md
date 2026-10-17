@@ -63,7 +63,7 @@ A **word** is a maximal horizontal run of Shavian letters, namer dots and digits
 - `«…»` is a **text literal**. It may contain Shavian letters, digits, the namer dot and spaces.
 - `※` starts a **comment** that runs to the end of the line. Comments are still restricted to the repertoire, so they are written in Shavian.
 
-**Single-letter words are reserved for primitives** (§9). User definitions need names of two letters or more.
+**Single-letter words and `𐑯𐑦𐑤` are reserved for primitives** (§9). User definitions need names of two letters or more, other than `𐑯𐑦𐑤`.
 
 **Port names** (§5) are a separate namespace from callable names. A port named `𐑯` does not shadow the primitive `𐑯`.
 
@@ -119,6 +119,7 @@ A **node** is a call. It is drawn as a square box containing exactly one word: t
 - **Inputs** are `▶` arrowheads on the node's left border. Their top-to-bottom order is the argument order.
 - **Outputs** are `├` tees on the node's right border. Their top-to-bottom order is the result order. An output nobody needs is still drawn, as a tee with no wire (see `𐑕` in [corpus/09-length.shaw](../corpus/09-length.shaw)).
 - The number of input and output ports must match the callee's arity exactly.
+- Every port arrowhead (a node's input, a definition's output, a switch's selector or through-port) must have a wire reaching it (`Y019`). An output tee may be left unwired; an arrowhead may not.
 
 Two shorthands avoid drawing a box:
 
@@ -230,16 +231,20 @@ A runtime error prints nothing on stdout. It prints `error ROW:COL CODE: message
 | 𐑥 | minimum | 2→1 | 𐑯 | maximum | 2→1 |
 | 𐑖 | show (Int → Text) | 1→1 | 𐑠 | read (Text → Int) | 1→1 |
 
-`𐑯𐑦𐑤` is the empty list (0→1). The other single letters are reserved for future primitives, and each pair is still to be assigned as a pair.
+`𐑯𐑦𐑤` is the empty list (0→1), whether written as a constant (`𐑯𐑦𐑤 ──▶`) or boxed. The other single letters are reserved for future primitives, and each pair is still to be assigned as a pair.
 
 ## 10. Evaluation
 
 - Each definition is a pure function, and evaluation is strict.
-- Nodes run in dependency order. The order among independent nodes is unobservable.
+- Nodes run in dependency order; among nodes that don't depend on each other, the one whose word comes first in row-major order runs first. The exception is a tail call, which always runs last in its definition, because it replaces the definition's frame.
+- That order only shows when a program hits more than one runtime error: the error reported is the first one hit in this order. So the reported error is the same on every run of a sheet, though an edit that turns a call into, or out of, a tail call can change which one it is.
 - A switch evaluates only the arm it selects.
 - Calls must not consume the host stack, and recursion at least 100 000 deep must work.
-- Calls are bounded: a program that nests more than 1 000 000 calls, or whose live calls hold more than 16 777 216 values together (256 MB), stops with `R007` at the call that went too deep. Without the bound, a recursion whose base case is never reached grows until the machine runs out of memory. Tail calls don't nest, so they never reach it.
-- A call whose outputs go only to the enclosing definition's outputs, in the same order (directly, or through switch arm outputs), is a **tail call**, and it must run in constant stack. A call whose results reach the outputs reordered or duplicated is an ordinary call.
+- Memory is bounded, so a program whose base case is never reached stops with an error instead of exhausting the machine:
+  - **Calls** (`R007`, at the call that went too deep): more than 1 000 000 calls nested below `·𐑥𐑱𐑯`, or more than 16 777 216 values held by live calls together (about 400 MB). Tail calls don't nest, so they never reach the first limit.
+  - **Heap** (`R008`, at the node that allocated): more than 8 388 608 pairs and list cells alive at once. This catches a tail loop that keeps growing a list, which the call limit can't see.
+  - **Output** (`R009`, at `·𐑥𐑱𐑯`'s namer dot): a result whose printed form would exceed 1 000 000 characters. Pairs can share parts, so a few cells can describe an astronomically large value.
+- A call whose outputs are exactly the enclosing definition's outputs, all of them, in the same order, and read by nothing else (directly, or through switch arm outputs), is a **tail call**, and it must run in constant stack. A call whose results reach the outputs reordered, duplicated or only partly is an ordinary call.
 
 ## 11. Canonical form
 
@@ -336,12 +341,13 @@ Every diagnostic has a stable code. The corpus checks codes and positions, never
 | Y010 | syntax | Switch without a selector |
 | Y011 | syntax | Arms with different numbers of results |
 | Y012 | syntax | Stray text |
-| Y013 | syntax | Single-letter definition name (reserved for primitives) |
+| Y013 | syntax | Reserved definition name: a single letter, or `𐑯𐑦𐑤` |
 | Y014 | syntax | Rounded box inside a definition (definitions don't nest) |
 | Y015 | syntax | Box with mixed corner styles |
 | Y016 | syntax | A guard on a box that is not a switch (no selector, no dividers) |
 | Y017 | syntax | Number literal too large for an Int |
 | Y018 | syntax | Square box outside any definition (definitions are rounded) |
+| Y019 | syntax | Port arrowhead with no wire reaching it |
 | C001 | check | Unknown name |
 | C002 | check | Arity mismatch |
 | C003 | check | Cycle in a definition's wires |
@@ -357,6 +363,8 @@ Every diagnostic has a stable code. The corpus checks codes and positions, never
 | R005 | runtime | No arm matches |
 | R006 | runtime | `𐑠` (read) of text that isn't a number |
 | R007 | runtime | Call stack exhausted: calls nested too deep (§10) |
+| R008 | runtime | Heap exhausted: too many pairs and list cells alive (§10) |
+| R009 | runtime | Result too large to print (§10) |
 | A001 | asm | Malformed `.shawasm` or bytecode |
 | L001–L006 | fmt | The lints of §12, in table order |
 
@@ -376,7 +384,10 @@ Every diagnostic has a stable code. The corpus checks codes and positions, never
 | A wire end (`Y003`, `Y004`, `S010`) | The end's cell |
 | A slipped border cell (`S012`) | The cell where it sits, not where it belongs |
 | A whole wire (`Y005`, `Y006`) | The wire's first cell in row-major order |
-| A cycle (`C003`) | The word of the cycle's first node in row-major order |
+| A cycle (`C003`) | Of the words of the nodes on the cycle, the first in row-major order |
+| A port with no wire (`Y019`) | Its arrowhead |
+| Heap exhausted (`R008`) | The word of the node that allocated |
+| Result too large (`R009`) | The namer dot of `·𐑥𐑱𐑯` |
 | No main (`C005`) | `0:0` |
 
 A wire with a dangling end gets `Y003` (or `Y004`) only, never also `Y005`.
