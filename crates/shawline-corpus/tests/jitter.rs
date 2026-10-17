@@ -76,24 +76,31 @@ fn squeeze(row: &mut [char], rng: &mut Rng) -> usize {
     filled
 }
 
-/// Rule 5: a one-cell bump in a straight horizontal wire (never a box
-/// border), where the three cells above are free and the row above that
-/// keeps them clear.
+/// Rule 5: one-cell bumps in a straight horizontal wire (never a box
+/// border), where the cells above are free and the row above that keeps
+/// them clear. Sometimes two bumps sit side by side (`┌─┐┌─┐` over
+/// `┘ └┘ └`), which a single straightening pass can merge into one wider
+/// dip instead of removing.
 fn bump(rows: &mut [Vec<char>], wire: &HashSet<Pos>, rng: &mut Rng) -> bool {
+    let count = if rng.chance(3) { 2 } else { 1 };
+    let span = 3 * count;
     for r in 2..rows.len() {
         let at = |rows: &[Vec<char>], r: usize, c: usize| rows[r].get(c).copied().unwrap_or(' ');
-        for c in 1..rows[r].len().saturating_sub(4) {
-            let straight = (c - 1..c + 4).all(|i| at(rows, r, i) == '─' && wire.contains(&Pos::new(r, i)));
-            let room = (c..c + 3).all(|i| at(rows, r - 1, i) == ' ' && at(rows, r - 2, i) == ' ');
+        for c in 1..rows[r].len().saturating_sub(span + 1) {
+            let straight = (c - 1..c + span + 1).all(|i| at(rows, r, i) == '─' && wire.contains(&Pos::new(r, i)));
+            let room = (c..c + span).all(|i| at(rows, r - 1, i) == ' ' && at(rows, r - 2, i) == ' ');
             if straight && room && rng.chance(8) {
-                let width = rows[r - 1].len().max(c + 3);
+                let width = rows[r - 1].len().max(c + span);
                 rows[r - 1].resize(width, ' ');
-                rows[r][c] = '┘';
-                rows[r][c + 1] = ' ';
-                rows[r][c + 2] = '└';
-                rows[r - 1][c] = '┌';
-                rows[r - 1][c + 1] = '─';
-                rows[r - 1][c + 2] = '┐';
+                for b in 0..count {
+                    let c = c + 3 * b;
+                    rows[r][c] = '┘';
+                    rows[r][c + 1] = ' ';
+                    rows[r][c + 2] = '└';
+                    rows[r - 1][c] = '┌';
+                    rows[r - 1][c + 1] = '─';
+                    rows[r - 1][c + 2] = '┐';
+                }
                 return true;
             }
         }
