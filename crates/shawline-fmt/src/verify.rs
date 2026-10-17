@@ -2,13 +2,14 @@
 //! leave unchanged.
 //!
 //! It records what connects to what and ignores where things sit, so a step
-//! may move text along its row, lengthen a wire or restyle a box, but may not
-//! change which port, word or arrowhead any wire end meets.
+//! may move text along its row, lengthen a wire or redraw a stroke in its
+//! canonical character, but may not change which port, word or arrowhead any
+//! wire end meets, a box's style or slipped cells, or the syntax errors.
 
 use std::collections::HashMap;
 
 use shawline_grid::{Code, Dir, Grid, Pos};
-use shawline_shape::{BoxShape, Diagram, EndKind, PortKind, TextKind};
+use shawline_shape::{BoxShape, BoxStyle, Diagram, EndKind, PortKind, TextKind};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct Fingerprint {
@@ -16,12 +17,18 @@ pub(crate) struct Fingerprint {
     texts: Vec<TextPrint>,
     /// Sorted, because wire order follows cell positions.
     wires: Vec<WirePrint>,
-    /// Shape diagnostics by code, sorted.
+    /// Shape diagnostics by code, sorted. `S012` is left out: each box
+    /// counts its own slips.
     codes: Vec<Code>,
+    /// Syntax diagnostics by code, sorted.
+    syntax: Vec<Code>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct BoxPrint {
+    style: BoxStyle,
+    /// Slipped border cells: only `fix` may move them.
+    slips: usize,
     parent: Option<usize>,
     titled: bool,
     ports: Vec<(Dir, PortKind, Dir, Target)>,
@@ -77,6 +84,8 @@ impl Fingerprint {
             .boxes
             .iter()
             .map(|b| BoxPrint {
+                style: b.style,
+                slips: b.slips.len(),
                 parent: b.parent,
                 titled: b.title_gap.is_some(),
                 ports: b
@@ -130,9 +139,22 @@ impl Fingerprint {
             .collect();
         wires.sort();
 
-        let mut codes: Vec<Code> = diagram.diagnostics.iter().map(|d| d.code).collect();
+        let mut codes: Vec<Code> =
+            diagram.diagnostics.iter().map(|d| d.code).filter(|&c| c != "S012").collect();
         codes.sort_unstable();
-        Fingerprint { boxes, texts, wires, codes }
+        let mut syntax: Vec<Code> =
+            shawline_syntax::parse(grid, diagram).1.iter().map(|d| d.code).collect();
+        syntax.sort_unstable();
+        Fingerprint { boxes, texts, wires, codes, syntax }
+    }
+
+    /// The fingerprint once box `i`'s slipped cells are back in place.
+    pub(crate) fn repaired(&self, i: usize) -> Self {
+        let mut want = self.clone();
+        if let Some(b) = want.boxes.get_mut(i) {
+            b.slips = 0;
+        }
+        want
     }
 }
 

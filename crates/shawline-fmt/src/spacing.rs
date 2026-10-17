@@ -269,6 +269,15 @@ mod tests {
     }
 
     #[test]
+    fn spacing_one_text_makes_room_for_the_next() {
+        // From the formatter audit (/tmp/fmtfuzz/s1.shaw): the port name's
+        // move freed room for the constant only on a second format.
+        let src = "╭─ ·𐑛𐑳𐑚𐑩𐑤 ───────────────────────╮\n│                                │\n▶   𐑯 5─▶ 𐑖 ─────────────────────▶ 𐑚\n│                                │\n╰────────────────────────────────╯\n";
+        let once = fmt(src);
+        assert_eq!(fmt(&once), once);
+    }
+
+    #[test]
     fn constant_moves_when_its_wire_is_too_short() {
         let src = "╭─ ·𐑨𐑛 ────╮\n│  10─▶ 𐑖 ─▶ 𐑚\n╰──────────╯\n";
         assert_eq!(fmt(src), "╭─ ·𐑨𐑛 ────╮\n│ 10 ─▶ 𐑖 ─▶ 𐑚\n╰──────────╯\n");

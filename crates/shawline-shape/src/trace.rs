@@ -15,7 +15,8 @@ type Node = (Pos, u8);
 
 struct Tracer<'a> {
     strokes: &'a StrokeMap,
-    /// Box perimeters and divider rows: strokes that are never wire.
+    /// Box perimeters, slipped border cells and divider rows: strokes that
+    /// are never wire.
     border: HashSet<Pos>,
     ports: HashSet<Pos>,
 }
@@ -110,6 +111,8 @@ pub(crate) fn trace(
     let mut border = HashSet::new();
     for b in boxes {
         border.extend(perimeter(b.rect));
+        // A slipped cell is border drawn out of place, not a wire.
+        border.extend(b.slips.iter().map(|s| s.at));
         for d in &b.dividers {
             border.extend((b.rect.left..=b.rect.right).map(|col| Pos::new(d.row, col)));
         }

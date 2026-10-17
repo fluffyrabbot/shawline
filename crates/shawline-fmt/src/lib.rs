@@ -7,9 +7,9 @@
 //! leaves the program's structure (what connects to what) unchanged, so
 //! formatting can never change meaning.
 //!
-//! Rule 6 (edge snapping) is not applied. Recognition only finds exact
-//! rectangles, so a ragged edge is not a box yet, and snapping it would
-//! change the structure the safety net protects.
+//! Rule 6: [`format`] never moves a near box's slipped border cell, because
+//! moving one turns an error into a valid program. [`fix`] does that repair
+//! first, under the same safety net, and then formats.
 
 mod canvas;
 mod glyphs;
@@ -51,12 +51,45 @@ type Phase = fn(&Grid, &Diagram) -> Vec<Edit>;
 /// sees the final wires. Rule 7 is applied while rendering.
 const PHASES: [Phase; 4] = [glyphs::edits, jitter::edits, spacing::titles, spacing::ports];
 
+/// Most full passes [`format`] makes looking for a fixpoint. One fix can
+/// make room for another, but each pass only tidies, so a few suffice.
+const MAX_PASSES: usize = 8;
+
 /// Formats a sheet into canonical text (SPEC §11).
 ///
 /// `diagram` must be `shawline_shape::recognize(grid)`. The result is
 /// idempotent and recognizes to the same structure as the input; any edit
 /// that would change the structure is dropped.
 pub fn format(grid: &Grid, diagram: &Diagram) -> String {
+    let mut out = format_once(grid, diagram);
+    for _ in 1..MAX_PASSES {
+        let (g, d) = reparse(&out);
+        let next = format_once(&g, &d);
+        if next == out {
+            break;
+        }
+        out = next;
+    }
+    out
+}
+
+/// Formats a sheet like [`format`], first moving each near box's slipped
+/// border cells into place (SPEC §3, §11 rule 6: `shawline fmt --fix`).
+///
+/// A box is repaired only if it then recognizes as the same box with no
+/// slips and nothing else about the sheet changes.
+pub fn fix(grid: &Grid, diagram: &Diagram) -> String {
+    let (g, d) = repair(grid, diagram).recognize();
+    format(&g, &d)
+}
+
+/// Reports the aesthetic lints `L001`–`L006` (SPEC §12), sorted by position.
+pub fn lint(grid: &Grid, diagram: &Diagram) -> Vec<Diagnostic> {
+    lint::lint(grid, diagram)
+}
+
+/// One pass of every phase, then trailing spaces and blank lines.
+fn format_once(grid: &Grid, diagram: &Diagram) -> String {
     let base = Fingerprint::of(grid, diagram);
     let mut canvas = Canvas::from_grid(grid);
     for phase in PHASES {
@@ -68,20 +101,44 @@ pub fn format(grid: &Grid, diagram: &Diagram) -> String {
     let rows = layout::trimmed(&canvas);
     let flat = canvas::render_rows(rows.clone());
     let (_, d) = reparse(&flat);
-    let spaced = layout::spaced(&rows, &d);
-    for out in [spaced, flat] {
-        let (g, d) = reparse(&out);
-        if Fingerprint::of(&g, &d) == base {
-            return out;
-        }
+    let same = |out: &str| {
+        let (g, d) = reparse(out);
+        Fingerprint::of(&g, &d) == base
+    };
+    // Each blank-line change stands alone, so an inserted blank that would
+    // split a wire doesn't block the rest. Drops go first, as one batch
+    // when they can: they never bring strokes together, since one blank
+    // row always stays between two items.
+    let ok = |ops: &[layout::Op]| same(&layout::render(&rows, ops));
+    let (drops, inserts): (Vec<_>, Vec<_>) =
+        layout::ops(&rows, &d).into_iter().partition(|op| matches!(op, layout::Op::Drop(_)));
+    let kept = keep_safe(Vec::new(), &drops, ok);
+    let kept = keep_safe(kept, &inserts, ok);
+    let out = layout::render(&rows, &kept);
+    if same(&out) {
+        return out;
     }
-    // Unreachable while every phase is checked, but the input is always safe.
+    // Unreachable while every step is checked, but the input is always safe.
     Canvas::from_grid(grid).render()
 }
 
-/// Reports the aesthetic lints `L001`–`L006` (SPEC §12), sorted by position.
-pub fn lint(grid: &Grid, diagram: &Diagram) -> Vec<Diagnostic> {
-    lint::lint(grid, diagram)
+/// `kept` plus those of `items` that `ok` accepts on top of it: all of them
+/// at once when possible, otherwise each in turn, greedily.
+fn keep_safe<T: Copy>(mut kept: Vec<T>, items: &[T], ok: impl Fn(&[T]) -> bool) -> Vec<T> {
+    if items.is_empty() {
+        return kept;
+    }
+    let all: Vec<T> = kept.iter().chain(items).copied().collect();
+    if ok(&all) {
+        return all;
+    }
+    for &item in items {
+        kept.push(item);
+        if !ok(&kept) {
+            kept.pop();
+        }
+    }
+    kept
 }
 
 /// Applies `edits`, keeping only those that leave the structure as `base`.
@@ -112,6 +169,32 @@ fn unchanged(canvas: &Canvas, base: &Fingerprint) -> bool {
     Fingerprint::of(&g, &d) == *base
 }
 
+/// Moves each near box's slipped cells home, one box at a time, keeping a
+/// move only if that box then has no slips and nothing else changed.
+fn repair(grid: &Grid, diagram: &Diagram) -> Canvas {
+    let mut canvas = Canvas::from_grid(grid);
+    let mut want = Fingerprint::of(grid, diagram);
+    for (i, b) in diagram.boxes.iter().enumerate() {
+        if b.slips.is_empty() {
+            continue;
+        }
+        let undo: Edit =
+            b.slips.iter().flat_map(|s| [s.at, s.home]).map(|p| (p, canvas.get(p))).collect();
+        let edit: Edit =
+            b.slips.iter().flat_map(|s| [(s.at, ' '), (s.home, canvas.get(s.at))]).collect();
+        canvas.write(&edit);
+        let (g, d) = canvas.recognize();
+        let whole = d.boxes.get(i).is_some_and(|nb| nb.rect == b.rect && nb.slips.is_empty());
+        let target = want.repaired(i);
+        if whole && Fingerprint::of(&g, &d) == target {
+            want = target;
+        } else {
+            canvas.write(&undo);
+        }
+    }
+    canvas
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -119,6 +202,11 @@ mod tests {
     fn fmt(src: &str) -> String {
         let grid = Grid::parse(src).unwrap();
         format(&grid, &shawline_shape::recognize(&grid))
+    }
+
+    fn fixed(src: &str) -> String {
+        let grid = Grid::parse(src).unwrap();
+        fix(&grid, &shawline_shape::recognize(&grid))
     }
 
     #[test]
@@ -135,5 +223,33 @@ mod tests {
     fn empty_sheet() {
         assert_eq!(fmt(""), "");
         assert_eq!(fmt("\n\n"), "");
+    }
+
+    const WHOLE: &str = "╭─ ·𐑨𐑛 ──╮\n│ 1 ─────▶ 𐑚\n│        │\n╰────────╯\n";
+
+    #[test]
+    fn fix_moves_slipped_cells_and_format_does_not() {
+        let edge = WHOLE.replace("│        │", "│         │");
+        let corner = WHOLE.replace("╰────────╯", "╰────────\n         ╯");
+        for src in [&edge, &corner] {
+            assert_eq!(fmt(src), *src, "format leaves slips alone");
+            assert_eq!(fixed(src), WHOLE, "{src}");
+        }
+        let ascii = edge.replace("│\n╰", "|\n╰");
+        assert_eq!(fmt(&ascii), edge, "redrawn in place");
+        assert_eq!(fixed(&ascii), WHOLE);
+    }
+
+    #[test]
+    fn fix_leaves_cells_two_out() {
+        let far = WHOLE.replace("│        │", "│          │");
+        assert_eq!(fixed(&far), fmt(&far));
+        assert!(fixed(&far).contains("│          │"));
+    }
+
+    #[test]
+    fn fix_formats_too() {
+        let rough = WHOLE.replace("│        │", "│         │").replace("│ 1 ─", "│ 1  ");
+        assert_eq!(fixed(&rough), WHOLE);
     }
 }

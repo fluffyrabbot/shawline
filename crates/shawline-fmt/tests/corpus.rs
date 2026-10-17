@@ -42,6 +42,49 @@ fn format(src: &str) -> String {
     shawline_fmt::format(&grid, &shawline_shape::recognize(&grid))
 }
 
+/// `corpus/fix/`: each sheet fixes to its `.fix.shaw`, fixing is idempotent,
+/// and plain formatting never repairs a slip.
+#[test]
+fn corpus_fixes_near_boxes() {
+    let dir = corpus().join("fix");
+    let mut programs: Vec<PathBuf> = fs::read_dir(&dir)
+        .unwrap()
+        .map(|e| e.unwrap().path())
+        .filter(|p| {
+            let name = p.to_string_lossy();
+            name.ends_with(".shaw") && !name.ends_with(".fix.shaw")
+        })
+        .collect();
+    programs.sort();
+    let fix = |src: &str| {
+        let grid = Grid::parse(src).unwrap();
+        shawline_fmt::fix(&grid, &shawline_shape::recognize(&grid))
+    };
+    let slips = |src: &str| {
+        let diagram = shawline_shape::recognize(&Grid::parse(src).unwrap());
+        diagram.boxes.iter().map(|b| b.slips.len()).sum::<usize>()
+    };
+
+    let mut failures = Vec::new();
+    for path in &programs {
+        let name = path.file_stem().unwrap().to_string_lossy().into_owned();
+        let src = fs::read_to_string(path).unwrap();
+        let expected = fs::read_to_string(path.with_extension("fix.shaw")).unwrap();
+        let fixed = fix(&src);
+        if fixed != expected {
+            failures.push(format!("{name}: fixes to\n{fixed}\nexpected\n{expected}"));
+        }
+        if fix(&fixed) != fixed {
+            failures.push(format!("{name}: fixing twice changes it"));
+        }
+        if slips(&format(&src)) != slips(&src) {
+            failures.push(format!("{name}: plain formatting moved a slipped cell"));
+        }
+    }
+    assert!(programs.len() >= 3, "only {} programs under {dir:?}", programs.len());
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
 #[test]
 fn corpus_formats_canonically() {
     let mut programs: Vec<PathBuf> = fs::read_dir(corpus())
