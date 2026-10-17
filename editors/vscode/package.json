@@ -1,0 +1,98 @@
+{
+  "name": "shawline",
+  "displayName": "Shawline",
+  "description": "Shawline, the dataflow language you draw: language server client, Shawline Mono font and Shavian transliteration.",
+  "version": "0.1.0",
+  "publisher": "shawline",
+  "private": true,
+  "license": "UNLICENSED",
+  "engines": {
+    "vscode": "^1.91.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Formatters"
+  ],
+  "main": "./out/extension.js",
+  "extensionKind": [
+    "workspace"
+  ],
+  "contributes": {
+    "languages": [
+      {
+        "id": "shawline",
+        "aliases": [
+          "Shawline"
+        ],
+        "extensions": [
+          ".shaw"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "commands": [
+      {
+        "command": "shawline.toggleTransliteration",
+        "title": "Toggle Shavian Transliteration",
+        "category": "Shawline"
+      },
+      {
+        "command": "shawline.installFont",
+        "title": "Install Shawline Mono Font",
+        "category": "Shawline"
+      },
+      {
+        "command": "shawline.restartServer",
+        "title": "Restart Language Server",
+        "category": "Shawline"
+      }
+    ],
+    "configuration": {
+      "title": "Shawline",
+      "properties": {
+        "shawline.serverPath": {
+          "type": "string",
+          "default": "shawline-lsp",
+          "scope": "machine-overridable",
+          "markdownDescription": "Path to the `shawline-lsp` language server. A bare name is looked up on `PATH` and in `~/.cargo/bin`. Install it with `cargo install --path crates/shawline-lsp`."
+        }
+      }
+    },
+    "configurationDefaults": {
+      "[shawline]": {
+        "editor.fontFamily": "Shawline Mono",
+        "editor.lineHeight": 1,
+        "editor.letterSpacing": 0,
+        "editor.fontLigatures": false,
+        "editor.formatOnType": true,
+        "editor.renderWhitespace": "none",
+        "editor.guides.indentation": false,
+        "editor.wordWrap": "off",
+        "editor.insertSpaces": true,
+        "editor.detectIndentation": false,
+        "editor.inlayHints.enabled": "off",
+        "editor.codeLens": false,
+        "editor.unicodeHighlight.ambiguousCharacters": false,
+        "editor.unicodeHighlight.nonBasicASCII": false,
+        "editor.semanticHighlighting.enabled": true,
+        "editor.wordBasedSuggestions": "off"
+      }
+    }
+  },
+  "scripts": {
+    "compile": "tsc -p .",
+    "watch": "tsc -watch -p .",
+    "build-font": "node -e \"require('fs').mkdirSync('fonts',{recursive:true})\" && cd ../.. && cargo run -p shawline-font --example build -- editors/vscode/fonts/ShawlineMono.ttf",
+    "vscode:prepublish": "npm run compile",
+    "package": "npm run build-font && vsce package --skip-license --allow-missing-repository"
+  },
+  "dependencies": {
+    "vscode-languageclient": "^10.1.2"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/vscode": "~1.91.0",
+    "@vscode/vsce": "^4.0.0",
+    "typescript": "^7.0.2"
+  }
+}
