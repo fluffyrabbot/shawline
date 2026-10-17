@@ -3,6 +3,8 @@
 use shawline_grid::repertoire::is_word_char;
 use shawline_grid::{Diagnostic, Grid, Pos};
 
+use crate::stroke::is_stroke_char;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TextKind {
     Word,
@@ -43,7 +45,13 @@ pub(crate) fn find(grid: &Grid, diagnostics: &mut Vec<Diagnostic>) -> Vec<Text> 
             let start = c;
             let (kind, content, end) = match row[c] {
                 '※' => {
-                    let end = row.iter().rposition(|&ch| ch != ' ').map_or(c + 1, |i| i + 1);
+                    // A comment stops at the first stroke, so it can sit
+                    // inside a box without swallowing the border.
+                    let stop = row[c + 1..]
+                        .iter()
+                        .position(|&ch| is_stroke_char(ch))
+                        .map_or(row.len(), |n| c + 1 + n);
+                    let end = row[..stop].iter().rposition(|&ch| ch != ' ').map_or(c + 1, |i| i + 1);
                     let content: String = row[c + 1..end].iter().collect();
                     (TextKind::Comment, content.trim().to_owned(), end)
                 }

@@ -62,6 +62,7 @@ A **word** is a maximal horizontal run of Shavian letters, namer dots and digits
 - A word that starts with `·` is a **definition name** and appears only in a definition's title. Shavian prose marks proper names with the namer dot; Shawline uses it the same way for the names of definitions.
 - `«…»` is a **text literal**. It may contain Shavian letters, digits, the namer dot and spaces.
 - `※` starts a **comment** that runs to the end of the line. Comments are still restricted to the repertoire, so they are written in Shavian.
+- A comment ends early at the first stroke character on its line (a box-drawing character, ASCII stroke or joint, or arrowhead), so a comment can sit inside a box without swallowing its border.
 
 **Single-letter words and `𐑯𐑦𐑤` are reserved for primitives** (§9). User definitions need names of two letters or more, other than `𐑯𐑦𐑤`.
 

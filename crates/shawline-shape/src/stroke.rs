@@ -98,6 +98,12 @@ fn potential(ch: char) -> u8 {
     }
 }
 
+/// True if `ch` can draw part of a box or wire: a canonical or ASCII stroke,
+/// joint or arrowhead.
+pub fn is_stroke_char(ch: char) -> bool {
+    potential(ch) != 0
+}
+
 /// The resolved stroke of every cell in a grid.
 #[derive(Clone, Debug)]
 pub struct StrokeMap {

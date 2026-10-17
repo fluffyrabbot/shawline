@@ -34,7 +34,8 @@ pub struct Diagram {
 }
 
 pub fn recognize(grid: &Grid) -> Diagram {
-    // Text comes first so comments and literals can't draw geometry.
+    // Text comes first so literals can't draw geometry. Comments need no
+    // mask: they end before the first stroke on their row.
     let mut diagnostics = Vec::new();
     let mut texts = text::find(grid, &mut diagnostics);
     let masked: HashSet<Pos> =
@@ -68,15 +69,11 @@ pub fn recognize(grid: &Grid) -> Diagram {
     Diagram { boxes, wires, texts, diagnostics, strokes }
 }
 
-/// Whether `t`'s cells are hidden from stroke recognition. An unclosed
-/// literal is left alone: it is already `S002`, and masking the rest of its
+/// Whether `t`'s cells are hidden from stroke recognition: only a closed
+/// literal's. An unclosed one is already `S002`, and masking the rest of its
 /// row would also erase the border of the box it sits in.
 fn masks(grid: &Grid, t: &Text) -> bool {
-    match t.kind {
-        TextKind::Comment => true,
-        TextKind::Literal => grid.get(Pos::new(t.pos.row, t.pos.col + t.width - 1)) == '»',
-        TextKind::Word | TextKind::Number => false,
-    }
+    t.kind == TextKind::Literal && grid.get(Pos::new(t.pos.row, t.pos.col + t.width - 1)) == '»'
 }
 
 /// The dump format checked by the corpus. One fact per line, stable order.
@@ -241,32 +238,36 @@ mod tests {
     }
 
     #[test]
-    fn comments_and_literals_draw_nothing() {
-        for src in ["※ ─\n", "─ ※ ─\n", "«─» ─\n", "※ ┌┐\n※ └┘\n"] {
-            let d = diagram(src);
-            assert!(d.boxes.is_empty(), "{src}\n{d}");
-            let in_text = |w: &Wire| w.cells.iter().any(|&p| d.strokes.is_masked(p));
-            assert!(!d.wires.iter().any(in_text), "{src}\n{d}");
-        }
-        assert_eq!(diagram("※ ─\n").wires.len(), 0);
-        let d = diagram("─ ※ ─\n");
-        assert_eq!(d.wires.len(), 1);
-        assert!(d.wires[0].ends.iter().all(|e| e.kind == EndKind::Open), "{d}");
+    fn literals_draw_nothing() {
+        let d = diagram("«─» ─\n");
+        assert!(d.boxes.is_empty(), "{d}");
+        assert_eq!(d.wires.len(), 1, "{d}");
+        assert_eq!(d.wires[0].cells, [Pos::new(0, 4)]);
         assert!(d.diagnostics.is_empty(), "{:?}", d.diagnostics);
-    }
-
-    #[test]
-    fn ascii_joint_ignores_comment_neighbours() {
-        let d = diagram("  +─\n※ │\n");
-        assert_eq!(d.strokes.get(Pos::new(0, 2)).map(|s| s.conn), Some(stroke::E));
-    }
-
-    #[test]
-    fn commented_stroke_is_not_a_slip() {
-        let src = NODE.replace("└───┘", "└─ ─┘").replace("┘\n", "┘\n※ ─\n");
+        // The literal's spaces are not blank border cells either.
+        let src = NODE.replace("└───┘", "└─ ─┘").replace("┘\n", "┘\n «─»\n");
         let d = diagram(&src);
         assert!(d.boxes.is_empty(), "{d}");
         assert!(!codes(&d).iter().any(|&(_, c)| c == "S012"));
+    }
+
+    #[test]
+    fn comment_stops_at_the_first_stroke() {
+        let d = diagram("※ 𐑯 ─\n");
+        let comment = &d.texts[0];
+        assert_eq!((comment.kind, comment.content.as_str(), comment.width), (TextKind::Comment, "𐑯", 3));
+        assert_eq!(d.wires.len(), 1, "{d}");
+        assert_eq!(d.wires[0].cells, [Pos::new(0, 4)]);
+    }
+
+    #[test]
+    fn comment_inside_a_box_keeps_its_border() {
+        let d = diagram("╭─ ·𐑥𐑱𐑯 ─╮\n│ ※ 𐑯𐑴   │\n╰────────╯\n");
+        assert_eq!(d.boxes.len(), 1, "{d}");
+        assert_eq!(d.boxes[0].rect.right, 9);
+        let comment = d.texts.iter().find(|t| t.kind == TextKind::Comment).unwrap();
+        assert_eq!((comment.content.as_str(), comment.width, comment.owner), ("𐑯𐑴", 4, Some(0)));
+        assert!(d.wires.is_empty() && d.diagnostics.is_empty(), "{d}");
     }
 
     #[test]
