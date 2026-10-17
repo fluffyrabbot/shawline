@@ -134,7 +134,7 @@ Done = tests + clippy green for your crate, committed on your branch, ≤200-wor
 The critical path runs **P1 → A1 (wires) → B1 (syntax) → Gate B → C**. The glyph → render/font track and the VM run alongside it, off the critical path.
 
 ```
-P0 spine ✅ ─► P1 spec+contracts ✅ ─► Wave A ───────────► Gate A ─► Wave B ──────────► Gate B ─► Wave C ─► Gate C ─► P5
+P0 spine ✅ ─► P1 spec+contracts ✅ ─► Wave A ✅ ─────────► Gate A ─► Wave B ──────────► Gate B ─► Wave C ─► Gate C ─► P5
              (lead)               A1 shape-wires                B1 syntax                   C2 lsp
                                   A2 word                       B2 fmt                      C3 playground
                                   A3 glyph                      B3 render                   C4 vscode
@@ -164,7 +164,7 @@ Done by one mind, because this is where conceptual integrity is set.
 - [x] Corpus v1, 27 programs: hello, arithmetic, double (and its ASCII twin), abs, inline chains, pairs with a crossing, lists, factorial (and its ASCII twin), list length, 100 000-deep tail recursion, mutual recursion, guards (and text results), fan-out, 3 runtime errors and 9 static errors. Expectations: `.diagram` (blessed from the reviewed seed recognizer), `.wires`, `.out` and `.check` (hand-written), `.fmt.shaw` for the ASCII twins. The `.wires` files come from a scratch reference tracer written independently of A1, then hand-checked on six programs.
 - [x] Gate P1: contracts compile; clippy is clean; the corpus is green except `.wires`, which A1 owns.
 
-### Wave A: Leaves (4 agents in parallel)
+### Wave A: Leaves (4 agents in parallel) ✅
 
 | Agent | Owns | Delivers | Oracle |
 |---|---|---|---|
@@ -173,7 +173,13 @@ Done by one mind, because this is where conceptual integrity is set.
 | **A3** glyph | `shawline-glyph` | A skeleton model (kurbo paths on a 600×1200-unit cell, with x-height, ascender and descender for the short, tall and deep classes); all 48 letters, with partners derived by the true rotation or reflection; every stroke character drawn edge-to-edge so lines join across cells; digits, marks, namer dot; `specimen.svg` and a PNG preview for self-inspection. | Self-inspection of the PNG, then the user at Gate A |
 | **A4** vm | `shawline-vm` (not `bytecode.rs`) | The dispatch loop, values, heap-allocated frames, tail calls, runtime errors mapped to source positions; `.shawasm` assembler and disassembler; a 100k-deep recursion test. | Crate tests driven by `.shawasm` programs |
 
-**Gate A (lead):** merge four branches; run workspace tests and clippy; the `.diagram` and `.wires` stages must be fully green. The user reviews `specimen.svg`. The lead copies the transliteration table into SPEC §13 and commits.
+**Gate A (lead) ✅:** merge four branches; run workspace tests and clippy; the `.diagram` and `.wires` stages must be fully green. The user reviews `specimen.svg`. The lead copies the transliteration table into SPEC §13 and commits.
+
+- [x] Four branches merged without conflicts. All 54 corpus checks green, 58 crate tests green, clippy clean.
+- [x] Contract fixes from the reports. `wire.rs`: tie order for wires starting at a shared crossing. `bytecode.rs`: comma form of `prim` in the example, unused prim slots are 0, pair/list constants, use `shawline_vm::equal` rather than `==` on `Value`. SPEC §14: `S011` scope, `R001` for oversized reads, `A001`.
+- [x] SPEC §13: transliteration table, `=` for the namer dot, and transliteration only inside word runs (resolves the clash between `v` and `▼`). ReadLex (MIT) adopted as an optional language-server dictionary.
+- [x] The user reviewed `crates/shawline-glyph/specimen.svg` and passed it.
+- [x] SPEC §14 gains `Y017` (number literal too large for an Int), closing a gap B1 would otherwise have hit.
 
 ### Wave B: Middle (5 agents in parallel)
 

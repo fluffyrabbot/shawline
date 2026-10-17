@@ -15,8 +15,8 @@
 //!
 //! ```text
 //! fn 𐑛𐑳𐑚𐑩𐑤 params 1 results 1 registers 2
-//!   const k0 21                ; consts: an integer, «text», or nil
-//!   prim 𐑐 r1 r0 r0            ; prim <letter> <dst>[,<dst>] <src>[,<src>]
+//!   const k0 21                ; an integer, «text», nil, (a b) or [a b c]
+//!   prim 𐑐 r1 r0,r0            ; prim <letter> <dst>[,<dst>] <src>[,<src>]
 //!   ret r1 1                   ; ret <base> <count>
 //! end
 //! main 𐑥𐑱𐑯
@@ -70,7 +70,7 @@ pub enum Instr {
     Const { dst: Reg, idx: ConstId },
     Move { dst: Reg, src: Reg },
     /// Runs a primitive on the first `arity().0` of `src`, writing the first
-    /// `arity().1` of `dst`. Unused slots are ignored.
+    /// `arity().1` of `dst`. Unused slots are 0, so `.shawasm` round-trips.
     Prim { prim: Prim, dst: [Reg; 2], src: [Reg; 2] },
     /// Calls `func` with arguments `base..base + argc`. Its results land in
     /// `dst..dst + results`.
@@ -174,6 +174,9 @@ impl Prim {
 }
 
 /// A runtime value. Truth is `Int(1)` / `Int(0)`.
+///
+/// The derived `==` recurses, so it can overflow the stack on long lists.
+/// Compare runtime values with [`crate::equal`] instead.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Value {
     Int(i64),

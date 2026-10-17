@@ -54,7 +54,8 @@ pub enum EndKind {
 }
 
 /// Writes the `.wires` dump: one fact per line, wires in order of their
-/// first cell.
+/// first cell. Two wires whose first cell is the same crossing are ordered
+/// by their full cell lists, which puts the horizontal one first.
 ///
 /// ```text
 /// wire 0 cells 9

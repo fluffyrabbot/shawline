@@ -262,9 +262,41 @@ The thresholds live in one table in `shawline-fmt`. They get tuned against the c
 
 ## 13. Typing it
 
-Shawline is typed through **phonemic ASCII transliteration**. Each Shavian letter has a short ASCII key sequence, and the language server replaces the sequence as you type. The mapping is one-to-one and needs no dictionary.
+Shawline is typed through **phonemic ASCII transliteration**. Each Shavian letter has a short ASCII key sequence, and the language server replaces the sequence as you type. The mapping is one-to-one and needs no dictionary. Keys follow the sounds, spelled the way English pronunciation respellings spell them, with `@` for the schwa. Mirror pairs are voiceless/voiced key pairs (`p`/`b`, `th`/`dh`, `sh`/`zh`).
 
-`shawline-word` owns the table, and it is reproduced here at Gate A. An English-word → Shavian dictionary is an optional extra, adopted only if a suitably licensed lexicon exists; the A2 brief covers that check.
+| Letter | Key | Letter | Key |
+|---|---|---|---|
+| 𐑐 peep | `p` | 𐑚 bib | `b` |
+| 𐑑 tot | `t` | 𐑛 dead | `d` |
+| 𐑒 kick | `k` | 𐑜 gag | `g` |
+| 𐑓 fee | `f` | 𐑝 vow | `v` |
+| 𐑔 thigh | `th` | 𐑞 they | `dh` |
+| 𐑕 so | `s` | 𐑟 zoo | `z` |
+| 𐑖 sure | `sh` | 𐑠 measure | `zh` |
+| 𐑗 church | `ch` | 𐑡 judge | `j` |
+| 𐑘 yea | `y` | 𐑢 woe | `w` |
+| 𐑙 hung | `ng` | 𐑣 ha-ha | `h` |
+| 𐑤 loll | `l` | 𐑮 roar | `r` |
+| 𐑥 mime | `m` | 𐑯 nun | `n` |
+| 𐑦 if | `i` | 𐑰 eat | `ee` |
+| 𐑧 egg | `e` | 𐑱 age | `ay` |
+| 𐑨 ash | `a` | 𐑲 ice | `ie` |
+| 𐑩 ado | `@` | 𐑳 up | `u` |
+| 𐑪 on | `o` | 𐑴 oak | `oh` |
+| 𐑫 wool | `uu` | 𐑵 ooze | `oo` |
+| 𐑬 out | `ow` | 𐑶 oil | `oy` |
+| 𐑭 ah | `ah` | 𐑷 awe | `aw` |
+| 𐑸 are | `ar` | 𐑹 or | `or` |
+| 𐑺 air | `air` | 𐑻 err | `ur` |
+| 𐑼 array | `@r` | 𐑽 ear | `eer` |
+| 𐑾 ian | `i@` | 𐑿 yew | `ew` |
+| · namer dot | `=` | | |
+
+- **Longest match wins.** `th` is 𐑔 and `ar` is 𐑸. Type `/` between keys for the shorter reading: `t/h` is 𐑑𐑣. The `/` itself produces nothing.
+- **The namer dot is `=`,** because `.` is a stroke.
+- **Only word runs are transliterated.** Inside a word run, `v` is 𐑝. Anywhere else the language server leaves `v` alone, so it stays the `▼` arrowhead fallback. Other characters (digits, spaces, marks, strokes) always pass through unchanged.
+
+`shawline-word` owns the table (`TABLE`), and a test keeps this copy in step with it. The language server may also offer whole-word suggestions from the ReadLex lexicon (MIT-licensed; only its Latin→Shavian columns are bundled), but source text never depends on it.
 
 ## 14. Diagnostics
 
@@ -280,7 +312,7 @@ Every diagnostic has a stable code. The corpus checks codes and positions, never
 | S003 | shape | `»` without `«` |
 | S004 | shape | Digits and letters in one word |
 | S010 | shape | Wire runs into a stroke that doesn't join it |
-| S011 | shape | Crossing on a box border |
+| S011 | shape | Crossing on exactly one box's border. Where two overlapping borders cross, `S001` covers it. A wire running into such a crossing is also blocked and gets `S010` as well. |
 | Y001 | syntax | Definition title is not a `·`-word |
 | Y002 | syntax | Node box doesn't hold exactly one word |
 | Y003 | syntax | Dangling wire end |
@@ -297,6 +329,7 @@ Every diagnostic has a stable code. The corpus checks codes and positions, never
 | Y014 | syntax | Rounded box inside a definition (definitions don't nest) |
 | Y015 | syntax | Box with mixed corner styles |
 | Y016 | syntax | A guard on a box that has no dividers |
+| Y017 | syntax | Number literal too large for an Int |
 | C001 | check | Unknown name |
 | C002 | check | Arity mismatch |
 | C003 | check | Cycle in a definition's wires |
@@ -305,12 +338,13 @@ Every diagnostic has a stable code. The corpus checks codes and positions, never
 | C006 | check | `·𐑥𐑱𐑯` has inputs |
 | W001 | check | Switch without a default arm |
 | W002 | check | Unused definition input |
-| R001 | runtime | Integer overflow |
+| R001 | runtime | Integer overflow, including `𐑠` of a number too large for an Int |
 | R002 | runtime | Division by zero |
 | R003 | runtime | Split of an empty list |
 | R004 | runtime | Type mismatch |
 | R005 | runtime | No arm matches |
 | R006 | runtime | `𐑠` (read) of text that isn't a number |
+| A001 | asm | Malformed `.shawasm` or bytecode |
 | L001–L006 | fmt | The lints of §12, in table order |
 
 **Where a diagnostic points.** Positions are fixed so the corpus can check them:
@@ -318,7 +352,7 @@ Every diagnostic has a stable code. The corpus checks codes and positions, never
 | Diagnostic is about | Position |
 |---|---|
 | A node or inline node (`Y002`, `C001`, `C002`, `R001`–`R004`, `R006`) | Its word |
-| A constant | The literal's first cell |
+| A constant or literal (`Y017`) | The literal's first cell |
 | A switch (`Y010`, `Y011`, `W001`, `R005`) | Its selector `▼`; for `Y010`, its top-left corner |
 | A guard (`Y007`) | The guard's first cell |
 | A definition (`Y001`, `Y013`, `C004`, `C006`) | Its namer dot |
