@@ -5,7 +5,24 @@ edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true
 
+[lib]
+name = "shawline_lsp"
+path = "src/lib.rs"
+
+[[bin]]
+name = "shawline-lsp"
+path = "src/main.rs"
+
 [dependencies]
+shawline-cli.workspace = true
+shawline-grid.workspace = true
+shawline-shape.workspace = true
+shawline-syntax.workspace = true
+shawline-vm.workspace = true
+shawline-word.workspace = true
+lsp-server = "0.10.0"
+lsp-types = "0.97.0"
+serde_json = "1.0.140"
 
 [lints]
 workspace = true
