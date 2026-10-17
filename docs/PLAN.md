@@ -67,7 +67,7 @@ These signatures are fixed so Gate B can wire the pipeline without negotiation. 
 | `shawline-vm` | `run(&Module) -> Result<Vec<Value>, Diagnostic>`, `assemble(&str) -> Result<Module, Diagnostic>`, `disassemble(&Module) -> String` |
 | `shawline-syntax` | `parse(&Grid, &Diagram) -> (Sheet, Vec<Diagnostic>)`, and `impl Display for Sheet` (the `.ast` dump: one fact per line) |
 | `shawline-ir` | `lower(&Sheet) -> (Option<Program>, Vec<Diagnostic>)`, `compile(&Program) -> Module` |
-| `shawline-fmt` | `format(&Grid, &Diagram) -> String`, `lint(&Grid, &Diagram) -> Vec<Diagnostic>` |
+| `shawline-fmt` | `format(&Grid, &Diagram) -> String`, `fix(&Grid, &Diagram) -> String` (P5: also moves slipped cells), `lint(&Grid, &Diagram) -> Vec<Diagnostic>` |
 | `shawline-render` | `render(&Grid, Theme) -> String` (SVG) |
 | `shawline-font` | `build() -> Vec<u8>` (TTF) |
 
@@ -243,6 +243,11 @@ Progress:
   - corpus case `83-runaway`;
   - `scripts/capped` and the rule above for every agent.
 - [ ] Audit pass: both audits were cut short by the freeze. The formatter fuzzer left 18 unverified "meaning changed" mutants in `/tmp/fmtfuzz/out` (scratch, outside the repo), to be triaged when the audits re-run under `scripts/capped`.
+- [x] Design for `fmt --fix`, recorded in SPEC §3 (near boxes), §11 rule 6 and §14 (`S012`), with cases in `corpus/fix/`. While designing it, it turned out that one slipped border cell made the whole box unrecognizable and produced 24 cascading diagnostics, none at the cause. Near boxes therefore become an error-recovery feature of the shape stage: the box is still recognized, its slipped cells are recorded, and the user gets one `S012` at the slipped cell. `fmt --fix` then moves recorded slips into place.
+- [ ] Wave P5 (after audit triage). The formatter keeps a single writer.
+  - **F**, one agent owning `shawline-shape` (outside `wire.rs`) and `shawline-fmt`, does three things: near-box recognition (slips recorded on `BoxShape`, excluded from wire tracing, `S012`), `fix` and `fmt --fix`, and the confirmed formatter audit findings.
+  - **V** fixes the confirmed VM/IR findings in `shawline-vm`/`shawline-ir`, if there are any.
+  - The lead then registers the `fix.shaw` stage, blesses the `fix/` dumps after reading them, and runs the gate.
 - [ ] `fmt --fix`.
 - [ ] Gallery review and lint tuning.
 

@@ -44,6 +44,13 @@ Every stroke cell connects in a fixed set of directions. The table lives in `sha
 
 A wire that runs into a stroke that doesn't join it, and isn't a port, is an error (`S010`).
 
+**Near boxes.** A box whose border is almost closed is still recognized as a box, so one misplaced cell doesn't make everything inside it meaningless. A near box needs:
+
+- at least three of its four corners in place, which fixes its rectangle;
+- every other border cell either in place, or **slipped**: exactly one cell off its line, perpendicular to its edge (a `│` one column out, a `─` one row out, the fourth corner one cell out). The cell where it belongs must be blank, and the slipped cell must join no other stroke.
+
+Each slipped cell is an error (`S012`), so the program doesn't run. Everything else parses as if the box were whole. `shawline fmt --fix` moves slipped cells into place (§11). A cell two or more cells out is not a slip, and the box isn't recognized.
+
 **Arrowheads in Shawline Mono.** A font glyph can't see the rows above and below it, so the font draws `▶ ◀` with a vertical border line through them and `▲ ▼` with a horizontal one. Nearly every arrowhead sits in a box border; an inline node's input arrowhead shows a small tick instead. The SVG renderer knows each arrowhead's neighbours and draws both kinds exactly.
 
 ## 4. Words
@@ -243,7 +250,7 @@ The formatter **keeps the author's placement**: every box and wire stays where i
 3. Titles and guards are written `─ name ─`: exactly one rule, one space, the name, one space.
 4. A port name sits exactly one space after its arrowhead. A wire starts one space after a word or literal.
 5. Jitter is straightened. A wire that wanders by one cell becomes straight when straightening changes no connections.
-6. Ragged boxes are not formatting. A box whose edges don't line up isn't recognized as a box, so straightening it would change the program's structure; that repair belongs to `shawline fmt --fix` (P5).
+6. Slipped border cells (§3, near boxes) stay where they are. Moving one changes the program from an error into a valid one, so that is a repair, not formatting. `shawline fmt --fix` does it: it applies every rule here and also moves each slipped cell into place. Nothing else differs between the two modes.
 7. Trailing spaces are removed. Exactly one blank line separates top-level items.
 
 The formatter is idempotent: `fmt(fmt(x)) == fmt(x)`. It also preserves meaning: `parse(fmt(x))` is equivalent to `parse(x)`.
@@ -316,6 +323,7 @@ Every diagnostic has a stable code. The corpus checks codes and positions, never
 | S004 | shape | Digits and letters in one word |
 | S010 | shape | Wire runs into a stroke that doesn't join it |
 | S011 | shape | Crossing on exactly one box's border. Where two overlapping borders cross, `S001` covers it. A wire running into such a crossing is also blocked and gets `S010` as well. |
+| S012 | shape | A near box's border cell slipped one cell off its line (§3) |
 | Y001 | syntax | Definition title is not a `·`-word |
 | Y002 | syntax | Node box doesn't hold exactly one word |
 | Y003 | syntax | Dangling wire end |
@@ -366,6 +374,7 @@ Every diagnostic has a stable code. The corpus checks codes and positions, never
 | A second default arm (`Y008`) | Its divider's left `├` |
 | A port (`Y009`, `W002`) | Its arrowhead |
 | A wire end (`Y003`, `Y004`, `S010`) | The end's cell |
+| A slipped border cell (`S012`) | The cell where it sits, not where it belongs |
 | A whole wire (`Y005`, `Y006`) | The wire's first cell in row-major order |
 | A cycle (`C003`) | The word of the cycle's first node in row-major order |
 | No main (`C005`) | `0:0` |
