@@ -1,0 +1,12 @@
+def ·𐑥𐑱𐑯 at 2:3 box 2:0-12:26
+  result 0 𐑬 at 9:28 arrow 9:26
+  node 0 const 3 cells 4:2-4:2 out 4:4
+  node 1 switch box 6:2-10:16 selector 6:8 in 6:8 out 7:16
+    arm 0 default rows 7..8 results 7:16
+      node 0 const 1 cells 7:4-7:4 out 7:6
+      edge wire 1: node 0 out 0 -> result 0
+    arm 1 guard 2 at 8:5 rows 9..10 results 9:16
+      node 0 const 2 cells 9:4-9:4 out 9:6
+      edge wire 3: node 0 out 0 -> result 0
+  edge wire 0: node 0 out 0 -> node 1 in 0
+  edge wire 2: node 1 out 0 -> result 0

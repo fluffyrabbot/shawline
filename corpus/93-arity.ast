@@ -1,0 +1,6 @@
+def ·𐑥𐑱𐑯 at 2:3 box 2:0-8:20
+  result 0 𐑬 at 5:22 arrow 5:20
+  node 0 call 𐑐 at 5:8 box 4:6-6:10 in 5:6 out 5:10
+  node 1 const 1 cells 5:3-5:3 out 5:5
+  edge wire 0: node 1 out 0 -> node 0 in 0
+  edge wire 1: node 0 out 0 -> result 0

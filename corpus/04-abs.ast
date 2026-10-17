@@ -1,0 +1,33 @@
+def ·𐑨𐑚𐑕 at 2:3 box 2:0-18:34
+  param 0 𐑯 at 5:2 arrow 5:0
+  result 0 𐑬 at 13:36 arrow 13:34
+  node 0 call 𐑤 at 5:16 box 4:14-7:18 in 5:14 6:14 out 5:18
+  node 1 const 0 cells 6:11-6:11 out 6:13
+  node 2 switch box 9:12-16:26 selector 9:20 in 9:20 10:12 14:12 out 10:26
+    arm 0 guard 0 at 9:15 rows 10..11 params 10:12 results 10:26
+      edge wire 3: param 0 -> result 0
+    arm 1 default rows 12..16 params 14:12 results 13:26
+      node 0 call 𐑚 at 13:20 box 12:18-15:22 in 13:18 14:18 out 13:22
+      node 1 const 0 cells 13:15-13:15 out 13:17
+      edge wire 5: node 1 out 0 -> node 0 in 0
+      edge wire 6: node 0 out 0 -> result 0
+      edge wire 7: param 0 -> node 0 in 1
+  edge wire 0: param 0 -> node 0 in 0, node 2 in 1, node 2 in 2
+  edge wire 1: node 0 out 0 -> node 2 in 0
+  edge wire 2: node 1 out 0 -> node 0 in 1
+  edge wire 4: node 2 out 0 -> result 0
+def ·𐑥𐑱𐑯 at 20:3 box 20:0-29:30
+  result 0 𐑢𐑳𐑯 at 23:32 arrow 23:30
+  result 1 𐑑𐑵 at 26:32 arrow 26:30
+  node 0 call 𐑚 at 23:8 box 22:6-25:10 in 23:6 24:6 out 23:10
+  node 1 call 𐑨𐑚𐑕 at 23:18 box 22:16-24:22 in 23:16 out 23:22
+  node 2 const 0 cells 23:3-23:3 out 23:5
+  node 3 const 7 cells 24:3-24:3 out 24:5
+  node 4 call 𐑨𐑚𐑕 at 26:18 box 25:16-27:22 in 26:16 out 26:22
+  node 5 const 5 cells 26:3-26:3 out 26:5
+  edge wire 8: node 2 out 0 -> node 0 in 0
+  edge wire 9: node 0 out 0 -> node 1 in 0
+  edge wire 10: node 1 out 0 -> result 0
+  edge wire 11: node 3 out 0 -> node 0 in 1
+  edge wire 12: node 5 out 0 -> node 4 in 0
+  edge wire 13: node 4 out 0 -> result 1

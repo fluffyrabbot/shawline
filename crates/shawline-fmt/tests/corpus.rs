@@ -8,11 +8,10 @@ use std::path::{Path, PathBuf};
 
 use shawline_grid::Grid;
 
-/// Lints the canonical corpus is known to trigger, pending threshold tuning
-/// at P5. Both are U-shaped detours (down, across, up into a lower input),
-/// which take four bends however they are routed: `06-pair` swaps two
-/// adjacent rows, and `08-factorial` carries `n` under the `𐑚` node.
-const KNOWN_LINTS: &[(&str, &str)] = &[("06-pair", "9:21 L003"), ("08-factorial", "13:10 L003")];
+/// Lints the canonical corpus is known to trigger. Empty since Gate B raised
+/// `L003` to more than 4 bends: the U-shaped detours in `06-pair` and
+/// `08-factorial` take four bends however they are routed.
+const KNOWN_LINTS: &[(&str, &str)] = &[];
 
 fn corpus() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../../corpus")

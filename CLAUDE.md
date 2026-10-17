@@ -5,9 +5,10 @@ A dataflow programming language whose source is a drawing: Shavian-alphabet word
 ## Commands
 
 - `cargo test --workspace`: unit tests plus the corpus oracle
-- `cargo test -p shawline-corpus`: the corpus only (its `.wires` checks stay red until A1 lands at Gate A)
+- `cargo test -p shawline-corpus`: the corpus oracle and the formatter property test
 - `SHAWLINE_BLESS=<stage>[,…] cargo test -p shawline-corpus`: rewrite expectations (lead only)
-- `cargo run --bin shawline -- check|diagram <file.shaw>`
+- `cargo run --bin shawline -- check|run|fmt|render [--dark]|diagram|ast <file.shaw>`
+- `cargo run -p shawline-font --example build -- <out.ttf>`: build Shawline Mono
 - `cargo clippy --workspace --all-targets`
 
 ## Rules for agents

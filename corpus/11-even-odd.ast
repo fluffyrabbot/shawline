@@ -1,0 +1,53 @@
+def ·𐑰𐑝𐑩𐑯 at 2:3 box 2:0-18:46
+  param 0 𐑯 at 5:2 arrow 5:0
+  result 0 𐑬 at 13:48 arrow 13:46
+  node 0 call 𐑦 at 5:16 box 4:14-7:18 in 5:14 6:14 out 5:18
+  node 1 const 0 cells 6:11-6:11 out 6:13
+  node 2 switch box 9:9-16:38 selector 9:20 in 9:20 13:9 out 10:38
+    arm 0 guard 1 at 9:12 rows 10..11 results 10:38
+      node 0 const 1 cells 10:11-10:11 out 10:13
+      edge wire 3: node 0 out 0 -> result 0
+    arm 1 default rows 12..16 params 13:9 results 13:38
+      node 0 call 𐑚 at 13:18 box 12:16-15:20 in 13:16 14:16 out 13:20
+      node 1 call 𐑪𐑛 at 13:27 box 12:25-14:30 in 13:25 out 13:30
+      node 2 const 1 cells 14:13-14:13 out 14:15
+      edge wire 5: param 0 -> node 0 in 0
+      edge wire 6: node 0 out 0 -> node 1 in 0
+      edge wire 7: node 1 out 0 -> result 0
+      edge wire 8: node 2 out 0 -> node 0 in 1
+  edge wire 0: param 0 -> node 0 in 0, node 2 in 1
+  edge wire 1: node 0 out 0 -> node 2 in 0
+  edge wire 2: node 1 out 0 -> node 0 in 1
+  edge wire 4: node 2 out 0 -> result 0
+def ·𐑪𐑛 at 20:3 box 20:0-36:46
+  param 0 𐑯 at 23:2 arrow 23:0
+  result 0 𐑬 at 31:48 arrow 31:46
+  node 0 call 𐑦 at 23:16 box 22:14-25:18 in 23:14 24:14 out 23:18
+  node 1 const 0 cells 24:11-24:11 out 24:13
+  node 2 switch box 27:9-34:38 selector 27:20 in 27:20 31:9 out 28:38
+    arm 0 guard 1 at 27:12 rows 28..29 results 28:38
+      node 0 const 0 cells 28:11-28:11 out 28:13
+      edge wire 12: node 0 out 0 -> result 0
+    arm 1 default rows 30..34 params 31:9 results 31:38
+      node 0 call 𐑚 at 31:18 box 30:16-33:20 in 31:16 32:16 out 31:20
+      node 1 call 𐑰𐑝𐑩𐑯 at 31:27 box 30:25-32:32 in 31:25 out 31:32
+      node 2 const 1 cells 32:13-32:13 out 32:15
+      edge wire 14: param 0 -> node 0 in 0
+      edge wire 15: node 0 out 0 -> node 1 in 0
+      edge wire 16: node 1 out 0 -> result 0
+      edge wire 17: node 2 out 0 -> node 0 in 1
+  edge wire 9: param 0 -> node 0 in 0, node 2 in 1
+  edge wire 10: node 0 out 0 -> node 2 in 0
+  edge wire 11: node 1 out 0 -> node 0 in 1
+  edge wire 13: node 2 out 0 -> result 0
+def ·𐑥𐑱𐑯 at 38:3 box 38:0-48:22
+  result 0 𐑢𐑳𐑯 at 41:24 arrow 41:22
+  result 1 𐑑𐑵 at 45:24 arrow 45:22
+  node 0 call 𐑰𐑝𐑩𐑯 at 41:10 box 40:8-42:15 in 41:8 out 41:15
+  node 1 const 7 cells 41:3-41:3 out 41:5
+  node 2 call 𐑪𐑛 at 45:10 box 44:8-46:13 in 45:8 out 45:13
+  node 3 const 7 cells 45:3-45:3 out 45:5
+  edge wire 18: node 1 out 0 -> node 0 in 0
+  edge wire 19: node 0 out 0 -> result 0
+  edge wire 20: node 3 out 0 -> node 2 in 0
+  edge wire 21: node 2 out 0 -> result 1

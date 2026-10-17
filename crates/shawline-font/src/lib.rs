@@ -13,6 +13,7 @@
 
 use kurbo::{Affine, BezPath, PathEl, Point, Rect, Shape, StrokeOpts};
 use shawline_glyph::{CELL_HEIGHT, CELL_WIDTH, STROKE_WEIGHT, Skeleton, metrics, pen, pen_for, skeleton};
+use shawline_grid::Dir;
 use shawline_grid::repertoire::{MARKS, NAMER_DOT, SHAVIAN, STROKES};
 use write_fonts::FontBuilder;
 use write_fonts::tables::cmap::Cmap;
@@ -60,13 +61,30 @@ pub fn characters() -> impl Iterator<Item = char> {
         .chain(MARKS.iter().copied())
 }
 
+/// The skeleton a font draws for `ch`. A font glyph can't see the rows above
+/// and below it, so canonical arrowheads always carry the border running
+/// through them: nearly every one sits in a box border, and an inline node's
+/// input arrowhead shows a small tick instead (SPEC §3).
+fn font_skeleton(ch: char) -> Skeleton {
+    let border = |points: Dir, across: [Dir; 2]| {
+        shawline_glyph::arrowhead(points, &[points.opposite(), across[0], across[1]])
+    };
+    match ch {
+        '▶' => border(Dir::E, [Dir::N, Dir::S]),
+        '◀' => border(Dir::W, [Dir::N, Dir::S]),
+        '▲' => border(Dir::N, [Dir::E, Dir::W]),
+        '▼' => border(Dir::S, [Dir::E, Dir::W]),
+        _ => skeleton(ch).unwrap_or_else(|| panic!("{ch:?} is in the repertoire but has no skeleton")),
+    }
+}
+
 /// The Shawline Mono TrueType font.
 pub fn build() -> Vec<u8> {
     let mut glyphs = vec![notdef()];
     let mut names = vec![".notdef".to_string()];
     let mut mappings = Vec::new();
     for ch in characters() {
-        let sk = skeleton(ch).unwrap_or_else(|| panic!("{ch:?} is in the repertoire but has no skeleton"));
+        let sk = font_skeleton(ch);
         mappings.push((ch, GlyphId::new(glyphs.len() as u32)));
         glyphs.push(glyph(&sk));
         names.push(match ch {

@@ -13,6 +13,8 @@ The single oracle for every pipeline stage. Each `*.shaw` program may have expec
 
 A program with an empty `.check` and no `.fmt.shaw` is canonical: it must format to itself.
 
+`.fmt.shaw` and `.svg` are selective. Blessing only rewrites the files that exist; to add one, create it empty, then bless.
+
 Numbering: `01`–`79` are valid programs, `80`–`89` fail at runtime, and `90`–`99` must be rejected statically. An ASCII twin of a canonical program has the same number and the suffix `-ascii`; its `.wires` and `.out` match the canonical program's, and its `.fmt.shaw` is the canonical program.
 
 The lead writes and blesses expectations (`SHAWLINE_BLESS=<stage>`). Agents only read them. Never bless a stage whose implementation isn't merged: blessing writes actual output, which for an unimplemented stage is empty.

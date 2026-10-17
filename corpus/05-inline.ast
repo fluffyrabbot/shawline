@@ -1,0 +1,20 @@
+def ·𐑥𐑱𐑯 at 2:3 box 2:0-6:50
+  result 0 𐑬 at 4:52 arrow 4:50
+  node 0 const 5 cells 4:2-4:2 out 4:4
+  node 1 inline 𐑛𐑳𐑚𐑩𐑤 at 4:8 cells 4:8-4:12 in 4:6 out 4:14
+  node 2 inline 𐑛𐑳𐑚𐑩𐑤 at 4:18 cells 4:18-4:22 in 4:16 out 4:24
+  node 3 inline 𐑖 at 4:28 cells 4:28-4:28 in 4:26 out 4:30
+  node 4 inline 𐑠 at 4:34 cells 4:34-4:34 in 4:32 out 4:36
+  node 5 inline 𐑛𐑳𐑚𐑩𐑤 at 4:40 cells 4:40-4:44 in 4:38 out 4:46
+  edge wire 0: node 0 out 0 -> node 1 in 0
+  edge wire 1: node 1 out 0 -> node 2 in 0
+  edge wire 2: node 2 out 0 -> node 3 in 0
+  edge wire 3: node 3 out 0 -> node 4 in 0
+  edge wire 4: node 4 out 0 -> node 5 in 0
+  edge wire 5: node 5 out 0 -> result 0
+def ·𐑛𐑳𐑚𐑩𐑤 at 8:3 box 8:0-15:22
+  param 0 𐑯 at 11:2 arrow 11:0
+  result 0 𐑬 at 11:24 arrow 11:22
+  node 0 call 𐑐 at 11:12 box 10:10-13:14 in 11:10 12:10 out 11:14
+  edge wire 6: param 0 -> node 0 in 0, node 0 in 1
+  edge wire 7: node 0 out 0 -> result 0

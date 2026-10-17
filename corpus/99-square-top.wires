@@ -1,0 +1,3 @@
+wire 0 cells 12
+  end 4:4 W open
+  end 4:15 E port 4:16

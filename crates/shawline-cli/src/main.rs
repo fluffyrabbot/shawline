@@ -3,22 +3,29 @@
 use std::process::ExitCode;
 use std::{env, fs};
 
-use shawline_grid::{Diagnostic, Grid};
+use shawline_cli::Theme;
+use shawline_grid::Diagnostic;
 
-const USAGE: &str = "usage: shawline <command> <file.shaw>
+const USAGE: &str = "usage: shawline <command> [--dark] <file.shaw>
 
 commands:
   check     report diagnostics
+  run       check, then run ·𐑥𐑱𐑯 and print its outputs
+  fmt       print the canonical form
+  render    print an SVG drawing (--dark for the dark theme)
   diagram   print the recognized diagram
+  ast       print the syntax tree
 ";
 
 fn main() -> ExitCode {
     let args: Vec<String> = env::args().skip(1).collect();
-    let [command, path] = args.as_slice() else {
+    let dark = args.iter().any(|a| a == "--dark");
+    let rest: Vec<&String> = args.iter().filter(|a| *a != "--dark").collect();
+    let [command, path] = rest.as_slice() else {
         eprint!("{USAGE}");
         return ExitCode::from(2);
     };
-    if !matches!(command.as_str(), "check" | "diagram") {
+    if !["check", "run", "fmt", "render", "diagram", "ast"].contains(&command.as_str()) {
         eprint!("{USAGE}");
         return ExitCode::from(2);
     }
@@ -29,24 +36,53 @@ fn main() -> ExitCode {
             return ExitCode::from(2);
         }
     };
-    let grid = match Grid::parse(&src) {
-        Ok(grid) => grid,
-        Err(errors) => {
-            for e in errors {
-                report(path, &src, &e.into());
-            }
-            return ExitCode::FAILURE;
+    let report_all = |diagnostics: &[Diagnostic]| {
+        for d in diagnostics {
+            report(path, &src, d);
         }
+        ExitCode::FAILURE
     };
 
-    let diagram = shawline_shape::recognize(&grid);
-    if command == "diagram" {
-        print!("{diagram}");
+    match command.as_str() {
+        "fmt" => match shawline_cli::format(&src) {
+            Ok(text) => print!("{text}"),
+            Err(errors) => return report_all(&errors),
+        },
+        "render" => {
+            let theme = if dark { Theme::DARK } else { Theme::LIGHT };
+            match shawline_cli::render(&src, theme) {
+                Ok(svg) => print!("{svg}"),
+                Err(errors) => return report_all(&errors),
+            }
+        }
+        _ => {
+            let checked = match shawline_cli::check(&src) {
+                Ok(checked) => checked,
+                Err(errors) => return report_all(&errors),
+            };
+            match command.as_str() {
+                "diagram" => print!("{}", checked.diagram),
+                "ast" => print!("{}", checked.sheet),
+                _ => {}
+            }
+            report_all(&checked.diagnostics);
+            if checked.has_errors() {
+                return ExitCode::FAILURE;
+            }
+            if command.as_str() == "run" {
+                let program = checked.program.as_ref().expect("no errors, so lowered");
+                match shawline_cli::run(program) {
+                    Ok(values) => values.iter().for_each(|v| println!("{v}")),
+                    Err(e) => {
+                        // SPEC §9: zero-based position, nothing on stdout.
+                        eprintln!("error {} {}: {}", e.at, e.code, e.message);
+                        return ExitCode::FAILURE;
+                    }
+                }
+            }
+        }
     }
-    for d in &diagram.diagnostics {
-        report(path, &src, d);
-    }
-    if diagram.diagnostics.is_empty() { ExitCode::SUCCESS } else { ExitCode::FAILURE }
+    ExitCode::SUCCESS
 }
 
 /// Prints `d` with its source line and a caret. Every repertoire character is

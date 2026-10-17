@@ -13,11 +13,15 @@ fn corpus() {
         let src = fs::read_to_string(&program).unwrap();
         for stage in STAGES {
             let expected_path = program.with_extension(stage.name);
+            let stored = fs::read_to_string(&expected_path).ok();
             if blessing(stage.name) {
-                fs::write(&expected_path, (stage.run)(&src)).unwrap();
+                if stored.is_some() || !stage.selective {
+                    fs::write(&expected_path, (stage.run)(&src)).unwrap();
+                }
                 continue;
             }
-            let Ok(expected) = fs::read_to_string(&expected_path) else { continue };
+            let expected = stored.or_else(|| stage.fallback.and_then(|f| f(&program, &src)));
+            let Some(expected) = expected else { continue };
             checked += 1;
             let actual = (stage.run)(&src);
             if actual != expected {

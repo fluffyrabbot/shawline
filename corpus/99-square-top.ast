@@ -1,0 +1,4 @@
+def ·𐑥𐑱𐑯 at 2:3 box 2:0-6:16
+  result 0 𐑬 at 4:18 arrow 4:16
+  node 0 const 1 cells 4:2-4:2 out 4:4
+  edge wire 0: node 0 out 0 -> result 0

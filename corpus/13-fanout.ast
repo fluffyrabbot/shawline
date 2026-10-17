@@ -1,0 +1,14 @@
+def ·𐑥𐑱𐑯 at 2:3 box 2:0-16:26
+  result 0 𐑢𐑳𐑯 at 5:28 arrow 5:26
+  result 1 𐑑𐑵 at 10:28 arrow 10:26
+  result 2 𐑔𐑮𐑰 at 14:28 arrow 14:26
+  node 0 call 𐑐 at 5:12 box 4:10-7:14 in 5:10 6:10 out 5:14
+  node 1 const 7 cells 5:2-5:2 out 5:4
+  node 2 call 𐑑 at 10:12 box 9:10-12:14 in 10:10 11:10 out 10:14
+  node 3 inline 𐑖 at 14:10 cells 14:10-14:10 in 14:8 out 14:12
+  node 4 inline 𐑠 at 14:16 cells 14:16-14:16 in 14:14 out 14:18
+  edge wire 0: node 1 out 0 -> node 0 in 0, node 0 in 1, node 2 in 0, node 2 in 1, node 3 in 0
+  edge wire 1: node 0 out 0 -> result 0
+  edge wire 2: node 2 out 0 -> result 1
+  edge wire 3: node 3 out 0 -> node 4 in 0
+  edge wire 4: node 4 out 0 -> result 2

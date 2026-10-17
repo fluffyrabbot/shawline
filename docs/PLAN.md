@@ -134,7 +134,7 @@ Done = tests + clippy green for your crate, committed on your branch, ≤200-wor
 The critical path runs **P1 → A1 (wires) → B1 (syntax) → Gate B → C**. The glyph → render/font track and the VM run alongside it, off the critical path.
 
 ```
-P0 spine ✅ ─► P1 spec+contracts ✅ ─► Wave A ✅ ─────────► Gate A ─► Wave B ──────────► Gate B ─► Wave C ─► Gate C ─► P5
+P0 spine ✅ ─► P1 spec+contracts ✅ ─► Wave A ✅ ─────────► Gate A ✅ ─► Wave B ✅ ───────► Gate B ✅ ─► Wave C ─► Gate C ─► P5
              (lead)               A1 shape-wires                B1 syntax                   C2 lsp
                                   A2 word                       B2 fmt                      C3 playground
                                   A3 glyph                      B3 render                   C4 vscode
@@ -181,7 +181,7 @@ Done by one mind, because this is where conceptual integrity is set.
 - [x] The user reviewed `crates/shawline-glyph/specimen.svg` and passed it.
 - [x] SPEC §14 gains `Y017` (number literal too large for an Int), closing a gap B1 would otherwise have hit.
 
-### Wave B: Middle (5 agents in parallel)
+### Wave B: Middle (5 agents in parallel) ✅
 
 | Agent | Owns | Delivers | Oracle |
 |---|---|---|---|
@@ -191,7 +191,19 @@ Done by one mind, because this is where conceptual integrity is set.
 | **B4** font | `shawline-font` | Shawline Mono TTF built from skeletons (kurbo stroke expansion → `write-fonts`); metrics with no line gap so box drawing joins; read-back validation. | Read-back plus a rasterized test string |
 | **B5** ir | `shawline-ir` (not `ir.rs`) | AST → IR (name resolution, arity, switch lowering, cycle detection); `C` and `W` diagnostics; IR → bytecode, including tail-call detection. | Unit tests on hand-built ASTs; corpus `.check` and `.out` come online at the gate |
 
-**Gate B (lead):** merge; wire `shawline run` and `shawline fmt`; register the corpus stages `ast`, `check`, `out`, `fmt.shaw` and `svg`. A program with an empty `.check` and no `.fmt.shaw` must format to itself. Add the formatter property test; fix integration seams personally. The whole corpus must be green. Commit.
+**Gate B (lead) ✅:** merge; wire `shawline run` and `shawline fmt`; register the corpus stages `ast`, `check`, `out`, `fmt.shaw` and `svg`. A program with an empty `.check` and no `.fmt.shaw` must format to itself. Add the formatter property test; fix integration seams personally. The whole corpus must be green. Commit.
+
+- [x] Five branches merged; only `Cargo.lock` overlapped, and it merged automatically.
+- [x] The pipeline lives in the `shawline_cli` library and is shared by the binary and the corpus. The CLI gains `run`, `fmt`, `render [--dark]` and `ast`.
+- [x] Corpus stages `ast`, `check`, `out`, `fmt.shaw` (falling back to the program itself when its `.check` is empty) and `svg` (selective: `01-hello`, `04-abs`, `06-pair`) are registered. First integration: every `.out` and `.check` matched with no seam fixes. B1 and B5 met only through `ast.rs`.
+- [x] `.ast` dumps blessed after reading `03`, `04`, `06` and `12` against their drawings; `.svg` blessed after viewing the light and dark renders.
+- [x] Gate decisions:
+  - `Y018` (square box at top level) is reported by syntax and left alone by fmt, with a new negative case `99-square-top`.
+  - `L003` is now more than 4 bends.
+  - SPEC §11 rule 6 becomes `fmt --fix` (P5).
+  - Font arrowheads carry the border through them.
+  - SPEC §10 tail calls require "in the same order".
+  - SPEC §14 rewords `Y005`/`Y016`, adds positions for `C004`/`Y008`/`Y014`/`Y015`/`Y018`, and runs the checker only on structurally clean sheets.
 
 ### Wave C: Surfaces (3 agents in parallel, plus the lead)
 
@@ -209,6 +221,7 @@ Done by one mind, because this is where conceptual integrity is set.
 - The user reviews the gallery (every corpus program rendered in the playground). Lint thresholds and canonical spacing get tuned from that review.
 - One audit pass, with lenses picked via the `agent-fleet` skill (at most two; likely `dijkstra-correctness-auditor` on VM/IR and `data-integrity-architect` on formatter round-trips). The lead triages and batches the fixes.
 - A jitter corpus: the canonical programs with random one-cell perturbations must format back to their canonical form.
+- `shawline fmt --fix`: repairs ragged boxes, which plain formatting must leave alone (SPEC §11 rule 6).
 
 ## Risks
 

@@ -294,6 +294,10 @@ impl Parser<'_> {
             if b.style == BoxStyle::Rounded && b.parent.is_some() {
                 self.error(at, "Y014", "rounded box inside a definition; definitions don't nest");
             }
+            // Still parsed as a definition, so the rest of the sheet checks.
+            if b.style == BoxStyle::Square && b.parent.is_none() {
+                self.error(at, "Y018", "square box outside any definition; definitions are rounded");
+            }
         }
     }
 

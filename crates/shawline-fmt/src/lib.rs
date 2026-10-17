@@ -42,7 +42,7 @@ pub struct Thresholds {
 
 /// The lint thresholds in force.
 pub const THRESHOLDS: Thresholds =
-    Thresholds { max_bends: 3, max_crossings: 2, max_ink_percent: 60, max_padding_skew: 1 };
+    Thresholds { max_bends: 4, max_crossings: 2, max_ink_percent: 60, max_padding_skew: 1 };
 
 /// A formatting phase: proposes edits against the canvas as it stands.
 type Phase = fn(&Grid, &Diagram) -> Vec<Edit>;

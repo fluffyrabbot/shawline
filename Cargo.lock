@@ -419,14 +419,20 @@ dependencies = [
 name = "shawline-cli"
 version = "0.0.1"
 dependencies = [
+ "shawline-fmt",
  "shawline-grid",
+ "shawline-ir",
+ "shawline-render",
  "shawline-shape",
+ "shawline-syntax",
+ "shawline-vm",
 ]
 
 [[package]]
 name = "shawline-corpus"
 version = "0.0.1"
 dependencies = [
+ "shawline-cli",
  "shawline-grid",
  "shawline-shape",
 ]

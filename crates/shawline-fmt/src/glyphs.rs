@@ -52,10 +52,10 @@ pub(crate) fn edits(grid: &Grid, diagram: &Diagram) -> Vec<Edit> {
     edits
 }
 
-/// Whether each box corner should be drawn rounded. Definitions (top-level
-/// boxes) are rounded and nodes and switches square. A nested rounded box
-/// (`Y014`) or a mixed one (`Y015`) keeps its corners: restyling it would
-/// turn an error into a different program.
+/// Whether each box corner should be drawn rounded. Every box keeps its
+/// style: rounding a top-level square box (`Y018`), squaring a nested
+/// rounded one (`Y014`) or settling a mixed one (`Y015`) would turn an error
+/// into a different, valid program.
 fn box_corners(diagram: &Diagram) -> HashMap<Pos, bool> {
     let mut corners = HashMap::new();
     for b in &diagram.boxes {
@@ -72,7 +72,7 @@ fn box_corners(diagram: &Diagram) -> HashMap<Pos, bool> {
             );
             let rounded = match b.style {
                 BoxStyle::Rounded => true,
-                BoxStyle::Square => b.parent.is_none(),
+                BoxStyle::Square => false,
                 BoxStyle::Mixed => own,
             };
             corners.entry(p).or_insert(rounded);
@@ -129,9 +129,10 @@ mod tests {
     }
 
     #[test]
-    fn square_definition_becomes_rounded() {
+    fn square_top_level_box_keeps_its_corners() {
+        // `Y018`: rounding it would turn an error into a valid program.
         let src = "┌─ ·𐑨𐑛 ──┐\n│ 1 ─────▶ 𐑚\n└────────┘\n";
-        assert_eq!(fmt(src), "╭─ ·𐑨𐑛 ──╮\n│ 1 ─────▶ 𐑚\n╰────────╯\n");
+        assert_eq!(fmt(src), src);
     }
 
     #[test]

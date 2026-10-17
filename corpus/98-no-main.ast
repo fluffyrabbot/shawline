@@ -1,0 +1,6 @@
+def ·𐑛𐑳𐑚𐑩𐑤 at 2:3 box 2:0-9:22
+  param 0 𐑯 at 5:2 arrow 5:0
+  result 0 𐑬 at 5:24 arrow 5:22
+  node 0 call 𐑐 at 5:12 box 4:10-7:14 in 5:10 6:10 out 5:14
+  edge wire 0: param 0 -> node 0 in 0, node 0 in 1
+  edge wire 1: node 0 out 0 -> result 0

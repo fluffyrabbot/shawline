@@ -44,6 +44,8 @@ Every stroke cell connects in a fixed set of directions. The table lives in `sha
 
 A wire that runs into a stroke that doesn't join it, and isn't a port, is an error (`S010`).
 
+**Arrowheads in Shawline Mono.** A font glyph can't see the rows above and below it, so the font draws `▶ ◀` with a vertical border line through them and `▲ ▼` with a horizontal one. Nearly every arrowhead sits in a box border; an inline node's input arrowhead shows a small tick instead. The SVG renderer knows each arrowhead's neighbours and draws both kinds exactly.
+
 ## 4. Words
 
 A **word** is a maximal horizontal run of Shavian letters, namer dots and digits.
@@ -229,7 +231,7 @@ A runtime error prints nothing on stdout. It prints `error ROW:COL CODE: message
 - Nodes run in dependency order. The order among independent nodes is unobservable.
 - A switch evaluates only the arm it selects.
 - Calls must not consume the host stack, and recursion at least 100 000 deep must work.
-- A call whose outputs go only to the enclosing definition's outputs (directly, or through switch arm outputs) is a **tail call**, and it must run in constant stack.
+- A call whose outputs go only to the enclosing definition's outputs, in the same order (directly, or through switch arm outputs), is a **tail call**, and it must run in constant stack. A call whose results reach the outputs reordered or duplicated is an ordinary call.
 
 ## 11. Canonical form
 
@@ -240,7 +242,7 @@ The formatter **keeps the author's placement**: every box and wire stays where i
 3. Titles and guards are written `─ name ─`: exactly one rule, one space, the name, one space.
 4. A port name sits exactly one space after its arrowhead. A wire starts one space after a word or literal.
 5. Jitter is straightened. A wire that wanders by one cell becomes straight when straightening changes no connections.
-6. A box edge snaps to the nearest column where all of its rows agree.
+6. Ragged boxes are not formatting. A box whose edges don't line up isn't recognized as a box, so straightening it would change the program's structure; that repair belongs to `shawline fmt --fix` (P5).
 7. Trailing spaces are removed. Exactly one blank line separates top-level items.
 
 The formatter is idempotent: `fmt(fmt(x)) == fmt(x)`. It also preserves meaning: `parse(fmt(x))` is equivalent to `parse(x)`.
@@ -253,7 +255,7 @@ These are measurable stand-ins for taste. The formatter fixes what it can; the c
 
 - **Mixed box style:** a box with some rounded and some square corners.
 - **Wire too short:** an arrowhead with no line cell before it (`0 ▶`).
-- **Too many bends:** a wire with more than 3 bends between its source and a sink.
+- **Too many bends:** a wire with more than 4 bends between its source and a sink. Four is the minimum for a U-shaped detour into a lower input, as in `06-pair` and `08-factorial`.
 - **Too many crossings:** more than 2 crossings in a definition. Most of these are better solved by re-arranging.
 - **Ink too dense:** more than 60% non-space cells in a definition's interior.
 - **Asymmetric padding:** a node box whose word is not centred, when centring is possible.
@@ -317,7 +319,7 @@ Every diagnostic has a stable code. The corpus checks codes and positions, never
 | Y002 | syntax | Node box doesn't hold exactly one word |
 | Y003 | syntax | Dangling wire end |
 | Y004 | syntax | Dangling arrowhead |
-| Y005 | syntax | Wire with no sink |
+| Y005 | syntax | Wire with no source or no sink |
 | Y006 | syntax | Two sources on one wire (a merge outside a switch) |
 | Y007 | syntax | Guard after the default arm |
 | Y008 | syntax | More than one default arm |
@@ -328,8 +330,9 @@ Every diagnostic has a stable code. The corpus checks codes and positions, never
 | Y013 | syntax | Single-letter definition name (reserved for primitives) |
 | Y014 | syntax | Rounded box inside a definition (definitions don't nest) |
 | Y015 | syntax | Box with mixed corner styles |
-| Y016 | syntax | A guard on a box that has no dividers |
+| Y016 | syntax | A guard on a box that is not a switch (no selector, no dividers) |
 | Y017 | syntax | Number literal too large for an Int |
+| Y018 | syntax | Square box outside any definition (definitions are rounded) |
 | C001 | check | Unknown name |
 | C002 | check | Arity mismatch |
 | C003 | check | Cycle in a definition's wires |
@@ -355,7 +358,10 @@ Every diagnostic has a stable code. The corpus checks codes and positions, never
 | A constant or literal (`Y017`) | The literal's first cell |
 | A switch (`Y010`, `Y011`, `W001`, `R005`) | Its selector `▼`; for `Y010`, its top-left corner |
 | A guard (`Y007`) | The guard's first cell |
-| A definition (`Y001`, `Y013`, `C004`, `C006`) | Its namer dot |
+| A definition (`Y001`, `Y013`, `C006`) | Its namer dot |
+| A duplicate definition (`C004`) | The namer dot of each later duplicate |
+| A box's style or placement (`Y014`, `Y015`, `Y018`) | Its top-left corner |
+| A second default arm (`Y008`) | Its divider's left `├` |
 | A port (`Y009`, `W002`) | Its arrowhead |
 | A wire end (`Y003`, `Y004`, `S010`) | The end's cell |
 | A whole wire (`Y005`, `Y006`) | The wire's first cell in row-major order |
@@ -363,6 +369,8 @@ Every diagnostic has a stable code. The corpus checks codes and positions, never
 | No main (`C005`) | `0:0` |
 
 A wire with a dangling end gets `Y003` (or `Y004`) only, never also `Y005`.
+
+The checker (`C` and `W` codes) only runs on sheets free of shape and syntax errors, so a broken drawing doesn't also produce phantom name or arity errors.
 
 The corpus `.check` files list every static diagnostic (grid, shape, syntax, check, warnings), one per line as `ROW:COL CODE`, sorted.
 
