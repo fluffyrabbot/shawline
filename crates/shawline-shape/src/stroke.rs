@@ -102,26 +102,45 @@ fn potential(ch: char) -> u8 {
 #[derive(Clone, Debug)]
 pub struct StrokeMap {
     cells: Vec<Vec<Option<Stroke>>>,
+    masked: Vec<Vec<bool>>,
 }
 
 impl StrokeMap {
     pub fn new(grid: &Grid) -> Self {
+        Self::masking(grid, |_| false)
+    }
+
+    /// Strokes with the cells where `masked` holds treated as text: never a
+    /// stroke, and nothing an ASCII joint can join.
+    pub fn masking(grid: &Grid, masked: impl Fn(Pos) -> bool) -> Self {
+        let masked: Vec<Vec<bool>> = (0..grid.height())
+            .map(|row| (0..grid.row(row).len()).map(|col| masked(Pos::new(row, col))).collect())
+            .collect();
+        let is_masked = |p: Pos| masked.get(p.row).and_then(|r| r.get(p.col)) == Some(&true);
         let cells = (0..grid.height())
             .map(|row| {
                 (0..grid.row(row).len())
-                    .map(|col| resolve(grid, Pos::new(row, col)))
+                    .map(|col| {
+                        let p = Pos::new(row, col);
+                        if is_masked(p) { None } else { resolve(grid, p, &is_masked) }
+                    })
                     .collect()
             })
             .collect();
-        Self { cells }
+        Self { cells, masked }
     }
 
     pub fn get(&self, p: Pos) -> Option<Stroke> {
         self.cells.get(p.row)?.get(p.col).copied().flatten()
     }
+
+    /// True if `p` lies in a masked text span.
+    pub fn is_masked(&self, p: Pos) -> bool {
+        self.masked.get(p.row).and_then(|r| r.get(p.col)) == Some(&true)
+    }
 }
 
-fn resolve(grid: &Grid, p: Pos) -> Option<Stroke> {
+fn resolve(grid: &Grid, p: Pos, masked: &impl Fn(Pos) -> bool) -> Option<Stroke> {
     let ch = grid.get(p);
     if let Some(s) = fixed(ch) {
         return Some(s);
@@ -130,7 +149,10 @@ fn resolve(grid: &Grid, p: Pos) -> Option<Stroke> {
     let conn = Dir::ALL
         .into_iter()
         .filter(|&d| possible & d.bit() != 0)
-        .filter(|&d| p.step(d).is_some_and(|q| potential(grid.get(q)) & d.opposite().bit() != 0))
+        .filter(|&d| {
+            p.step(d)
+                .is_some_and(|q| !masked(q) && potential(grid.get(q)) & d.opposite().bit() != 0)
+        })
         .fold(0, |acc, d| acc | d.bit());
     let kind = match conn.count_ones() {
         4 => Kind::Crossing,

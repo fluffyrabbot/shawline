@@ -27,6 +27,13 @@ pub struct Text {
     pub divider_of: Option<usize>,
 }
 
+impl Text {
+    /// Every cell the text covers.
+    pub fn cells(&self) -> impl Iterator<Item = Pos> + '_ {
+        (self.pos.col..self.pos.col + self.width).map(|col| Pos::new(self.pos.row, col))
+    }
+}
+
 pub(crate) fn find(grid: &Grid, diagnostics: &mut Vec<Diagnostic>) -> Vec<Text> {
     let mut texts = Vec::new();
     for r in 0..grid.height() {
