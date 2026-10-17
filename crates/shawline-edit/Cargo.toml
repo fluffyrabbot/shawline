@@ -8,6 +8,9 @@ publish.workspace = true
 [dependencies]
 shawline-grid.workspace = true
 shawline-shape.workspace = true
+# The check on every edit: canonical form and diagnostic codes.
+shawline-fmt.workspace = true
+shawline-cli.workspace = true
 
 [lints]
 workspace = true

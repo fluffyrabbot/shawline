@@ -11,6 +11,8 @@ crate-type = ["cdylib"]
 [dependencies]
 shawline-cli.workspace = true
 shawline-grid.workspace = true
+shawline-shape.workspace = true
+shawline-edit.workspace = true
 shawline-word.workspace = true
 # Pinned to the installed wasm-bindgen CLI, which must match exactly.
 wasm-bindgen = "=0.2.126"

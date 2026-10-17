@@ -580,6 +580,8 @@ dependencies = [
 name = "shawline-edit"
 version = "0.0.1"
 dependencies = [
+ "shawline-cli",
+ "shawline-fmt",
  "shawline-grid",
  "shawline-shape",
 ]
@@ -682,7 +684,9 @@ version = "0.0.1"
 dependencies = [
  "js-sys",
  "shawline-cli",
+ "shawline-edit",
  "shawline-grid",
+ "shawline-shape",
  "shawline-word",
  "wasm-bindgen",
 ]

@@ -68,4 +68,19 @@ test("transliterator revises th and keeps v inside words", () => {
   assert.equal(t.push("v").insert, "𐑝");
 });
 
+test("move_box moves a box in 03-double", () => {
+  const src = corpus("03-double.shaw");
+  const node = shawline.boxes(src).find((b) => b.kind === "node");
+  assert.deepEqual([node.top, node.left, node.bottom, node.right], [4, 10, 7, 14]);
+  const moved = shawline.move_box(src, node.top, node.left, 1, 0);
+  assert.equal(moved.ok, true, moved.reason);
+  assert.ok(shawline.boxes(moved.text).some((b) => b.kind === "node" && b.top === 5 && b.left === 10));
+  assert.equal(shawline.format(moved.text), moved.text);
+  assert.deepEqual(shawline.run(moved.text).outputs, shawline.run(src).outputs);
+  const refused = shawline.move_box(src, node.top, node.left, 0, 20);
+  assert.equal(refused.ok, false);
+  assert.deepEqual([refused.row, refused.col], [4, 10]);
+  assert.match(refused.reason, /leave its definition/);
+});
+
 process.exit(failed ? 1 : 0);

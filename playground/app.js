@@ -1,7 +1,7 @@
 // The Shawline playground: an editor, a live drawing, diagnostics, and a
 // Run button. All language work happens in the wasm package; this file only
 // wires it to the page.
-import init, { check, render, format, table, Transliterator } from "./pkg/shawline_wasm.js";
+import init, { check, render, format, table, boxes, move_box, Transliterator } from "./pkg/shawline_wasm.js";
 
 const $ = (id) => document.getElementById(id);
 const editor = $("editor");
@@ -207,15 +207,130 @@ function showDrawing() {
   );
 }
 
-drawing.addEventListener("click", (e) => {
+/** The drawing's cell under a pointer event, or null off the sheet. */
+function cellAt(e) {
   const svg = drawing.querySelector("svg");
-  if (!svg) return;
+  if (!svg) return null;
   const box = svg.getBoundingClientRect();
   const view = svg.viewBox.baseVal;
   const x = view.x + ((e.clientX - box.left) * view.width) / box.width;
   const y = view.y + ((e.clientY - box.top) * view.height) / box.height;
-  if (x >= 0 && y >= 0) jumpTo({ row: Math.floor(y / CELL_H), col: Math.floor(x / CELL_W) }, false);
+  return x >= 0 && y >= 0 ? { row: Math.floor(y / CELL_H), col: Math.floor(x / CELL_W) } : null;
+}
+
+let dragged = false;
+
+drawing.addEventListener("click", (e) => {
+  // The click that ends a drag isn't a request for the caret.
+  if (dragged) return void (dragged = false);
+  const at = cellAt(e);
+  if (at) jumpTo(at, false);
 });
+
+// Moving boxes. Press on a node or a definition and drag: the box snaps by
+// whole cells and a ghost shows where it would land. On release the move is
+// one checked edit to the text (shawline-edit), undoable like typing; a
+// refused move leaves everything as it was and says why.
+
+let drag = null;
+let found = { src: null, list: [] };
+
+/** The innermost box under a cell: a node before its definition. */
+function boxAt(at) {
+  if (found.src !== editor.value) found = { src: editor.value, list: boxes(editor.value) };
+  const area = (b) => (b.bottom - b.top + 1) * (b.right - b.left + 1);
+  return found.list
+    .filter((b) => at.row >= b.top && at.row <= b.bottom && at.col >= b.left && at.col <= b.right)
+    .sort((a, b) => area(a) - area(b))[0];
+}
+
+function svgRect(className, { top, left, bottom, right }) {
+  const rect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+  const attrs = {
+    x: left * CELL_W, y: top * CELL_H,
+    width: (right - left + 1) * CELL_W, height: (bottom - top + 1) * CELL_H, rx: 90,
+  };
+  Object.entries(attrs).forEach(([k, v]) => rect.setAttribute(k, v));
+  rect.setAttribute("class", className);
+  return rect;
+}
+
+function showGhost() {
+  const { box, dr, dc } = drag;
+  drag.ghost?.remove();
+  const at = { top: box.top + dr, left: box.left + dc, bottom: box.bottom + dr, right: box.right + dc };
+  drag.ghost = (dr || dc) && at.top >= 0 && at.left >= 0 ? svgRect("ghost", at) : null;
+  if (drag.ghost) drawing.querySelector("svg")?.append(drag.ghost);
+}
+
+function endDrag() {
+  drag?.ghost?.remove();
+  drag = null;
+  drawing.classList.remove("dragging");
+}
+
+/** Shows a refusal's reason by the cell it is about, for a moment. */
+function refuse({ row, col, reason }) {
+  const svg = drawing.querySelector("svg");
+  if (!svg) return;
+  const cell = svgRect("refused", { top: row, left: col, bottom: row, right: col });
+  svg.append(cell);
+  const view = svg.viewBox.baseVal;
+  const box = svg.getBoundingClientRect();
+  const host = drawing.getBoundingClientRect();
+  const tip = el("div", "refusal", reason);
+  tip.setAttribute("role", "status");
+  tip.style.left = `${((col * CELL_W - view.x) * box.width) / view.width + box.left - host.left + drawing.scrollLeft}px`;
+  tip.style.top = `${(((row + 1) * CELL_H - view.y) * box.height) / view.height + box.top - host.top + drawing.scrollTop}px`;
+  drawing.append(tip);
+  setTimeout(() => (tip.remove(), cell.remove()), 2800);
+}
+
+drawing.addEventListener("pointerdown", (e) => {
+  if (e.button !== 0) return;
+  const at = cellAt(e);
+  const box = at && boxAt(at);
+  if (!box) return;
+  e.preventDefault();
+  drawing.setPointerCapture(e.pointerId);
+  drawing.classList.add("dragging");
+  drag = { box, from: at, dr: 0, dc: 0, ghost: null };
+});
+
+drawing.addEventListener("pointermove", (e) => {
+  const at = cellAt(e);
+  if (!drag) {
+    drawing.querySelector("svg")?.classList.toggle("over-box", Boolean(at && boxAt(at)));
+    return;
+  }
+  if (!at) return;
+  const [dr, dc] = [at.row - drag.from.row, at.col - drag.from.col];
+  if (dr === drag.dr && dc === drag.dc) return;
+  Object.assign(drag, { dr, dc });
+  showGhost();
+});
+
+drawing.addEventListener("pointerup", () => {
+  if (!drag) return;
+  const { box, dr, dc } = drag;
+  endDrag();
+  if (!dr && !dc) return;
+  dragged = true;
+  const result = move_box(editor.value, box.top, box.left, dr, dc);
+  if (!result.ok) return refuse(result);
+  // Replacing the whole text through the editor keeps it on the undo stack.
+  const caret = posOf(editor.value, editor.selectionStart);
+  editor.focus({ preventScroll: true });
+  editor.select();
+  insertText(result.text);
+  settle();
+  const at = offsetOf(editor.value, caret.row, caret.col);
+  editor.setSelectionRange(at, at);
+  clearTimeout(refreshTimer);
+  refresh();
+});
+
+drawing.addEventListener("pointercancel", endDrag);
 
 editor.addEventListener("input", changed);
 
