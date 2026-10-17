@@ -1,0 +1,22 @@
+[package]
+name = "shawline-wasm"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+shawline-cli.workspace = true
+shawline-grid.workspace = true
+shawline-word.workspace = true
+# Pinned to the installed wasm-bindgen CLI, which must match exactly.
+wasm-bindgen = "=0.2.126"
+# Plain JS objects and arrays for results, without a serde round trip. Its
+# `std` feature only adds futures support, which nothing here uses.
+js-sys = { version = "0.3", default-features = false }
+
+[lints]
+workspace = true

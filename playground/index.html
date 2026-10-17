@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Shawline playground</title>
+  <meta name="description" content="A dataflow programming language you draw.">
+  <link rel="preload" href="ShawlineMono.ttf" as="font" type="font/ttf" crossorigin>
+  <link rel="stylesheet" href="style.css">
+  <script>
+    // Set the theme before first paint so the page never flashes.
+    document.documentElement.dataset.theme = localStorage.getItem("shawline.theme")
+      ?? (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+  </script>
+  <script type="module" src="app.js"></script>
+</head>
+<body>
+  <header>
+    <div class="title">
+      <h1>Shawline</h1>
+      <span class="shavian" lang="en-Shaw" aria-hidden="true">·𐑖𐑷𐑤𐑲𐑯</span>
+      <p>A dataflow language you draw.</p>
+    </div>
+    <nav class="controls" aria-label="Playground settings">
+      <label class="picker">
+        <span class="label">Example</span>
+        <select id="examples"></select>
+      </label>
+      <label class="switch" title="Type phonemic ASCII and get Shavian: t h → 𐑔">
+        <input type="checkbox" id="translit" checked>
+        <span class="track" aria-hidden="true"></span>
+        <span class="label">Transliterate</span>
+      </label>
+      <button type="button" id="theme" class="quiet" aria-label="Switch theme">
+        <span class="when-light">Dark</span><span class="when-dark">Light</span>
+      </button>
+    </nav>
+  </header>
+
+  <main>
+    <section class="pane source" aria-labelledby="source-label">
+      <div class="pane-head">
+        <h2 id="source-label">Source</h2>
+        <span id="cursor" class="meta" aria-live="off">1:1</span>
+        <span class="spacer"></span>
+        <span id="note" class="meta" role="status"></span>
+        <button type="button" id="format" class="quiet" title="Redraw in canonical form">Format</button>
+        <button type="button" id="run" class="primary" title="Run ·𐑥𐑱𐑯 (Ctrl+Enter)">Run</button>
+      </div>
+      <div class="editor">
+        <div id="marks" aria-hidden="true"></div>
+        <textarea id="editor" spellcheck="false" autocomplete="off" autocapitalize="off"
+          wrap="off" aria-label="Shawline source"></textarea>
+      </div>
+    </section>
+
+    <section class="pane drawing" aria-labelledby="drawing-label">
+      <div class="pane-head"><h2 id="drawing-label">Drawing</h2></div>
+      <div id="drawing" title="Click a cell to put the cursor there"></div>
+    </section>
+
+    <section class="pane problems" aria-labelledby="problems-label">
+      <div class="pane-head">
+        <h2 id="problems-label">Diagnostics</h2>
+        <span id="problem-count" class="meta"></span>
+      </div>
+      <ul id="problems"></ul>
+    </section>
+
+    <section class="pane output" aria-labelledby="output-label">
+      <div class="pane-head">
+        <h2 id="output-label">Output</h2>
+        <span id="output-meta" class="meta"></span>
+      </div>
+      <pre id="output" aria-live="polite"><span class="hint">Run the program to see what ·𐑥𐑱𐑯 returns.</span></pre>
+    </section>
+  </main>
+
+  <footer>
+    <details>
+      <summary>Typing Shavian</summary>
+      <p>
+        With <em>Transliterate</em> on, each letter has a short phonemic key, and the longest
+        match wins: <kbd>t</kbd><kbd>h</kbd> is 𐑔. Type <kbd>/</kbd> between keys for the
+        shorter reading, <kbd>=</kbd> for the namer dot, and <kbd>v</kbd> outside a word for the
+        ▼ arrowhead.
+      </p>
+      <ol id="keys"></ol>
+    </details>
+    <p class="colophon">
+      Rounded boxes define, square boxes call, wires carry values.
+      The drawing is the program.
+    </p>
+  </footer>
+</body>
+</html>
