@@ -6,26 +6,34 @@ use std::{env, fs};
 use shawline_cli::Theme;
 use shawline_grid::Diagnostic;
 
-const USAGE: &str = "usage: shawline <command> [--dark] <file.shaw>
+const USAGE: &str = "usage: shawline <command> [flags] <file.shaw>
 
 commands:
   check     report diagnostics
   run       check, then run ·𐑥𐑱𐑯 and print its outputs
-  fmt       print the canonical form
-  render    print an SVG drawing (--dark for the dark theme)
+  fmt       print the canonical form (--write: rewrite the file in place)
+  render    print an SVG drawing (--dark: the dark theme)
   diagram   print the recognized diagram
   ast       print the syntax tree
+  asm       print the compiled bytecode as .shawasm
 ";
+
+const COMMANDS: [&str; 7] = ["check", "run", "fmt", "render", "diagram", "ast", "asm"];
 
 fn main() -> ExitCode {
     let args: Vec<String> = env::args().skip(1).collect();
-    let dark = args.iter().any(|a| a == "--dark");
-    let rest: Vec<&String> = args.iter().filter(|a| *a != "--dark").collect();
+    let (flags, rest): (Vec<&String>, Vec<&String>) = args.iter().partition(|a| a.starts_with("--"));
+    let flag = |name: &str| flags.iter().any(|f| *f == name);
     let [command, path] = rest.as_slice() else {
         eprint!("{USAGE}");
         return ExitCode::from(2);
     };
-    if !["check", "run", "fmt", "render", "diagram", "ast"].contains(&command.as_str()) {
+    let known = match command.as_str() {
+        "fmt" => flags.iter().all(|f| *f == "--write"),
+        "render" => flags.iter().all(|f| *f == "--dark"),
+        c => COMMANDS.contains(&c) && flags.is_empty(),
+    };
+    if !known {
         eprint!("{USAGE}");
         return ExitCode::from(2);
     }
@@ -45,11 +53,19 @@ fn main() -> ExitCode {
 
     match command.as_str() {
         "fmt" => match shawline_cli::format(&src) {
+            Ok(text) if flag("--write") => {
+                if text != src
+                    && let Err(e) = fs::write(path, &text)
+                {
+                    eprintln!("shawline: {path}: {e}");
+                    return ExitCode::FAILURE;
+                }
+            }
             Ok(text) => print!("{text}"),
             Err(errors) => return report_all(&errors),
         },
         "render" => {
-            let theme = if dark { Theme::DARK } else { Theme::LIGHT };
+            let theme = if flag("--dark") { Theme::DARK } else { Theme::LIGHT };
             match shawline_cli::render(&src, theme) {
                 Ok(svg) => print!("{svg}"),
                 Err(errors) => return report_all(&errors),
@@ -68,6 +84,9 @@ fn main() -> ExitCode {
             report_all(&checked.diagnostics);
             if checked.has_errors() {
                 return ExitCode::FAILURE;
+            }
+            if command.as_str() == "asm" {
+                print!("{}", shawline_cli::asm(checked.program.as_ref().expect("no errors, so lowered")));
             }
             if command.as_str() == "run" {
                 let program = checked.program.as_ref().expect("no errors, so lowered");

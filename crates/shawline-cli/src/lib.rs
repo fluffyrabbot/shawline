@@ -56,6 +56,11 @@ pub fn run(program: &Program) -> Result<Vec<Value>, Diagnostic> {
     shawline_vm::run(&shawline_ir::compile(program))
 }
 
+/// The program's bytecode in `.shawasm` form.
+pub fn asm(program: &Program) -> String {
+    shawline_vm::disassemble(&shawline_ir::compile(program))
+}
+
 /// The canonical form of `src` (SPEC §11).
 pub fn format(src: &str) -> Result<String, Vec<Diagnostic>> {
     let grid = grid(src)?;
