@@ -250,15 +250,15 @@ A runtime error prints nothing on stdout. It prints `error ROW:COL CODE: message
 
 The formatter **keeps the author's placement**: every box and wire stays where it was drawn. It normalizes only local style:
 
-1. Canonical characters replace ASCII.
-2. Definitions get rounded corners. Nodes and switches get square ones.
+1. Canonical characters replace ASCII. An ASCII corner becomes the canonical corner it draws: `.` and `'` rounded, `+` square.
+2. A canonical corner never changes roundedness. Definitions are drawn rounded and nodes and switches square, but the formatter doesn't enforce it: a wrongly styled box is an error (`Y014`, `Y015`, `Y018`), and the corners of a drawing that isn't a box yet keep the style the author is drawing toward.
 3. Titles and guards are written `─ name ─`: exactly one rule, one space, the name, one space.
 4. A port name sits exactly one space after its arrowhead. A wire starts one space after a word or literal.
 5. Jitter is straightened. A wire that wanders by one cell becomes straight when straightening changes no connections.
 6. Slipped border cells (§3, near boxes) stay where they are. Moving one changes the program from an error into a valid one, so that is a repair, not formatting. `shawline fmt --fix` does it: it applies every rule here and also moves each slipped cell into place. Nothing else differs between the two modes.
 7. Trailing spaces are removed. Exactly one blank line separates top-level items.
 
-The formatter is idempotent: `fmt(fmt(x)) == fmt(x)`. It also preserves meaning: `parse(fmt(x))` is equivalent to `parse(x)`.
+The formatter is idempotent: `fmt(fmt(x)) == fmt(x)`. It repeats its rules until nothing changes, because one fix can make room for another. It also preserves meaning: `parse(fmt(x))` is equivalent to `parse(x)`.
 
 Full automatic layout (`shawline fmt --relayout`) is a later milestone.
 
