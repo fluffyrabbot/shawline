@@ -613,6 +613,7 @@ name = "shawline-ir"
 version = "0.0.1"
 dependencies = [
  "shawline-grid",
+ "shawline-shape",
  "shawline-syntax",
  "shawline-vm",
 ]

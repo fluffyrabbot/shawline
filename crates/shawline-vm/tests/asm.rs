@@ -91,3 +91,35 @@ fn errors_point_at_the_offending_token() {
         assert_eq!((d.at, d.code), (at, "A001"), "{src}{d}");
     }
 }
+
+#[test]
+fn constants_nest_at_most_ten_thousand_deep() {
+    let nested = |depth: usize| {
+        let value = format!("{}1{}", "[".repeat(depth), "]".repeat(depth));
+        let body = format!("  const k0 {value}\n  const r0 k0\n  ret r0 1\nend\n");
+        format!("fn 𐑥𐑱𐑯 params 0 results 1 registers 1\n{body}main 𐑥𐑱𐑯\n")
+    };
+    let m = assemble(&nested(10_000)).unwrap();
+    assert!(disassemble(&m).contains(&format!("{}1]", "[".repeat(10_000))));
+    let d = assemble(&nested(10_001)).unwrap_err();
+    assert_eq!((d.at, d.code), (Pos::new(1, 10_011), "A001"));
+}
+
+#[test]
+fn unused_primitive_slots_must_be_zero() {
+    use shawline_vm::bytecode::{Function, Instr, Module, Prim};
+    let f = Function {
+        name: "𐑥𐑱𐑯".into(),
+        params: 0,
+        results: 1,
+        registers: 2,
+        consts: vec![],
+        code: vec![
+            Instr::Prim { prim: Prim::Show, dst: [0, 1], src: [0, 0] },
+            Instr::Return { base: 0, count: 1 },
+        ],
+        spans: vec![Pos::new(2, 2), Pos::new(0, 0)],
+    };
+    let d = run(&Module { functions: vec![f], main: 0 }).unwrap_err();
+    assert_eq!((d.at, d.code), (Pos::new(2, 2), "A001"));
+}

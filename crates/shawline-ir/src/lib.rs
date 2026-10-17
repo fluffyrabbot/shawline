@@ -7,5 +7,8 @@ mod compile;
 pub mod ir;
 mod lower;
 
+#[cfg(test)]
+mod tests;
+
 pub use compile::compile;
 pub use lower::lower;
