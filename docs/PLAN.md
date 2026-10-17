@@ -309,7 +309,8 @@ The interaction model for a visual editor is designed in the [Shawline Studio do
 | Function | Semantics |
 |---|---|
 | `connect(src, from, to)` | Adds sink `to` to source `from`'s wire, creating the wire or joining the existing one with a tee. The edge set becomes the old set plus that pair, and nothing else changes. |
-| `remove_wire(src, at)` | Removes the wire through cell `at`. On one branch of a fan-out, removes only that branch, and turns a tee left with two arms back into a plain stroke. |
+| `remove_wire(src, at)` | Removes the whole wire through cell `at`, with every branch. |
+| `disconnect(src, to)` | Removes only the branch reaching sink `to`, back to its tee, and turns a tee left with two arms back into a plain stroke. Split from `remove_wire` when the contract was written: one function whose effect depended on which cell was clicked would have made the gates ambiguous. |
 | `place_node(src, corner, word, inputs, outputs)` | A canonical node box with the given ports, inside a definition. Refused if it would overlap something or leave the definition. |
 | `remove_node(src, corner)` | Removes the box, the wires it sources, and the branches into its inputs. |
 | `palette(src, from: Option<Pos>) -> Vec<Candidate>` | `Candidate { word, inputs, outputs, gloss, mirror }`. Primitives first, then definitions, in a fixed order. With `from`, only candidates with at least one input. |
@@ -319,6 +320,8 @@ The interaction model for a visual editor is designed in the [Shawline Studio do
   - `shawline_vm::show(&Value, max_chars)` prints a value in the SPEC §9 format, shortened with `…`.
   - `shawline_ir::trace(&Sheet, &Program, steps) -> SheetTrace { wires: Vec<(usize, Value)>, error, stopped }` maps those outputs to `Diagram` wire indices. A definition's parameter wires take the values its first call received.
   - `shawline_cli::trace(src)` is the lead's glue for the CLI and playground.
+
+- [x] Lead: contracts written (`shawline-edit` P7 section, `shawline-vm/src/trace.rs`, `shawline-ir/src/trace.rs`, `shawline_cli::trace`), and the gates in `crates/shawline-corpus/tests/studio.rs`. All three gates are red until the wave lands.
 
 **Construction.** One wave, two agents, disjoint:
 - **W** owns `shawline-edit` (behind the contract), the `shawline-wasm` exports and the playground UI: dragging wires, the palette, `Delete`, and badges. W builds the badges last. If T hasn't merged by then, the lead resumes W after the gate merges T, for a short second round.
@@ -338,7 +341,7 @@ The interaction model for a visual editor is designed in the [Shawline Studio do
   - every wire in `·𐑥𐑱𐑯` has a value;
   - the values reaching `·𐑥𐑱𐑯`'s outputs print exactly the `.out` lines;
   - runtime-error programs report the `.out` error;
-  - `10-countdown` completes, or stops at the step budget, within 2 s.
+  - every corpus program traces to completion within 5 s in a debug build (budget `TRACE_STEPS` = 5 000 000).
 - **By hand**, first the lead and then the user, in the playground:
   - wire `03-double` from scratch by dragging;
   - add a node by dropping a wire on empty canvas;

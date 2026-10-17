@@ -574,6 +574,7 @@ dependencies = [
  "shawline-edit",
  "shawline-grid",
  "shawline-shape",
+ "shawline-syntax",
 ]
 
 [[package]]

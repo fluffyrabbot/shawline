@@ -62,6 +62,20 @@ pub fn run(program: &Program) -> Result<Vec<Value>, Diagnostic> {
     shawline_vm::run(&shawline_ir::compile(program))
 }
 
+/// The step budget for [`trace`]: generous for any sheet a person draws, and
+/// small enough that a constant-memory infinite loop stops in about a second.
+pub const TRACE_STEPS: u64 = 5_000_000;
+
+/// The value on every wire, for Studio's live badges (PLAN P7). A sheet
+/// with errors has no trace: its diagnostics come back as `Err`.
+pub fn trace(src: &str) -> Result<shawline_ir::SheetTrace, Vec<Diagnostic>> {
+    let checked = check(src)?;
+    match &checked.program {
+        Some(program) => Ok(shawline_ir::trace(&checked.sheet, program, TRACE_STEPS)),
+        None => Err(checked.diagnostics.into_iter().filter(|d| !d.is_warning()).collect()),
+    }
+}
+
 /// The program's bytecode in `.shawasm` form.
 pub fn asm(program: &Program) -> String {
     shawline_vm::disassemble(&shawline_ir::compile(program))

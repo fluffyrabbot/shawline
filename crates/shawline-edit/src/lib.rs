@@ -85,6 +85,90 @@ pub fn route(src: &str, from: Pos, to: Pos) -> Option<Vec<Pos>> {
     router::search(&sheet, start, BUDGET).map(|found| found.path)
 }
 
+// ---------------------------------------------------------------------------
+// P7 contract: Studio Phase 1. Lead-owned and frozen; agent W implements.
+//
+// Endpoints are named by cell. A *source* is a node's output tee, a
+// definition input's arrowhead, a constant's first cell, or an arm's left
+// through-port. A *sink* is an arrowhead: a node input, a definition output,
+// a switch selector or through-port, an arm's right through-port. Wires that
+// a switch's merged outputs feed, and wires touching an inline node, aren't
+// editable in Phase 1: edits to them are refused with that reason.
+// ---------------------------------------------------------------------------
+
+/// A callee the context palette offers.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Candidate {
+    /// The word to write in the node box.
+    pub word: String,
+    pub inputs: u16,
+    pub outputs: u16,
+    /// What it does in plain English: the SPEC §9 meaning for a primitive
+    /// ("add"), the port names for a definition ("𐑯 → 𐑬").
+    pub gloss: String,
+    /// A primitive's mirrored partner, as its word.
+    pub mirror: Option<String>,
+}
+
+/// Connects source `from` to sink `to`.
+///
+/// When the source has no wire yet, a new one is routed. When it has one, the
+/// new branch joins that wire with a tee. The sheet's edge set becomes the
+/// old one plus this pair, and nothing else changes. The result is canonical.
+/// Refused when `to` already has a wire, the cells aren't a source and a sink,
+/// or no route fits within the router's budget.
+pub fn connect(src: &str, from: Pos, to: Pos) -> Result<String, Refusal> {
+    let _ = (src, from, to);
+    todo!("P7: agent W")
+}
+
+/// Removes the whole wire that passes through cell `at`, with every branch.
+/// Refused when no editable wire passes through `at`.
+pub fn remove_wire(src: &str, at: Pos) -> Result<String, Refusal> {
+    let _ = (src, at);
+    todo!("P7: agent W")
+}
+
+/// Removes only the branch of a wire that reaches sink `to`, back to the tee
+/// it leaves from. A tee left with two arms becomes a plain stroke. When the
+/// wire has no other sink, the whole wire goes, as with [`remove_wire`].
+pub fn disconnect(src: &str, to: Pos) -> Result<String, Refusal> {
+    let _ = (src, to);
+    todo!("P7: agent W")
+}
+
+/// Places a canonical node box for `word` with its top-left corner at
+/// `corner`: `inputs` arrowheads on its left border, `outputs` tees on its
+/// right, and no wires. Refused when the box would overlap anything, or not
+/// lie wholly inside one definition (or one arm of a switch).
+pub fn place_node(
+    src: &str,
+    corner: Pos,
+    word: &str,
+    inputs: u16,
+    outputs: u16,
+) -> Result<String, Refusal> {
+    let _ = (src, corner, word, inputs, outputs);
+    todo!("P7: agent W")
+}
+
+/// Removes the node box whose top-left corner is `corner`. Every wire it
+/// sources goes too, and only the branches that reach its inputs
+/// ([`disconnect`]).
+pub fn remove_node(src: &str, corner: Pos) -> Result<String, Refusal> {
+    let _ = (src, corner);
+    todo!("P7: agent W")
+}
+
+/// What the context palette offers, in a fixed order: primitives first in
+/// SPEC §9 table order (with `𐑯𐑦𐑤`), then the sheet's definitions in sheet
+/// order. With `from`, a wire is being dragged from that source, so only
+/// candidates with at least one input are offered.
+pub fn palette(src: &str, from: Option<Pos>) -> Vec<Candidate> {
+    let _ = (src, from);
+    todo!("P7: agent W")
+}
+
 /// A sheet as [`route`] sees it: blank cells are free except where a new
 /// stroke would touch an existing wire end, port or text gap, straight
 /// wire lines may be crossed, and box borders (title gaps included) wall

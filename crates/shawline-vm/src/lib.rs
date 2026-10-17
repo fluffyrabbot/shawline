@@ -5,11 +5,13 @@
 
 mod asm;
 pub mod bytecode;
+pub mod trace;
 mod value;
 mod verify;
 mod vm;
 
 pub use asm::{assemble, disassemble};
+pub use trace::{Traced, TracedOutput, run_traced, show};
 pub use value::equal;
 pub use vm::{MAX_CELLS, MAX_FRAMES, MAX_OUTPUT, MAX_REGISTERS, run};
 

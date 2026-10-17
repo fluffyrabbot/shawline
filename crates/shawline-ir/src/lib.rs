@@ -6,9 +6,11 @@
 mod compile;
 pub mod ir;
 mod lower;
+pub mod trace;
 
 #[cfg(test)]
 mod tests;
 
 pub use compile::compile;
 pub use lower::lower;
+pub use trace::{SheetTrace, trace};
