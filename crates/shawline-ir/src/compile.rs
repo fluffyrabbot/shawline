@@ -15,11 +15,16 @@ use crate::ir::{Block, Function, Op, Program, Value};
 /// results are exactly its definition's results, in order, becomes a
 /// `TailCall`, including through the arms of a switch whose results are, in
 /// turn, exactly the enclosing results (SPEC §10).
+///
+/// Main is the exception: its tail call still runs last but as a plain call,
+/// so main's frame survives to its own `Return`. Every `Return` sits at its
+/// definition's namer dot, which is where `R009` points (SPEC §14).
 pub fn compile(program: &Program) -> bc::Module {
     let functions = program
         .functions
         .iter()
-        .map(|f| function(program, f))
+        .enumerate()
+        .map(|(i, f)| function(program, f, i as u32 != program.main))
         .collect();
     bc::Module {
         functions,
@@ -27,9 +32,11 @@ pub fn compile(program: &Program) -> bc::Module {
     }
 }
 
-fn function(program: &Program, f: &Function) -> bc::Function {
+fn function(program: &Program, f: &Function, tail_calls: bool) -> bc::Function {
     let mut e = Emitter {
         program,
+        tail_calls,
+        ret_at: f.at,
         consts: Vec::new(),
         const_ids: HashMap::new(),
         code: Vec::new(),
@@ -68,6 +75,10 @@ enum Ctx<'a> {
 
 struct Emitter<'p> {
     program: &'p Program,
+    /// Whether calls in tail position become `TailCall`s.
+    tail_calls: bool,
+    /// Where every `Return` points: the definition's namer dot.
+    ret_at: Pos,
     consts: Vec<bc::Value>,
     const_ids: HashMap<Literal, ConstId>,
     code: Vec<Instr>,
@@ -231,7 +242,7 @@ impl Emitter<'_> {
                         .first()
                         .copied()
                         .filter(|&r0| srcs.iter().enumerate().all(|(j, &r)| r == r0 + reg(j)));
-                    if tail == Some(i) {
+                    if tail == Some(i) && self.tail_calls {
                         // The frame is replaced, so arguments already in a
                         // run can stay put.
                         let base = in_run.unwrap_or_else(|| self.moved_run(&srcs, k, inst.at));
@@ -327,7 +338,7 @@ impl Emitter<'_> {
                         base
                     }
                 };
-                self.emit(Instr::Return { base, count }, at);
+                self.emit(Instr::Return { base, count }, self.ret_at);
             }
         }
     }

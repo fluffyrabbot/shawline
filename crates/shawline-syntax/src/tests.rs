@@ -190,3 +190,35 @@ fn constants_nil_and_oversized() {
     let kinds: Vec<_> = sheet.definitions[0].body.nodes.iter().map(|n| n.kind.clone()).collect();
     assert_eq!(kinds, [NodeKind::Const(Literal::Nil), NodeKind::Const(Literal::Int(i64::MAX))]);
 }
+
+#[test]
+fn unfed_arrowheads_are_y019() {
+    let output = "╭─ ·𐑛𐑳 ───╮\n│ 5 ──────▶ 𐑬\n│         ▶ 𐑚\n╰─────────╯\n";
+    assert_eq!(codes(output), ["2:10 Y019"]);
+    let input = "\
+╭─ ·𐑛𐑳 ─────────╮
+│     ┌───┐     │
+│ 5 ──▶ 𐑐 ├─────▶ 𐑬
+│     ▶   │     │
+│     └───┘     │
+╰───────────────╯
+";
+    assert_eq!(codes(input), ["3:6 Y019"]);
+    // An unfed selector, and an arm whose through-ports are unfed: the left
+    // one from outside, the right one from inside.
+    let switch = "\
+╭─ ·𐑛𐑳 ────────────────╮
+│ ┌─ 1 ───▼────────┐   │
+│ ▶────────────────▶───▶ 𐑬
+│ ├┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┤   │
+│ │                ▶   │
+│ └────────────────┘   │
+╰──────────────────────╯
+";
+    assert_eq!(codes(switch), ["1:10 Y019", "2:2 Y019", "4:19 Y019"]);
+}
+
+#[test]
+fn nil_is_a_reserved_name() {
+    assert_eq!(codes("╭─ ·𐑯𐑦𐑤 ─╮\n│        │\n╰────────╯\n"), ["0:3 Y013"]);
+}

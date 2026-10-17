@@ -1,7 +1,7 @@
 //! The parser proper: box roles, scopes, the text-across-spaces patterns of
 //! SPEC §6, then one edge per wire by the role table of SPEC §7.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use shawline_grid::{Code, Diagnostic, Dir, Grid, Pos, Rect};
 use shawline_shape::{BoxStyle, Diagram, EndKind, Port, PortKind, Text, TextKind, Wire};
@@ -146,6 +146,7 @@ pub fn parse(grid: &Grid, diagram: &Diagram) -> (Sheet, Vec<Diagnostic>) {
     p.collect_nodes();
     p.assign_ids();
     p.trace_edges();
+    p.report_unfed();
     let definitions = heads
         .into_iter()
         .map(|h| Definition {
@@ -461,8 +462,8 @@ impl Parser<'_> {
         let text = &d.texts[t];
         match text.content.strip_prefix('·') {
             Some(rest) if text.kind == TextKind::Word && !rest.is_empty() => {
-                if rest.chars().count() == 1 {
-                    self.error(text.pos, "Y013", "single-letter names are reserved for primitives");
+                if rest.chars().count() == 1 || rest == NIL {
+                    self.error(text.pos, "Y013", "reserved for primitives");
                 }
                 Name { text: rest.to_owned(), at: text.pos }
             }
@@ -614,6 +615,40 @@ impl Parser<'_> {
                 Source::SwitchOut { node, ordinal, .. } => Endpoint::Output(node, ordinal),
             };
             self.edges.entry(scope).or_default().push(Edge { wire: wi, from, to: sinks });
+        }
+    }
+
+    /// `Y019` for every arrowhead that must be fed but that no wire reaches
+    /// from the feeding side. Every such port points E (fed from the west) or,
+    /// for a selector, S (fed from the north), so the end meeting it faces the
+    /// way the arrowhead points.
+    fn report_unfed(&mut self) {
+        let d = self.d;
+        let fed: HashSet<(Pos, Dir)> = d
+            .wires
+            .iter()
+            .flat_map(|w| &w.ends)
+            .filter_map(|e| match e.kind {
+                EndKind::Port(q) => Some((q, e.facing)),
+                _ => None,
+            })
+            .collect();
+        for b in &d.boxes {
+            for p in &b.ports {
+                let sink = matches!(
+                    self.ports.get(&p.pos),
+                    Some(
+                        PortRole::DefOut(..)
+                            | PortRole::NodeIn(..)
+                            | PortRole::Selector(_)
+                            | PortRole::ThroughIn(..)
+                            | PortRole::ThroughOut(..)
+                    )
+                );
+                if sink && p.kind == PortKind::Arrow && !fed.contains(&(p.pos, p.dir)) {
+                    self.error(p.pos, "Y019", "port arrowhead with no wire reaching it");
+                }
+            }
         }
     }
 

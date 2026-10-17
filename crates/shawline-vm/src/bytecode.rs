@@ -189,43 +189,44 @@ pub enum Value {
 
 /// The output format of SPEC §9: integers in decimal, text bare at top level
 /// and `«quoted»` inside a pair or list, pairs as `(a b)`, lists as `[a b c]`.
+///
+/// Values nest as deep as memory allows, so this walks an explicit worklist
+/// rather than recursing on the host stack.
 impl fmt::Display for Value {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Value::Text(t) => f.write_str(t),
-            _ => write_nested(f, self),
+        enum Task<'a> {
+            Value(&'a Value),
+            Str(&'static str),
+            /// The rest of a list after an item: more items, or the `]`.
+            Rest(&'a Value),
         }
-    }
-}
-
-fn write_nested(f: &mut fmt::Formatter<'_>, v: &Value) -> fmt::Result {
-    match v {
-        Value::Int(n) => write!(f, "{n}"),
-        Value::Text(t) => write!(f, "«{t}»"),
-        Value::Pair(p) => {
-            f.write_str("(")?;
-            write_nested(f, &p.0)?;
-            f.write_str(" ")?;
-            write_nested(f, &p.1)?;
-            f.write_str(")")
+        if let Value::Text(t) = self {
+            return f.write_str(t);
         }
-        Value::List(head) => {
-            f.write_str("[")?;
-            let mut cell = head.clone();
-            let mut first = true;
-            while let Some(c) = cell {
-                if !first {
-                    f.write_str(" ")?;
+        let mut tasks = vec![Task::Value(self)];
+        while let Some(task) = tasks.pop() {
+            match task {
+                Task::Str(s) => f.write_str(s)?,
+                Task::Value(Value::Int(n)) => write!(f, "{n}")?,
+                Task::Value(Value::Text(t)) => write!(f, "«{t}»")?,
+                Task::Value(Value::Pair(p)) => {
+                    f.write_str("(")?;
+                    tasks.extend([Task::Str(")"), Task::Value(&p.1), Task::Str(" ")]);
+                    tasks.push(Task::Value(&p.0));
                 }
-                first = false;
-                write_nested(f, &c.0)?;
-                cell = match &c.1 {
-                    Value::List(next) => next.clone(),
-                    _ => None,
-                };
+                Task::Value(Value::List(None)) => f.write_str("[]")?,
+                Task::Value(Value::List(Some(c))) => {
+                    f.write_str("[")?;
+                    tasks.extend([Task::Rest(&c.1), Task::Value(&c.0)]);
+                }
+                Task::Rest(Value::List(Some(c))) => {
+                    f.write_str(" ")?;
+                    tasks.extend([Task::Rest(&c.1), Task::Value(&c.0)]);
+                }
+                Task::Rest(_) => f.write_str("]")?,
             }
-            f.write_str("]")
         }
+        Ok(())
     }
 }
 

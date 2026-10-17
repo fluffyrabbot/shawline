@@ -27,6 +27,9 @@ pub fn assemble(src: &str) -> Result<Module, Diagnostic> {
     asm.finish(src.lines().count())
 }
 
+/// How deep constants may nest. Deeper ones are rejected as malformed (`A001`).
+const MAX_NESTING: usize = 10_000;
+
 fn error(at: Pos, message: impl Into<String>) -> Diagnostic {
     Diagnostic::new(at, MALFORMED, message)
 }
@@ -324,32 +327,59 @@ impl<'a> Line<'a> {
         pos.ok_or_else(|| error(tok.at, format!("expected ROW:COL, found {}", tok.text)))
     }
 
-    /// A constant: an integer, `«text»`, `nil`, `(a b)` or `[a b c]`.
+    /// A constant: an integer, `«text»`, `nil`, `(a b)` or `[a b c]`, nested
+    /// at most [`MAX_NESTING`] deep. Open brackets wait on a stack, not the
+    /// host's, however deep the input goes.
     fn value(&mut self) -> Result<Value, Diagnostic> {
-        let tok = self.next("a constant value")?;
-        Ok(match tok.text {
-            "nil" => Value::List(None),
-            "(" => {
-                let pair = (self.value()?, self.value()?);
-                self.keyword(")")?;
-                Value::Pair(Rc::new(pair))
-            }
-            "[" => {
-                let mut items = Vec::new();
-                while self.peek().is_some_and(|t| t.text != "]") {
-                    items.push(self.value()?);
+        // Each open bracket and the items it has so far.
+        let mut open: Vec<(bool, Vec<Value>)> = Vec::new();
+        loop {
+            let in_list = open.last().is_some_and(|(list, _)| *list);
+            let tok = self.next("a constant value")?;
+            let mut done = match tok.text {
+                "(" | "[" => {
+                    if open.len() == MAX_NESTING {
+                        let msg = format!("constant nested deeper than {MAX_NESTING}");
+                        return Err(error(tok.at, msg));
+                    }
+                    open.push((tok.text == "[", Vec::new()));
+                    continue;
                 }
-                self.keyword("]")?;
-                items
-                    .into_iter()
-                    .rev()
-                    .fold(Value::List(None), |tail, head| Value::List(Some(Rc::new((head, tail)))))
+                "]" if in_list => {
+                    let (_, items) = open.pop().expect("an open list");
+                    let cons = |tail, head| Value::List(Some(Rc::new((head, tail))));
+                    items.into_iter().rev().fold(Value::List(None), cons)
+                }
+                "nil" => Value::List(None),
+                t if t.starts_with('«') => {
+                    Value::Text(t['«'.len_utf8()..t.len() - '»'.len_utf8()].into())
+                }
+                t => Value::Int(
+                    int(t).ok_or_else(|| error(tok.at, format!("{t} isn't a constant")))?,
+                ),
+            };
+            // Hand the finished value to its bracket, closing every pair it
+            // completes.
+            loop {
+                match open.last_mut() {
+                    None => return Ok(done),
+                    Some((true, items)) => {
+                        items.push(done);
+                        break;
+                    }
+                    Some((false, items)) if items.is_empty() => {
+                        items.push(done);
+                        break;
+                    }
+                    Some((false, items)) => {
+                        let first = items.pop().expect("a pair's first item");
+                        open.pop();
+                        self.keyword(")")?;
+                        done = Value::Pair(Rc::new((first, done)));
+                    }
+                }
             }
-            t if t.starts_with('«') => {
-                Value::Text(t['«'.len_utf8()..t.len() - '»'.len_utf8()].into())
-            }
-            t => Value::Int(int(t).ok_or_else(|| error(tok.at, format!("{t} isn't a constant")))?),
-        })
+        }
     }
 }
 
@@ -424,35 +454,40 @@ pub fn disassemble(m: &Module) -> String {
     out
 }
 
-/// Writes a constant in the form [`Line::value`] reads. Lists are walked
-/// iteratively; only nesting through heads and pairs recurses.
+/// Writes a constant in the form [`Line::value`] reads, from a worklist
+/// rather than by recursion.
 fn write_const(out: &mut String, v: &Value) {
-    match v {
-        Value::Int(n) => {
-            let _ = write!(out, "{n}");
-        }
-        Value::Text(t) => {
-            let _ = write!(out, "«{t}»");
-        }
-        Value::Pair(cell) => {
-            out.push('(');
-            write_const(out, &cell.0);
-            out.push(' ');
-            write_const(out, &cell.1);
-            out.push(')');
-        }
-        Value::List(None) => out.push_str("nil"),
-        Value::List(Some(_)) => {
-            out.push('[');
-            let mut cell = v;
-            while let Value::List(Some(c)) = cell {
-                if !std::ptr::eq(cell, v) {
-                    out.push(' ');
-                }
-                write_const(out, &c.0);
-                cell = &c.1;
+    enum Task<'a> {
+        Value(&'a Value),
+        Str(&'static str),
+        /// The rest of a list after an item: more items, or the `]`.
+        Rest(&'a Value),
+    }
+    let mut tasks = vec![Task::Value(v)];
+    while let Some(task) = tasks.pop() {
+        match task {
+            Task::Str(s) => out.push_str(s),
+            Task::Value(Value::Int(n)) => {
+                let _ = write!(out, "{n}");
             }
-            out.push(']');
+            Task::Value(Value::Text(t)) => {
+                let _ = write!(out, "«{t}»");
+            }
+            Task::Value(Value::Pair(cell)) => {
+                out.push('(');
+                tasks.extend([Task::Str(")"), Task::Value(&cell.1), Task::Str(" ")]);
+                tasks.push(Task::Value(&cell.0));
+            }
+            Task::Value(Value::List(None)) => out.push_str("nil"),
+            Task::Value(Value::List(Some(c))) => {
+                out.push('[');
+                tasks.extend([Task::Rest(&c.1), Task::Value(&c.0)]);
+            }
+            Task::Rest(Value::List(Some(c))) => {
+                out.push(' ');
+                tasks.extend([Task::Rest(&c.1), Task::Value(&c.0)]);
+            }
+            Task::Rest(_) => out.push(']'),
         }
     }
 }

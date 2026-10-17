@@ -91,6 +91,10 @@ fn check_instr(m: &Module, f: &Function, instr: &Instr) -> Result<(), String> {
         }
         Instr::Prim { prim, dst, src } => {
             let (ins, outs) = prim.arity();
+            // The contract fixes unused slots at 0, so modules round-trip.
+            if src[ins as usize..].iter().chain(&dst[outs as usize..]).any(|&r| r != 0) {
+                return Err(format!("{} leaves a register slot unused but not 0", prim.letter()));
+            }
             src[..ins as usize].iter().try_for_each(|&r| regs(r, 1))?;
             dst[..outs as usize].iter().try_for_each(|&r| regs(r, 1))
         }

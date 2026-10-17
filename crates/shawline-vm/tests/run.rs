@@ -2,7 +2,7 @@
 
 use shawline_grid::{Diagnostic, Pos};
 use shawline_vm::bytecode::Value;
-use shawline_vm::{assemble, equal, run};
+use shawline_vm::{assemble, run};
 
 fn exec(src: &str) -> Result<Vec<Value>, Diagnostic> {
     run(&assemble(src).unwrap_or_else(|d| panic!("{d}\n{src}")))
@@ -263,7 +263,7 @@ fn 𐑚𐑦𐑤𐑛 params 2 results 1 registers 3   ; build(n, acc) = build(n-1
   prim 𐑚 r0 r0,r2
   tail 𐑚𐑦𐑤𐑛 r0 2
 end
-fn 𐑥𐑱𐑯 params 0 results 3 registers 6
+fn 𐑥𐑱𐑯 params 0 results 2 registers 6
   const k0 1000000
   const k1 nil
   const k2 0
@@ -273,28 +273,24 @@ fn 𐑥𐑱𐑯 params 0 results 3 registers 6
   call 𐑚𐑦𐑤𐑛 r0 2 r3
   TAIL
   prim 𐑦 r4 r2,r3
-  ret r2 3
+  prim 𐑕 r2,r3 r2
+  move r3 r4
+  ret r2 2
 end
 main 𐑥𐑱𐑯
 ";
 
 #[test]
 fn long_lists() {
-    // Two separately built, equal million-element lists.
-    let values = exec(&BUILD.replace("TAIL", "")).unwrap();
-    let [a, b, same] = &values[..] else { panic!("three results") };
-    assert_eq!(*same, Value::Int(1));
-    assert!(equal(a, b));
-    let shown = a.to_string();
-    assert!(shown.starts_with("[1 2 3 4 "));
-    assert!(shown.ends_with(" 999999 1000000]"));
-    drop(values);
+    // Two separately built, equal million-element lists, compared and then
+    // dropped in the VM. A million-element result would be too long to print
+    // (R009), so main returns the first list's head and the comparison.
+    assert_eq!(output(&BUILD.replace("TAIL", "")), "1\n1\n");
 
     // The second list ends in an extra 0, found only at the far end.
     let extra = "const r5 k2\n  const r1 k1\n  prim 𐑟 r1 r5,r1\n  call 𐑚𐑦𐑤𐑛 r0 2 r3";
     let values = exec(&BUILD.replace("call 𐑚𐑦𐑤𐑛 r0 2 r3\n  TAIL", extra)).unwrap();
-    assert_eq!(values[2], Value::Int(0));
-    assert!(!equal(&values[0], &values[1]));
+    assert_eq!(values[1], Value::Int(0));
 }
 
 #[test]

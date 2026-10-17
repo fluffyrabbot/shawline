@@ -4,7 +4,7 @@ use std::cmp::Reverse;
 use std::collections::{BinaryHeap, HashMap};
 
 use shawline_grid::{Diagnostic, Pos};
-use shawline_syntax::ast::{self, Endpoint, Graph, Node, NodeKind, Sheet};
+use shawline_syntax::ast::{self, Endpoint, Graph, Literal, Node, NodeKind, Sheet};
 use shawline_vm::bytecode::Prim;
 
 use crate::ir::{self, Block, FuncId, Function, Inst, Op, Program, Value};
@@ -15,10 +15,10 @@ const MAIN: &str = "𐑥𐑱𐑯";
 /// Checks a sheet and lowers it to IR.
 ///
 /// Reports `C001`–`C006`, `W001` and `W002` at the positions of SPEC §14.
-/// The program is `None` when any diagnostic is an error. The sheet is assumed
-/// to have passed syntax; a structural inconsistency that syntax reports
-/// (an unfed slot, an edge to a missing node) also yields `None`, without a
-/// further diagnostic.
+/// The program is `None` exactly when some diagnostic is an error. The sheet
+/// is assumed to have passed syntax; should a structural fault that syntax
+/// reports slip through anyway, lowering reports it again rather than
+/// failing silently (`Y019` for an unfed slot, for instance).
 pub fn lower(sheet: &Sheet) -> (Option<Program>, Vec<Diagnostic>) {
     let mut diags = Vec::new();
     let mut defs = HashMap::new();
@@ -70,27 +70,38 @@ pub fn lower(sheet: &Sheet) -> (Option<Program>, Vec<Diagnostic>) {
     if cx.diags.iter().any(|d| !d.is_warning()) {
         return (None, cx.diags);
     }
-    let functions = sheet
-        .definitions
-        .iter()
-        .map(|d| {
-            Some(Function {
+    let mut functions = Vec::with_capacity(sheet.definitions.len());
+    for d in &sheet.definitions {
+        let results: Vec<Pos> = d.outputs.iter().map(|p| p.arrow).collect();
+        match cx.lower_graph(&d.body, d.inputs.len(), &results, d.name.at) {
+            Ok(body) => functions.push(Function {
                 name: d.name.text.clone(),
-                body: cx.lower_graph(&d.body, d.inputs.len(), d.outputs.len())?,
+                body,
                 at: d.name.at,
-            })
-        })
-        .collect::<Option<Vec<_>>>();
-    (
-        functions.map(|functions| Program { functions, main }),
-        cx.diags,
-    )
+            }),
+            Err(diag) => cx.diags.push(diag),
+        }
+    }
+    if functions.len() < sheet.definitions.len() {
+        return (None, cx.diags);
+    }
+    (Some(Program { functions, main }), cx.diags)
 }
 
 #[derive(Clone, Copy)]
 enum Callee {
     Prim(Prim),
+    /// `𐑯𐑦𐑤` in a box: the empty list, 0→1 (SPEC §9).
+    Nil,
     Func(FuncId),
+}
+
+/// `𐑯𐑦𐑤`, reserved like the single letters (SPEC §4).
+const NIL: &str = "𐑯𐑦𐑤";
+
+/// A slot no wire feeds, which syntax should already have reported.
+fn unfed(at: Pos) -> Diagnostic {
+    Diagnostic::new(at, "Y019", "port arrowhead with no wire reaching it")
 }
 
 struct Checker<'a> {
@@ -101,9 +112,12 @@ struct Checker<'a> {
 }
 
 impl Checker<'_> {
-    /// Single letters name primitives only (SPEC §4), so they never reach the
-    /// definition table.
+    /// Single letters and `𐑯𐑦𐑤` name primitives only (SPEC §4), so they
+    /// never reach the definition table.
     fn resolve(&self, name: &ast::Name) -> Option<Callee> {
+        if name.text == NIL {
+            return Some(Callee::Nil);
+        }
         let mut chars = name.text.chars();
         match (chars.next(), chars.next()) {
             (Some(ch), None) => Prim::from_letter(ch).map(Callee::Prim),
@@ -117,6 +131,7 @@ impl Checker<'_> {
                 let (i, o) = p.arity();
                 (i.into(), o.into())
             }
+            Callee::Nil => (0, 1),
             Callee::Func(f) => {
                 let d = &self.sheet.definitions[f as usize];
                 (d.inputs.len(), d.outputs.len())
@@ -170,7 +185,7 @@ impl Checker<'_> {
     }
 
     /// One `C003` per strongly connected component that contains a cycle, at
-    /// the word of its first node. Nodes are already in row-major order.
+    /// the first of its nodes' words in row-major order (SPEC §14).
     fn cycles(&mut self, g: &Graph) {
         let n = g.nodes.len();
         let mut succ = vec![Vec::new(); n];
@@ -192,82 +207,99 @@ impl Checker<'_> {
             if seen[a] || !reach[a][a] {
                 continue;
             }
+            let mut first = word(&g.nodes[a]);
             for b in a..n {
                 if reach[a][b] && reach[b][a] {
                     seen[b] = true;
+                    first = first.min(word(&g.nodes[b]));
                 }
             }
-            self.diags.push(Diagnostic::new(
-                word(&g.nodes[a]),
-                "C003",
-                "cycle in the wires",
-            ));
+            self.diags.push(Diagnostic::new(first, "C003", "cycle in the wires"));
         }
     }
 
-    /// Lowers one scope with `params` inputs and `results` outputs to a block
-    /// in topological order, breaking ties by row-major node order.
-    fn lower_graph(&self, g: &Graph, params: usize, results: usize) -> Option<Block> {
+    /// Lowers one scope with `params` inputs and outputs at `result_at` to a
+    /// block in dependency order, breaking ties by the row-major order of the
+    /// nodes' words (SPEC §10). `fallback`, the definition's namer dot,
+    /// locates faults with no better position.
+    fn lower_graph(
+        &self,
+        g: &Graph,
+        params: usize,
+        result_at: &[Pos],
+        fallback: Pos,
+    ) -> Result<Block, Diagnostic> {
+        let malformed = || Diagnostic::new(fallback, "Y005", "a wire syntax left inconsistent");
         let n = g.nodes.len();
         let mut inputs: Vec<Vec<Option<Endpoint>>> = g
             .nodes
             .iter()
             .map(|nd| vec![None; nd.inputs.len()])
             .collect();
-        let mut outs = vec![None; results];
+        let mut outs = vec![None; result_at.len()];
         let mut succ = vec![Vec::new(); n];
         let mut indegree = vec![0usize; n];
         for e in &g.edges {
             for &sink in &e.to {
                 let slot = match sink {
-                    Endpoint::Input(b, k) => inputs.get_mut(b)?.get_mut(k as usize)?,
-                    Endpoint::Result(j) => outs.get_mut(j as usize)?,
-                    Endpoint::Param(_) | Endpoint::Output(..) => return None,
+                    Endpoint::Input(b, k) => inputs.get_mut(b).and_then(|s| s.get_mut(k as usize)),
+                    Endpoint::Result(j) => outs.get_mut(j as usize),
+                    Endpoint::Param(_) | Endpoint::Output(..) => None,
                 };
-                *slot = Some(e.from);
+                *slot.ok_or_else(malformed)? = Some(e.from);
                 if let (Endpoint::Output(a, _), Endpoint::Input(b, _)) = (e.from, sink) {
-                    succ.get_mut(a)?.push(b);
+                    succ.get_mut(a).ok_or_else(malformed)?.push(b);
                     indegree[b] += 1;
                 }
             }
         }
 
-        let mut ready: BinaryHeap<Reverse<usize>> =
-            (0..n).filter(|&a| indegree[a] == 0).map(Reverse).collect();
+        let key = |a: usize| Reverse((word(&g.nodes[a]), a));
+        let mut ready: BinaryHeap<_> = (0..n).filter(|&a| indegree[a] == 0).map(key).collect();
         let mut order = Vec::with_capacity(n);
-        while let Some(Reverse(a)) = ready.pop() {
+        while let Some(Reverse((_, a))) = ready.pop() {
             order.push(a);
             for &b in &succ[a] {
                 indegree[b] -= 1;
                 if indegree[b] == 0 {
-                    ready.push(Reverse(b));
+                    ready.push(key(b));
                 }
             }
         }
         if order.len() != n {
-            return None;
+            let stuck = (0..n).filter(|&a| indegree[a] > 0).map(|a| word(&g.nodes[a])).min();
+            let at = stuck.unwrap_or(fallback);
+            return Err(Diagnostic::new(at, "C003", "cycle in the wires"));
         }
         let mut pos = vec![0u32; n];
         for (i, &a) in order.iter().enumerate() {
             pos[a] = i as u32;
         }
 
-        let value = |ep: Option<Endpoint>| match ep? {
-            Endpoint::Param(i) if (i as usize) < params => Some(Value::Param(i)),
-            Endpoint::Output(a, k) if (k as usize) < g.nodes.get(a)?.outputs.len() => {
-                Some(Value::Out {
+        // `at` is the arrowhead of the slot being read.
+        let value = |ep: Option<Endpoint>, at: Pos| match ep {
+            None => Err(unfed(at)),
+            Some(Endpoint::Param(i)) if (i as usize) < params => Ok(Value::Param(i)),
+            Some(Endpoint::Output(a, k))
+                if g.nodes.get(a).is_some_and(|nd| (k as usize) < nd.outputs.len()) =>
+            {
+                Ok(Value::Out {
                     inst: pos[a],
                     output: k,
                 })
             }
-            _ => None,
+            Some(_) => Err(malformed()),
         };
         let insts = order
             .iter()
-            .map(|&a| self.lower_node(&g.nodes[a], &inputs[a], &value))
-            .collect::<Option<Vec<_>>>()?;
-        let results = outs.into_iter().map(value).collect::<Option<Vec<_>>>()?;
-        Some(Block {
+            .map(|&a| self.lower_node(&g.nodes[a], &inputs[a], &value, fallback))
+            .collect::<Result<Vec<_>, _>>()?;
+        let results = outs
+            .into_iter()
+            .zip(result_at)
+            .map(|(ep, &at)| value(ep, at))
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(Block {
             params: params as u32,
             insts,
             results,
@@ -278,51 +310,59 @@ impl Checker<'_> {
         &self,
         node: &Node,
         slots: &[Option<Endpoint>],
-        value: &dyn Fn(Option<Endpoint>) -> Option<Value>,
-    ) -> Option<Inst> {
-        let args = |slots: &[Option<Endpoint>]| {
-            slots.iter().map(|&s| value(s)).collect::<Option<Vec<_>>>()
+        value: &dyn Fn(Option<Endpoint>, Pos) -> Result<Value, Diagnostic>,
+        fallback: Pos,
+    ) -> Result<Inst, Diagnostic> {
+        // Slot `i` arrives at `node.inputs[i]`, its arrowhead.
+        let args = |first: usize, n: usize| {
+            (first..first + n)
+                .map(|i| value(slots[i], node.inputs[i]))
+                .collect::<Result<Vec<_>, _>>()
         };
         let op = match &node.kind {
             NodeKind::Const(lit) => Op::Const(lit.clone()),
-            NodeKind::Call(name) | NodeKind::Inline(name) => match self.resolve(name)? {
-                Callee::Prim(prim) => Op::Prim {
-                    prim,
-                    args: args(slots)?,
-                },
-                Callee::Func(func) => Op::Call {
-                    func,
-                    args: args(slots)?,
-                },
-            },
+            NodeKind::Call(name) | NodeKind::Inline(name) => {
+                let unknown = || Diagnostic::new(name.at, "C001", "unknown name");
+                match self.resolve(name).ok_or_else(unknown)? {
+                    Callee::Prim(prim) => Op::Prim {
+                        prim,
+                        args: args(0, slots.len())?,
+                    },
+                    Callee::Nil => Op::Const(Literal::Nil),
+                    Callee::Func(func) => Op::Call {
+                        func,
+                        args: args(0, slots.len())?,
+                    },
+                }
+            }
             NodeKind::Switch(sw) => {
-                let (&selector, mut rest) = slots.split_first()?;
                 let outputs = node.outputs.len();
+                if sw.arms.iter().any(|a| a.results.len() != outputs) {
+                    return Err(Diagnostic::new(sw.selector, "Y011", "arms with different results"));
+                }
+                // The selector, then every arm's through-ports.
+                if slots.len() != 1 + sw.arms.iter().map(|a| a.params.len()).sum::<usize>() {
+                    return Err(Diagnostic::new(sw.selector, "Y005", "switch slots out of step"));
+                }
+                let mut first = 1;
                 let mut arms = Vec::with_capacity(sw.arms.len());
                 for arm in &sw.arms {
                     let k = arm.params.len();
-                    if rest.len() < k {
-                        return None;
-                    }
-                    let (mine, tail) = rest.split_at(k);
-                    rest = tail;
                     arms.push(ir::Arm {
                         guard: arm.guard.as_ref().map(|g| g.value.clone()),
-                        args: args(mine)?,
-                        body: self.lower_graph(&arm.body, k, outputs)?,
+                        args: args(first, k)?,
+                        body: self.lower_graph(&arm.body, k, &arm.results, fallback)?,
                     });
-                }
-                if !rest.is_empty() {
-                    return None;
+                    first += k;
                 }
                 Op::Switch {
-                    selector: value(selector)?,
+                    selector: value(slots[0], sw.selector)?,
                     arms,
                     outputs: outputs as u32,
                 }
             }
         };
-        Some(Inst { op, at: word(node) })
+        Ok(Inst { op, at: word(node) })
     }
 }
 
