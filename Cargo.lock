@@ -427,6 +427,13 @@ version = "0.0.1"
 [[package]]
 name = "shawline-render"
 version = "0.0.1"
+dependencies = [
+ "kurbo",
+ "resvg",
+ "shawline-glyph",
+ "shawline-grid",
+ "shawline-shape",
+]
 
 [[package]]
 name = "shawline-shape"
