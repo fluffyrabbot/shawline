@@ -85,11 +85,14 @@ fn main() -> ExitCode {
             if checked.has_errors() {
                 return ExitCode::FAILURE;
             }
+            // `check` guarantees a program whenever there are no errors.
+            let Some(program) = checked.program.as_ref() else {
+                return ExitCode::FAILURE;
+            };
             if command.as_str() == "asm" {
-                print!("{}", shawline_cli::asm(checked.program.as_ref().expect("no errors, so lowered")));
+                print!("{}", shawline_cli::asm(program));
             }
             if command.as_str() == "run" {
-                let program = checked.program.as_ref().expect("no errors, so lowered");
                 match shawline_cli::run(program) {
                     Ok(values) => values.iter().for_each(|v| println!("{v}")),
                     Err(e) => {

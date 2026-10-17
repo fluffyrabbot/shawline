@@ -1,7 +1,7 @@
 //! The pipeline from source text to diagnostics, output, canonical text and
 //! SVG, shared by the `shawline` binary and the corpus.
 
-use shawline_grid::{Diagnostic, Grid};
+use shawline_grid::{Diagnostic, Grid, Pos};
 use shawline_ir::ir::Program;
 use shawline_shape::Diagram;
 use shawline_syntax::ast::Sheet;
@@ -41,6 +41,12 @@ pub fn check(src: &str) -> Result<Checked, Vec<Diagnostic>> {
         let (lowered, checks) = shawline_ir::lower(&sheet);
         diagnostics.extend(checks);
         program = lowered;
+        // A clean sheet always lowers. If it ever doesn't, say so plainly
+        // rather than leave callers holding neither a program nor an error.
+        if program.is_none() && !diagnostics.iter().any(|d| !d.is_warning()) {
+            let message = "internal error: this sheet passed every check but couldn't be compiled; please report it";
+            diagnostics.push(Diagnostic::new(Pos::new(0, 0), "I001", message));
+        }
     }
     diagnostics.extend(shawline_fmt::lint(&grid, &diagram));
     diagnostics.sort_by(|a, b| (a.at, a.code).cmp(&(b.at, b.code)));

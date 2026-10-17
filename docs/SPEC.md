@@ -366,6 +366,7 @@ Every diagnostic has a stable code. The corpus checks codes and positions, never
 | R008 | runtime | Heap exhausted: too many pairs and list cells alive (§10) |
 | R009 | runtime | Result too large to print (§10) |
 | A001 | asm | Malformed `.shawasm` or bytecode |
+| I001 | internal | A sheet with no errors failed to compile. Always a bug in Shawline, never in the program. |
 | L001–L006 | fmt | The lints of §12, in table order |
 
 **Where a diagnostic points.** Positions are fixed so the corpus can check them:
