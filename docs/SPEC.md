@@ -296,7 +296,7 @@ Shawline is typed through **phonemic ASCII transliteration**. Each Shavian lette
 
 - **Longest match wins.** `th` is 𐑔 and `ar` is 𐑸. Type `/` between keys for the shorter reading: `t/h` is 𐑑𐑣. The `/` itself produces nothing.
 - **The namer dot is `=`,** because `.` is a stroke.
-- **Only word runs are transliterated.** Inside a word run, `v` is 𐑝. Anywhere else the language server leaves `v` alone, so it stays the `▼` arrowhead fallback. Other characters (digits, spaces, marks, strokes) always pass through unchanged.
+- **Only word runs are transliterated.** Inside a word run, `v` is 𐑝. Anywhere else `v` is left alone, so it stays the `▼` arrowhead fallback. To start a word with 𐑝, type `/v`. Other characters (digits, spaces, marks, strokes) always pass through unchanged.
 
 `shawline-word` owns the table (`TABLE`), and a test keeps this copy in step with it. The language server may also offer whole-word suggestions from the ReadLex lexicon (MIT-licensed; only its Latin→Shavian columns are bundled), but source text never depends on it.
 

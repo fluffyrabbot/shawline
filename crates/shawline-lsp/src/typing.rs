@@ -36,12 +36,16 @@ pub struct Typing {
     translit: Transliterator,
     /// `(row, col)` where the next key must be typed to continue.
     expect: Option<(usize, usize)>,
+    /// The previous key was `/`, which makes a following `v` a letter even
+    /// at the start of a word (SPEC §13).
+    after_separator: bool,
 }
 
 impl Typing {
     pub fn reset(&mut self) {
         self.translit.reset();
         self.expect = None;
+        self.after_separator = false;
     }
 
     /// Handles `key`, just typed on raw line `row` (`line`), leaving the
@@ -57,14 +61,16 @@ impl Typing {
         };
         if self.expect != Some((row, typed)) {
             self.translit.reset();
+            self.after_separator = false;
         }
-        if key == 'v' && !extends_word(&chars[..typed]) {
+        if key == 'v' && !self.after_separator && !extends_word(&chars[..typed]) {
             // Outside a word run `v` is the `▼` fallback, and it breaks
             // any pending letter.
             self.reset();
             return None;
         }
         let edit = self.translit.push(key);
+        self.after_separator = key == SEPARATOR;
         let Some(start) = typed.checked_sub(edit.delete) else {
             self.reset();
             return None;
@@ -128,6 +134,12 @@ mod tests {
         assert_eq!(type_into("──", "v"), "──v");
         assert_eq!(type_into("", "v"), "v");
         assert_eq!(type_into("𐑐 ", "v"), "𐑐 v");
+    }
+
+    #[test]
+    fn separator_makes_v_a_letter_at_word_start() {
+        assert_eq!(type_into("", "/v"), "𐑝");
+        assert_eq!(type_into("𐑐 ", "/vow"), "𐑐 𐑝𐑬");
     }
 
     #[test]

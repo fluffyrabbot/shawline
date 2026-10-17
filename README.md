@@ -15,7 +15,10 @@ A dataflow programming language you draw. Definitions are rounded boxes, calls a
 
 The definition above doubles a number: it feeds `𐑯` into both inputs of `𐑐` (add). Rough ASCII sketches (`+--+`, `-->`) parse to the same structure, and the formatter redraws them in canonical form.
 
-Status: Gate B done. The whole pipeline works end to end: recognition, syntax, checking, a bytecode VM, a placement-preserving formatter, an SVG renderer, and the Shawline Mono font. Editor support and a web playground are next ([docs/PLAN.md](docs/PLAN.md)).
+Status: Gate C done. The whole pipeline works end to end: recognition, syntax, checking, a bytecode VM, a placement-preserving formatter, an SVG renderer, the Shawline Mono font, a language server, a VS Code extension and a web playground. The P5 aesthetic and correctness pass is next ([docs/PLAN.md](docs/PLAN.md)).
+
+- **Playground:** `playground/build.sh`, then `python3 -m http.server -d playground/dist`.
+- **VS Code:** `cargo install --path crates/shawline-lsp`, then `npm install && npm run package` in `editors/vscode/`, and install the `.vsix`. See [editors/vscode/README.md](editors/vscode/README.md).
 
 ```bash
 cargo run --bin shawline -- run corpus/08-factorial.shaw

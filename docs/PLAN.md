@@ -111,7 +111,7 @@ These prevent the cross-verification churn that swarms tend to accumulate:
 - **Spawning:** a wave launches in a single message: one `Agent` call per brief, `isolation: "worktree"`, background, general-purpose agents. An agent may instead run through the `codex-56-implement` or `grok-45-implement` skill with the same brief. At most 5 agents run at once; more agents would mean more seams than crates.
 - **Done means:** the agent's own crate tests are green, clippy is clean for its crate, its own corpus stage passes where it has one, and the work is committed on its branch. It ends with a report of at most 200 words covering what landed, any friction with the contract, and any deviations from the brief.
 - **Contract change mid-wave:** if a change blocks an agent, the lead edits the contract on `main`, commits, and tells the affected agents (`SendMessage`) to rebase. Otherwise the change waits for the gate.
-- **Dependencies:** an agent may add crates.io dependencies to its own crate only. These are pre-approved: `kurbo` (glyph, font), `write-fonts`/`read-fonts` (font), `resvg`/`tiny-skia` (dev-only previews), `tower-lsp`/`tokio` (lsp), `wasm-bindgen` (playground), `miette` (cli). Anything else is mentioned in the report.
+- **Dependencies:** an agent may add crates.io dependencies to its own crate only. These are pre-approved: `kurbo` (glyph, font), `write-fonts`/`read-fonts` (font), `resvg`/`tiny-skia` (dev-only previews), `tower-lsp`/`tokio` (lsp), `wasm-bindgen` (playground), `miette` (cli). Anything else is mentioned in the report. Accepted at gates: `skrifa` (font, dev-only), `lsp-server`/`lsp-types` (lsp: maintained, and synchronous, so a typed key's edit always arrives before its transliteration request), `js-sys` (wasm, without its default features).
 
 ### Agent brief template
 
@@ -134,7 +134,7 @@ Done = tests + clippy green for your crate, committed on your branch, ≤200-wor
 The critical path runs **P1 → A1 (wires) → B1 (syntax) → Gate B → C**. The glyph → render/font track and the VM run alongside it, off the critical path.
 
 ```
-P0 spine ✅ ─► P1 spec+contracts ✅ ─► Wave A ✅ ─────────► Gate A ✅ ─► Wave B ✅ ───────► Gate B ✅ ─► Wave C ─► Gate C ─► P5
+P0 spine ✅ ─► P1 spec+contracts ✅ ─► Wave A ✅ ─────────► Gate A ✅ ─► Wave B ✅ ───────► Gate B ✅ ─► Wave C ✅ ─► Gate C ✅ ─► P5
              (lead)               A1 shape-wires                B1 syntax                   C2 lsp
                                   A2 word                       B2 fmt                      C3 playground
                                   A3 glyph                      B3 render                   C4 vscode
@@ -205,7 +205,7 @@ Done by one mind, because this is where conceptual integrity is set.
   - SPEC §10 tail calls require "in the same order".
   - SPEC §14 rewords `Y005`/`Y016`, adds positions for `C004`/`Y008`/`Y014`/`Y015`/`Y018`, and runs the checker only on structurally clean sheets.
 
-### Wave C: Surfaces (3 agents in parallel, plus the lead)
+### Wave C: Surfaces (3 agents in parallel, plus the lead) ✅
 
 | Agent | Delivers |
 |---|---|
@@ -214,7 +214,18 @@ Done by one mind, because this is where conceptual integrity is set.
 | **C3** playground | A `wasm-bindgen` build of the pipeline; a static page with a grid editor in Shawline Mono (as a webfont), live SVG and run output. |
 | **C4** vscode | A VS Code extension: LSP client, bundled font and setup instructions, a transliteration toggle. |
 
-**Gate C (lead):** merge; smoke-test the playground in the browser pane and the extension in an editor; commit.
+**Gate C (lead) ✅:** merge; smoke-test the playground in the browser pane and the extension in an editor; commit.
+
+- [x] Three branches merged; `Cargo.lock` conflicted once and was regenerated.
+- [x] Lead's share: `shawline asm` (compiled bytecode as `.shawasm`) and `shawline fmt --write`. `miette` was dropped: the caret diagnostics already land on the right cell because every character is one cell wide.
+- [x] Gate fix: `/v` starts a word with 𐑝 in the language server, matching the playground (SPEC §13). Without it a word beginning with 𐑝 couldn't be typed.
+- [x] One check run:
+  - 161 Rust tests and clippy (host and `wasm32`) clean.
+  - `playground/build.sh` and its 7 Node checks pass.
+  - The `.vsix` compiles and packages (377 KB).
+- [x] Playground seen in the browser pane: source and drawing side by side, Run gives `08-factorial`'s output in 2 ms, `/vow` gives 𐑝𐑬.
+- [ ] The extension inside VS Code: the `code` CLI isn't on this machine, so installing the `.vsix` is the user's step.
+- Decided: no custom `semanticTokenColors`. The server uses standard token types (`function`, `parameter`, `number`, `string`, `enumMember`, `comment`), which every theme already colours.
 
 ### P5: Aesthetic and correctness gate (once)
 

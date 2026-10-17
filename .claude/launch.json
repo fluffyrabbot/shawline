@@ -4,8 +4,26 @@
     {
       "name": "review",
       "runtimeExecutable": "python3",
-      "runtimeArgs": ["-m", "http.server", "8765", "--directory", "review"],
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "8765",
+        "--directory",
+        "review"
+      ],
       "port": 8765
+    },
+    {
+      "name": "playground",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "8766",
+        "--directory",
+        "playground/dist"
+      ],
+      "port": 8766
     }
   ]
 }
