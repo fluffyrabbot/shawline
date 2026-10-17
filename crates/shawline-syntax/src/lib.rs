@@ -5,3 +5,10 @@
 //! Built in Wave B (agent B1). See `docs/PLAN.md`.
 
 pub mod ast;
+mod dump;
+mod parse;
+
+pub use parse::parse;
+
+#[cfg(test)]
+mod tests;
