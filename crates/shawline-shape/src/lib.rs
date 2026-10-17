@@ -2,12 +2,13 @@
 //!
 //! Recognition is structural. A box is any closed rectangle of strokes, whatever
 //! characters draw it, so a rough ASCII sketch and its canonical box-drawing
-//! form produce the same diagram apart from [`BoxStyle`]. Wire tracing lands in
-//! Wave A against the contract in [`wire`]; see `docs/PLAN.md`.
+//! form produce the same diagram apart from [`BoxStyle`]. Wires are traced from
+//! the strokes left over once boxes are found, against the contract in [`wire`].
 
 mod boxes;
 pub mod stroke;
 mod text;
+mod trace;
 pub mod wire;
 
 use std::fmt;
@@ -56,9 +57,8 @@ pub fn recognize(grid: &Grid) -> Diagram {
             })
             .min_by_key(|&i| boxes[i].rect.area());
     }
+    let wires = trace::trace(grid, &strokes, &boxes, &mut diagnostics);
     diagnostics.sort_by_key(|d| d.at);
-    // Traced by agent A1 (Wave A).
-    let wires = Vec::new();
     Diagram { boxes, wires, texts, diagnostics, strokes }
 }
 
