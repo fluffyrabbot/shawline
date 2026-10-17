@@ -95,6 +95,16 @@ mod tests {
     }
 
     #[test]
+    fn adjacent_dips_straighten_in_one_format() {
+        // From the formatter audit (/tmp/fmtfuzz/d1.shaw): straightening one
+        // dip made the next one, so formatting twice changed the result.
+        let src = "╭─ ·𐑛𐑳𐑚𐑩𐑤 ───────────────────╮\n│         ┌┐  ┌─┐            │\n▶ 𐑯 ──────┘└──┘ └────────────▶ 𐑚\n╰────────────────────────────╯\n";
+        let once = fmt(src);
+        assert_eq!(fmt(&once), once);
+        assert!(once.contains("▶ 𐑯 ─────────────────────────▶ 𐑚"), "{once}");
+    }
+
+    #[test]
     fn dip_around_something_stays() {
         let src = "╭─ ·𐑨𐑛 ──────╮\n▶ 𐑯 ─┐ 1┌────▶ 𐑚\n│    └──┘    │\n╰────────────╯\n";
         assert_eq!(fmt(src), src);

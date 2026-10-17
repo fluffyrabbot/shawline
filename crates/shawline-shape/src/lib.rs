@@ -15,7 +15,7 @@ use std::fmt;
 
 use shawline_grid::{Diagnostic, Grid, Pos};
 
-pub use boxes::{BoxShape, BoxStyle, Divider, Port, PortKind};
+pub use boxes::{BoxShape, BoxStyle, Divider, Port, PortKind, Slip};
 pub use stroke::StrokeMap;
 pub use text::{Text, TextKind};
 pub use wire::{EndKind, Wire, WireEnd};
@@ -36,6 +36,7 @@ pub fn recognize(grid: &Grid) -> Diagram {
     let strokes = StrokeMap::new(grid);
     let boxes = boxes::find(grid, &strokes);
     let mut diagnostics = boxes::overlaps(&boxes);
+    diagnostics.extend(boxes::slips(&boxes));
     let mut texts = text::find(grid, &mut diagnostics);
 
     for t in &mut texts {
@@ -87,6 +88,9 @@ impl fmt::Display for Diagram {
                     write!(f, " gap {start}-{end}")?;
                 }
                 writeln!(f)?;
+            }
+            for s in &b.slips {
+                writeln!(f, "  slip {} home {}", s.at, s.home)?;
             }
         }
         for t in &self.texts {
@@ -162,6 +166,62 @@ mod tests {
         assert_eq!(d.boxes[0].dividers, vec![Divider { row: 2, gap: Some((2, 5)) }]);
         let guard = d.texts.iter().find(|t| t.content == "1").unwrap();
         assert_eq!((guard.divider_of, guard.owner), (Some(0), Some(0)));
+    }
+
+    fn codes(d: &Diagram) -> Vec<(Pos, &str)> {
+        d.diagnostics.iter().map(|d| (d.at, d.code)).collect()
+    }
+
+    const NODE: &str = "┌───┐\n▶ 𐑐 ├─\n└───┘\n";
+
+    #[test]
+    fn slipped_edge_cell_is_border() {
+        let src = NODE.replace("└───┘", "└─ ─┘").replace("┘\n", "┘\n  ─\n");
+        let d = diagram(&src);
+        assert_eq!(d.boxes.len(), 1, "{d}");
+        let b = &d.boxes[0];
+        assert_eq!(b.slips, [Slip { at: Pos::new(3, 2), home: Pos::new(2, 2) }]);
+        assert_eq!(b.ports.len(), 2);
+        assert_eq!(codes(&d), [(Pos::new(3, 2), "S012")]);
+        assert_eq!(d.wires.len(), 1, "the slipped cell is not a wire");
+        assert!(d.to_string().contains("  slip 3:2 home 2:2\n"));
+    }
+
+    #[test]
+    fn slipped_vertical_and_inward() {
+        let src = "┌───┐\n│ 𐑐 ├─\n│  │\n└───┘\n";
+        let d = diagram(src);
+        assert_eq!(d.boxes[0].slips, [Slip { at: Pos::new(2, 3), home: Pos::new(2, 4) }]);
+    }
+
+    #[test]
+    fn slipped_corner_fixes_style() {
+        let d = diagram("╭───╮\n│ 𐑐 │\n╰───\n    ╯\n");
+        let b = &d.boxes[0];
+        assert_eq!((b.rect, b.style), (shawline_grid::Rect { top: 0, left: 0, bottom: 2, right: 4 }, BoxStyle::Rounded));
+        assert_eq!(b.slips, [Slip { at: Pos::new(3, 4), home: Pos::new(2, 4) }]);
+        let mixed = diagram("╭───╮\n│ 𐑐 │\n╰───\n    ┘\n");
+        assert_eq!(mixed.boxes[0].style, BoxStyle::Mixed);
+    }
+
+    #[test]
+    fn not_slips() {
+        let two_out = NODE.replace("└───┘", "└─ ─┘").replace("┘\n", "┘\n\n  ─\n");
+        let joined = NODE.replace("└───┘", "└─ ─┘").replace("┘\n", "┘\n  ──\n");
+        let two_corners = "┌───┐\n│ 𐑐 │\n└───\n\n    ┘\n";
+        let missing_two = "┌───\n│ 𐑐 │\n└───\n    ┘\n";
+        for src in [two_out.as_str(), joined.as_str(), two_corners, missing_two] {
+            let d = diagram(src);
+            assert!(d.boxes.is_empty(), "{src}\n{d}");
+            assert!(!codes(&d).iter().any(|&(_, c)| c == "S012"));
+        }
+    }
+
+    #[test]
+    fn closed_box_has_no_slips() {
+        let d = diagram(NODE);
+        assert!(d.boxes[0].slips.is_empty());
+        assert!(!d.to_string().contains("slip"));
     }
 
     #[test]

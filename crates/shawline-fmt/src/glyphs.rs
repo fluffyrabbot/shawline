@@ -1,21 +1,19 @@
 //! SPEC §11 rules 1–2: canonical stroke characters and corner styles.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 
 use shawline_grid::{Dir, Grid, Pos};
 use shawline_shape::stroke::{self, E, Kind, N, S, Stroke, W};
-use shawline_shape::{BoxStyle, Diagram};
+use shawline_shape::Diagram;
 
 use crate::canvas::Edit;
 
 /// One edit per box (border and dividers), one per wire, and one per stray
 /// stroke, so the safety net can reject them independently.
 pub(crate) fn edits(grid: &Grid, diagram: &Diagram) -> Vec<Edit> {
-    let corners = box_corners(diagram);
     let glyph = |p: Pos| -> Option<(Pos, char)> {
         let s = diagram.strokes.get(p)?;
-        let rounded = corners.get(&p).copied().unwrap_or(false);
-        let ch = canonical(s, rounded)?;
+        let ch = canonical(s, own_rounding(s))?;
         (ch != grid.get(p)).then_some((p, ch))
     };
 
@@ -52,37 +50,18 @@ pub(crate) fn edits(grid: &Grid, diagram: &Diagram) -> Vec<Edit> {
     edits
 }
 
-/// Whether each box corner should be drawn rounded. Every box keeps its
-/// style: rounding a top-level square box (`Y018`), squaring a nested
-/// rounded one (`Y014`) or settling a mixed one (`Y015`) would turn an error
-/// into a different, valid program.
-fn box_corners(diagram: &Diagram) -> HashMap<Pos, bool> {
-    let mut corners = HashMap::new();
-    for b in &diagram.boxes {
-        let r = b.rect;
-        for p in [
-            Pos::new(r.top, r.left),
-            Pos::new(r.top, r.right),
-            Pos::new(r.bottom, r.left),
-            Pos::new(r.bottom, r.right),
-        ] {
-            let own = matches!(
-                diagram.strokes.get(p),
-                Some(Stroke { kind: Kind::Corner { rounded: true }, .. })
-            );
-            let rounded = match b.style {
-                BoxStyle::Rounded => true,
-                BoxStyle::Square => false,
-                BoxStyle::Mixed => own,
-            };
-            corners.entry(p).or_insert(rounded);
-        }
-    }
-    corners
+/// Whether a corner stays rounded: a canonical corner keeps its own style,
+/// and an ASCII one takes the style it draws (`.` and `'` rounded, `+`
+/// square). So every box keeps its style, wrong or not: rounding a
+/// top-level square box (`Y018`), squaring a nested rounded one (`Y014`) or
+/// settling a mixed one (`Y015`) would turn an error into a valid program,
+/// and a drawing that isn't a box yet keeps the style it is heading for.
+fn own_rounding(s: Stroke) -> bool {
+    matches!(s.kind, Kind::Corner { rounded: true })
 }
 
 /// The canonical character for a resolved stroke, if one draws exactly the
-/// same connections. Wire corners are always square.
+/// same connections, with corners `rounded` or square.
 pub(crate) fn canonical(s: Stroke, rounded: bool) -> Option<char> {
     let pick = |square, round| if rounded { round } else { square };
     let ch = match s.kind {
@@ -142,9 +121,19 @@ mod tests {
     }
 
     #[test]
-    fn wire_corners_are_square() {
+    fn wire_corners_keep_their_roundedness() {
         let src = "╭─ ·𐑨𐑛 ────╮\n│ 1 ─╮     │\n│    ╰─────▶ 𐑚\n╰──────────╯\n";
-        assert_eq!(fmt(src), "╭─ ·𐑨𐑛 ────╮\n│ 1 ─┐     │\n│    └─────▶ 𐑚\n╰──────────╯\n");
+        assert_eq!(fmt(src), src);
+        let ascii = src.replace('╮', "+").replace('╰', "'");
+        assert_eq!(fmt(&ascii), src.replace('╮', "┐"));
+    }
+
+    #[test]
+    fn unclosed_rounded_box_stays_rounded() {
+        // From the formatter audit (/tmp/fmtfuzz/r1.shaw): a right edge
+        // missing a cell left the drawing boxless, and its corners squared.
+        let src = "╭─ ·𐑛𐑳𐑚𐑩𐑤 ──────╮\n│               │\n▶ 𐑯 ────────────▶ 𐑬\n│\n╰───────────────╯\n";
+        assert_eq!(fmt(src), src);
     }
 
     #[test]
