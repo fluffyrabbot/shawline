@@ -1,0 +1,11 @@
+box 0 rounded 2:0-10:24
+  port 7:24 side E arrow E
+box 1 square 6:2-8:16 in 0
+  port 6:8 side N arrow S
+  port 7:16 side E arrow E
+text comment 0:0 "𐑯𐑴 𐑸𐑥"
+text word 2:3 "·𐑥𐑱𐑯" title 0
+text number 4:2 "2" in 0
+text number 6:5 "1" in 0 title 1
+text number 7:4 "5" in 1
+text word 7:26 "𐑬"

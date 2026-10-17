@@ -52,7 +52,7 @@ fn main() -> ExitCode {
 /// Prints `d` with its source line and a caret. Every repertoire character is
 /// one cell wide, so the caret lines up in Shawline Mono.
 fn report(path: &str, src: &str, d: &Diagnostic) {
-    eprintln!("{path}:{}:{}: {}", d.at.row + 1, d.at.col + 1, d.message);
+    eprintln!("{path}:{}:{}: {} {}", d.at.row + 1, d.at.col + 1, d.code, d.message);
     if let Some(line) = src.lines().nth(d.at.row) {
         eprintln!("  {line}\n  {}^", " ".repeat(d.at.col));
     }

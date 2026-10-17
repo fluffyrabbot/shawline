@@ -1,0 +1,14 @@
+wire 0 cells 1
+  end 5:6 E port 5:7
+  end 5:6 W open
+wire 1 cells 7
+  end 5:12 W port 5:11
+  end 5:18 E port 5:19
+wire 2 cells 44
+  tee 5:29
+  end 5:24 W port 5:23
+  end 5:33 E port 5:34
+  end 6:6 E port 6:7
+wire 3 cells 1
+  end 6:18 E port 6:19
+  end 6:18 W open

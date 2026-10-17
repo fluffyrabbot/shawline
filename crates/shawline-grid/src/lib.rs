@@ -221,7 +221,17 @@ pub enum GridErrorKind {
 
 impl fmt::Display for GridError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}: {}", self.pos, self.kind)
+        write!(f, "{} {}: {}", self.pos, self.kind.code(), self.kind)
+    }
+}
+
+impl GridErrorKind {
+    pub fn code(&self) -> Code {
+        match self {
+            GridErrorKind::Tab => "G001",
+            GridErrorKind::StrayCarriageReturn => "G002",
+            GridErrorKind::OutsideRepertoire(_) => "G003",
+        }
     }
 }
 
@@ -237,28 +247,39 @@ impl fmt::Display for GridErrorKind {
     }
 }
 
+/// A stable diagnostic code such as `S001`. The corpus checks codes, never
+/// message wording. The registry is SPEC §14; the first letter names the stage
+/// (`G`rid, `S`hape, s`Y`ntax, `C`heck, `R`untime) or marks a `W`arning or `L`int.
+pub type Code = &'static str;
+
 /// A located message from any stage of the pipeline.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Diagnostic {
     pub at: Pos,
+    pub code: Code,
     pub message: String,
 }
 
 impl Diagnostic {
-    pub fn new(at: Pos, message: impl Into<String>) -> Self {
-        Self { at, message: message.into() }
+    pub fn new(at: Pos, code: Code, message: impl Into<String>) -> Self {
+        Self { at, code, message: message.into() }
+    }
+
+    /// Warnings and lints don't stop a program from running.
+    pub fn is_warning(&self) -> bool {
+        self.code.starts_with(['W', 'L'])
     }
 }
 
 impl fmt::Display for Diagnostic {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}: {}", self.at, self.message)
+        write!(f, "{} {}: {}", self.at, self.code, self.message)
     }
 }
 
 impl From<GridError> for Diagnostic {
     fn from(e: GridError) -> Self {
-        Diagnostic { at: e.pos, message: e.kind.to_string() }
+        Diagnostic::new(e.pos, e.kind.code(), e.kind.to_string())
     }
 }
 

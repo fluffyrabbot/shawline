@@ -3,24 +3,28 @@
 //! Recognition is structural. A box is any closed rectangle of strokes, whatever
 //! characters draw it, so a rough ASCII sketch and its canonical box-drawing
 //! form produce the same diagram apart from [`BoxStyle`]. Wire tracing lands in
-//! Wave A; see `docs/PLAN.md`.
+//! Wave A against the contract in [`wire`]; see `docs/PLAN.md`.
 
 mod boxes;
 pub mod stroke;
 mod text;
+pub mod wire;
 
 use std::fmt;
 
 use shawline_grid::{Diagnostic, Grid, Pos};
 
-pub use boxes::{BoxShape, BoxStyle, Port, PortKind};
+pub use boxes::{BoxShape, BoxStyle, Divider, Port, PortKind};
 pub use stroke::StrokeMap;
 pub use text::{Text, TextKind};
+pub use wire::{EndKind, Wire, WireEnd};
 
 #[derive(Clone, Debug)]
 pub struct Diagram {
     /// Boxes in row-major order of their top-left corners.
     pub boxes: Vec<BoxShape>,
+    /// Wires in order of their first cell.
+    pub wires: Vec<Wire>,
     /// Text runs in row-major order.
     pub texts: Vec<Text>,
     pub diagnostics: Vec<Diagnostic>,
@@ -39,6 +43,12 @@ pub fn recognize(grid: &Grid) -> Diagram {
             b.rect.top == t.pos.row
                 && b.title_gap.is_some_and(|(start, end)| (start..end).contains(&t.pos.col))
         });
+        t.divider_of = boxes.iter().position(|b| {
+            b.dividers.iter().any(|d| {
+                d.row == t.pos.row
+                    && d.gap.is_some_and(|(start, end)| (start..end).contains(&t.pos.col))
+            })
+        });
         t.owner = (0..boxes.len())
             .filter(|&i| {
                 let r = boxes[i].rect;
@@ -47,7 +57,9 @@ pub fn recognize(grid: &Grid) -> Diagram {
             .min_by_key(|&i| boxes[i].rect.area());
     }
     diagnostics.sort_by_key(|d| d.at);
-    Diagram { boxes, texts, diagnostics, strokes }
+    // Traced by agent A1 (Wave A).
+    let wires = Vec::new();
+    Diagram { boxes, wires, texts, diagnostics, strokes }
 }
 
 /// The dump format checked by the corpus. One fact per line, stable order.
@@ -69,8 +81,12 @@ impl fmt::Display for Diagram {
                 };
                 writeln!(f, "  port {} side {} {kind} {}", p.pos, p.side, p.dir)?;
             }
-            for row in &b.dividers {
-                writeln!(f, "  divider {row}")?;
+            for d in &b.dividers {
+                write!(f, "  divider {}", d.row)?;
+                if let Some((start, end)) = d.gap {
+                    write!(f, " gap {start}-{end}")?;
+                }
+                writeln!(f)?;
             }
         }
         for t in &self.texts {
@@ -83,6 +99,7 @@ impl fmt::Display for Diagram {
             write!(f, "text {kind} {} {:?}", t.pos, t.content)?;
             write_place(f, " in", t.owner)?;
             write_place(f, " title", t.title_of)?;
+            write_place(f, " divider", t.divider_of)?;
             writeln!(f)?;
         }
         for d in &self.diagnostics {
@@ -135,8 +152,16 @@ mod tests {
         );
         assert_eq!(d.boxes.len(), 2);
         assert_eq!(d.boxes[1].parent, Some(0));
-        assert_eq!(d.boxes[1].dividers, vec![3]);
+        assert_eq!(d.boxes[1].dividers, vec![Divider { row: 3, gap: None }]);
         assert_eq!(d.boxes[1].ports.len(), 1);
+    }
+
+    #[test]
+    fn divider_guard_gap() {
+        let d = diagram("┌─ 0 ─▼──┐\n│        │\n├┄ 1 ┄┄┄┄┤\n│        │\n└────────┘\n");
+        assert_eq!(d.boxes[0].dividers, vec![Divider { row: 2, gap: Some((2, 5)) }]);
+        let guard = d.texts.iter().find(|t| t.content == "1").unwrap();
+        assert_eq!((guard.divider_of, guard.owner), (Some(0), Some(0)));
     }
 
     #[test]

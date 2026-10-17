@@ -37,6 +37,11 @@ version = "0.0.1"
 [[package]]
 name = "shawline-ir"
 version = "0.0.1"
+dependencies = [
+ "shawline-grid",
+ "shawline-syntax",
+ "shawline-vm",
+]
 
 [[package]]
 name = "shawline-lsp"
@@ -56,10 +61,17 @@ dependencies = [
 [[package]]
 name = "shawline-syntax"
 version = "0.0.1"
+dependencies = [
+ "shawline-grid",
+ "shawline-shape",
+]
 
 [[package]]
 name = "shawline-vm"
 version = "0.0.1"
+dependencies = [
+ "shawline-grid",
+]
 
 [[package]]
 name = "shawline-word"

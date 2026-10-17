@@ -46,10 +46,18 @@ pub struct BoxShape {
     pub title_gap: Option<(usize, usize)>,
     /// Ports in row-major order.
     pub ports: Vec<Port>,
-    /// Interior rows holding a dashed divider (`├┄┄┤`).
-    pub dividers: Vec<usize>,
+    /// Dashed dividers between switch arms, top to bottom.
+    pub dividers: Vec<Divider>,
     /// The innermost box enclosing this one.
     pub parent: Option<usize>,
+}
+
+/// A dashed rule across a box (`├┄┄┄┤`, or `├┄ 1 ┄┤` with a guard gap).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Divider {
+    pub row: usize,
+    /// Columns `start..end` of the guard gap.
+    pub gap: Option<(usize, usize)>,
 }
 
 pub(crate) fn find(grid: &Grid, strokes: &StrokeMap) -> Vec<BoxShape> {
@@ -74,7 +82,7 @@ pub(crate) fn overlaps(boxes: &[BoxShape]) -> Vec<Diagnostic> {
             let (ra, rb) = (a.rect, b.rect);
             if ra.intersects(&rb) && !ra.encloses(&rb) && !rb.encloses(&ra) {
                 let at = Pos::new(rb.top, rb.left);
-                found.push(Diagnostic::new(at, format!("box {rb} overlaps box {ra}")));
+                found.push(Diagnostic::new(at, "S001", format!("box {rb} overlaps box {ra}")));
             }
         }
     }
@@ -168,17 +176,11 @@ fn trace(grid: &Grid, strokes: &StrokeMap, tl: Pos) -> Option<BoxShape> {
         add_port(&mut ports, p, Dir::W, border_cell(strokes.get(p), Dir::S)?);
     }
 
-    let at = |r, c| strokes.get(Pos::new(r, c));
-    let dividers: Vec<usize> = (tl.row + 1..bottom)
-        .filter(|&r| {
-            at(r, tl.col).is_some_and(|s| s.kind == Kind::Tee && s.connects(Dir::E))
-                && at(r, right).is_some_and(|s| s.kind == Kind::Tee && s.connects(Dir::W))
-                && (tl.col + 1..right)
-                    .all(|c| at(r, c).is_some_and(|s| s.kind == Kind::Dashed && s.runs(Dir::E)))
-        })
+    let dividers: Vec<Divider> = (tl.row + 1..bottom)
+        .filter_map(|row| divider(strokes, row, tl.col, right))
         .collect();
     // A divider's end tees belong to the divider, not to a wire.
-    ports.retain(|p| !(p.side.is_horizontal() && dividers.contains(&p.pos.row)));
+    ports.retain(|p| !(p.side.is_horizontal() && dividers.iter().any(|d| d.row == p.pos.row)));
     ports.sort_by_key(|p| p.pos);
 
     let corners = [tl_round, tr_round, br_round, bl_round];
@@ -195,4 +197,33 @@ fn trace(grid: &Grid, strokes: &StrokeMap, tl: Pos) -> Option<BoxShape> {
         dividers,
         parent: None,
     })
+}
+
+/// The divider on `row` between border columns `left` and `right`, if any:
+/// inward tees at both ends, dashes between, and at most one gap that has
+/// dashes on both sides.
+fn divider(strokes: &StrokeMap, row: usize, left: usize, right: usize) -> Option<Divider> {
+    let at = |c| strokes.get(Pos::new(row, c));
+    let tee = |c, d| at(c).is_some_and(|s: Stroke| s.kind == Kind::Tee && s.connects(d));
+    if !tee(left, Dir::E) || !tee(right, Dir::W) {
+        return None;
+    }
+    let dashed = |c| at(c).is_some_and(|s: Stroke| s.kind == Kind::Dashed && s.runs(Dir::E));
+    let interior = left + 1..right;
+    let gap_start = interior.clone().find(|&c| !dashed(c));
+    let gap = match gap_start {
+        None => None,
+        Some(start) => {
+            let end = (start..right).find(|&c| at(c).is_some()).unwrap_or(right);
+            let clean = start > left + 1
+                && end < right
+                && (start..end).all(|c| at(c).is_none())
+                && (end..right).all(dashed);
+            if !clean {
+                return None;
+            }
+            Some((start, end))
+        }
+    };
+    Some(Divider { row, gap })
 }

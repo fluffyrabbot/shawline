@@ -1,0 +1,9 @@
+wire 0 cells 1
+  end 5:22 E port 5:23
+  end 5:22 W open
+wire 1 cells 8
+  end 5:28 W port 5:27
+  end 5:35 E port 5:36
+wire 2 cells 1
+  end 6:22 E port 6:23
+  end 6:22 W open

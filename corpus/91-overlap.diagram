@@ -1,0 +1,3 @@
+box 0 square 0:0-2:3
+box 1 square 1:2-3:5
+diagnostic 1:2 S001: box 1:2-3:5 overlaps box 0:0-2:3

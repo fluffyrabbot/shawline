@@ -1,0 +1,9 @@
+wire 0 cells 6
+  end 4:4 W open
+  end 5:8 S port 6:8
+wire 1 cells 10
+  end 7:6 W open
+  end 7:15 E port 7:16
+wire 2 cells 7
+  end 7:17 W port 7:16
+  end 7:23 E port 7:24

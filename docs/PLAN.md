@@ -56,6 +56,21 @@ Grid ──► shawline-render (SVG) ◄── shawline-glyph (stroke skeletons)
 | `shawline-cli` | `shawline` binary | P0 ✅ → lead at each gate | — |
 | `shawline-corpus` | The oracle: stage registry and runner | P0 ✅ → lead | the whole crate |
 
+### Entry points
+
+These signatures are fixed so Gate B can wire the pipeline without negotiation. Each owning agent implements its row.
+
+| Crate | Entry points |
+|---|---|
+| `shawline-word` | `class(char) -> Option<LetterClass>`, `mirror(char) -> Option<char>`, `Transliterator` (incremental: `push(&mut self, key: char) -> Edit`) |
+| `shawline-glyph` | `skeleton(char) -> Option<Skeleton>`, `specimen() -> String` (SVG) |
+| `shawline-vm` | `run(&Module) -> Result<Vec<Value>, Diagnostic>`, `assemble(&str) -> Result<Module, Diagnostic>`, `disassemble(&Module) -> String` |
+| `shawline-syntax` | `parse(&Grid, &Diagram) -> (Sheet, Vec<Diagnostic>)`, and `impl Display for Sheet` (the `.ast` dump: one fact per line) |
+| `shawline-ir` | `lower(&Sheet) -> (Option<Program>, Vec<Diagnostic>)`, `compile(&Program) -> Module` |
+| `shawline-fmt` | `format(&Grid, &Diagram) -> String`, `lint(&Grid, &Diagram) -> Vec<Diagnostic>` |
+| `shawline-render` | `render(&Grid, Theme) -> String` (SVG) |
+| `shawline-font` | `build() -> Vec<u8>` (TTF) |
+
 ## Orchestration
 
 ### Principles
@@ -119,7 +134,7 @@ Done = tests + clippy green for your crate, committed on your branch, ≤200-wor
 The critical path runs **P1 → A1 (wires) → B1 (syntax) → Gate B → C**. The glyph → render/font track and the VM run alongside it, off the critical path.
 
 ```
-P0 spine ─► P1 spec+contracts ─► Wave A ───────────► Gate A ─► Wave B ──────────► Gate B ─► Wave C ─► Gate C ─► P5
+P0 spine ✅ ─► P1 spec+contracts ✅ ─► Wave A ───────────► Gate A ─► Wave B ──────────► Gate B ─► Wave C ─► Gate C ─► P5
              (lead)               A1 shape-wires                B1 syntax                   C2 lsp
                                   A2 word                       B2 fmt                      C3 playground
                                   A3 glyph                      B3 render                   C4 vscode
@@ -136,40 +151,41 @@ P0 spine ─► P1 spec+contracts ─► Wave A ──────────�
 - [x] `shawline` CLI: `check` and `diagram`, with caret diagnostics.
 - [x] Seed corpus: canonical double, its ASCII twin (identical diagram), the abs switch, and two negative cases.
 
-### P1: Spec freeze and contracts (lead, sequential)
+### P1: Spec freeze and contracts (lead, sequential) ✅
 
 Done by one mind, because this is where conceptual integrity is set.
 
-- [ ] Finish SPEC v1: exact rules for wire endpoints next to text (inline nodes, constants, port names), the minimum gap between parallel wires, the `.shawasm` grammar, and the display format for values.
-- [ ] `shawline-shape/src/wire.rs`: `Wire { cells, ends }` and `WireEnd { pos, kind }`, plus `wire` lines in the `.diagram` dump. Guard gaps in dividers (`├┄ 1 ┄┤`) recognized in the seed.
-- [ ] `shawline-syntax/src/ast.rs`: Sheet, Definition, Node, InlineNode, Constant, Switch/Arm/Guard, Port, Edge, with source positions on every item (the formatter needs geometry).
-- [ ] `shawline-ir/src/ir.rs`: Program, Function, Value nodes, Prim/Call/Const/Switch, and stable IDs.
-- [ ] `shawline-vm/src/bytecode.rs`: `Module`, `Function`, `Instr` (register machine: `Const`, `Prim`, `Call`, `TailCall`, `Switch`/`Jump`, `Return`), `Value`, and a source map from bytecode to `Pos`.
-- [ ] Corpus v1, 20–25 programs: every construct from SPEC §5–9, ASCII twins, recursion (factorial, list length, deep recursion), and negative cases (overlap, merge outside a switch, arity mismatch, cycle, unknown name, a guard after the default arm). Hand-written expectations: `.diagram` including wires, `.out` for program output, and `.fmt.shaw` for non-canonical inputs.
-- [ ] Gate P1: contracts compile, the workspace builds, commit. The corpus is expected to be red only on stages that later waves own.
+- [x] SPEC v1: how text meets wires (adjacency across spaces on one row), the source/sink role of every wire end, the touching rule (canonical strokes may run side by side), the output format, diagnostic codes with fixed positions, and `.shawasm`.
+- [x] `shawline-grid`: diagnostics carry stable codes (`Diagnostic { at, code, message }`); the corpus checks codes and positions, never wording.
+- [x] `shawline-shape/src/wire.rs`: `Wire`, `WireEnd`, `EndKind` and the `.wires` dump (a separate stage, so `.diagram` stays stable). Guard gaps in dividers (`├┄ 1 ┄┤`) are recognized.
+- [x] `shawline-syntax/src/ast.rs`: Sheet, Definition, Node (call, inline, constant, switch), Arm, Guard, Literal, and Edge/Endpoint (one edge per wire), with geometry on every item.
+- [x] `shawline-ir/src/ir.rs`: Program, Function, and Block in SSA form; Op is Const, Prim, Call or Switch (arms see only their through-ports).
+- [x] `shawline-vm/src/bytecode.rs`: register machine `Instr`, `Prim` (the letter, arity and mirror table: the single source for primitives), `Value` with its output `Display`, the source map, and the `.shawasm` grammar.
+- [x] Corpus v1, 27 programs: hello, arithmetic, double (and its ASCII twin), abs, inline chains, pairs with a crossing, lists, factorial (and its ASCII twin), list length, 100 000-deep tail recursion, mutual recursion, guards (and text results), fan-out, 3 runtime errors and 9 static errors. Expectations: `.diagram` (blessed from the reviewed seed recognizer), `.wires`, `.out` and `.check` (hand-written), `.fmt.shaw` for the ASCII twins. The `.wires` files come from a scratch reference tracer written independently of A1, then hand-checked on six programs.
+- [x] Gate P1: contracts compile; clippy is clean; the corpus is green except `.wires`, which A1 owns.
 
 ### Wave A: Leaves (4 agents in parallel)
 
 | Agent | Owns | Delivers | Oracle |
 |---|---|---|---|
-| **A1** shape-wires | `shawline-shape` (not `wire.rs`) | Wire tracing over stroke components outside borders; endpoint classification; crossings; guard gaps in dividers; ASCII parity for every construct; diagnostics for dangling ends and wires touching. | Corpus `.diagram` |
-| **A2** word | `shawline-word` | Letter table, classes and `mirror()`; the primitive table (name, arity); the phonemic ASCII transliteration table, plus an incremental transliterator for the LSP; a license check on the ReadLex lexicon, reported with a recommendation. | Unit tests against the SPEC §4 and §9 tables |
+| **A1** shape-wires | `shawline-shape` (not `wire.rs`) | Wire tracing per the `wire.rs` contract: components, crossings (one wire per axis), tees, end classification; ASCII parity (twins must dump identically); `S010`/`S011`. | Corpus `.wires`, with `.diagram` staying green |
+| **A2** word | `shawline-word` | Letter table, classes and `mirror()`; the phonemic ASCII transliteration table, plus an incremental transliterator for the LSP; a license check on the ReadLex lexicon, reported with a recommendation. Primitives are not A2's: they live in `bytecode.rs`. | Unit tests against the SPEC §4 table |
 | **A3** glyph | `shawline-glyph` | A skeleton model (kurbo paths on a 600×1200-unit cell, with x-height, ascender and descender for the short, tall and deep classes); all 48 letters, with partners derived by the true rotation or reflection; every stroke character drawn edge-to-edge so lines join across cells; digits, marks, namer dot; `specimen.svg` and a PNG preview for self-inspection. | Self-inspection of the PNG, then the user at Gate A |
 | **A4** vm | `shawline-vm` (not `bytecode.rs`) | The dispatch loop, values, heap-allocated frames, tail calls, runtime errors mapped to source positions; `.shawasm` assembler and disassembler; a 100k-deep recursion test. | Crate tests driven by `.shawasm` programs |
 
-**Gate A (lead):** merge four branches; run workspace tests and clippy; the `.diagram` stage must be fully green. The user reviews `specimen.svg`. The lead copies the transliteration table into SPEC §13 and commits.
+**Gate A (lead):** merge four branches; run workspace tests and clippy; the `.diagram` and `.wires` stages must be fully green. The user reviews `specimen.svg`. The lead copies the transliteration table into SPEC §13 and commits.
 
 ### Wave B: Middle (5 agents in parallel)
 
 | Agent | Owns | Delivers | Oracle |
 |---|---|---|---|
-| **B1** syntax | `shawline-syntax` (not `ast.rs`) | Diagram + words → AST; every structural diagnostic from SPEC §5–8; an `.ast` dump. | Corpus `.ast` (lead blesses after reading), negative cases |
+| **B1** syntax | `shawline-syntax` (not `ast.rs`) | Diagram + words → AST; every `Y` diagnostic at its SPEC §14 position; the `.ast` dump. | One crate test comparing its `Y` codes with the `Y` lines of every corpus `.check`; `.ast` blessed by the lead after reading |
 | **B2** fmt | `shawline-fmt` | The placement-preserving formatter over Grid + Diagram (SPEC §11) and the lint table (SPEC §12). | Corpus `.fmt.shaw` |
 | **B3** render | `shawline-render` | Grid → SVG from glyph skeletons; light and dark themes; no dependence on installed fonts. | PNG self-inspection; `.svg` corpus for 3 programs |
 | **B4** font | `shawline-font` | Shawline Mono TTF built from skeletons (kurbo stroke expansion → `write-fonts`); metrics with no line gap so box drawing joins; read-back validation. | Read-back plus a rasterized test string |
-| **B5** ir | `shawline-ir` (not `ir.rs`) | AST → IR (name resolution, arity, switch lowering, cycle detection); the checker; IR → bytecode including tail-call detection. | Unit tests on hand-built ASTs; corpus `.out` comes online at the gate |
+| **B5** ir | `shawline-ir` (not `ir.rs`) | AST → IR (name resolution, arity, switch lowering, cycle detection); `C` and `W` diagnostics; IR → bytecode, including tail-call detection. | Unit tests on hand-built ASTs; corpus `.check` and `.out` come online at the gate |
 
-**Gate B (lead):** merge; wire `shawline run` and `shawline fmt`; register the corpus stages `ast`, `fmt.shaw`, `out` and `svg`; add the formatter property test; fix integration seams personally. The whole corpus must be green. Commit.
+**Gate B (lead):** merge; wire `shawline run` and `shawline fmt`; register the corpus stages `ast`, `check`, `out`, `fmt.shaw` and `svg`. A program with an empty `.check` and no `.fmt.shaw` must format to itself. Add the formatter property test; fix integration seams personally. The whole corpus must be green. Commit.
 
 ### Wave C: Surfaces (3 agents in parallel, plus the lead)
 
@@ -194,7 +210,7 @@ Done by one mind, because this is where conceptual integrity is set.
 |---|---|
 | Editor line spacing leaves gaps in box drawing | The font has no line gap, with ascender + descender equal to the cell height; the docs recommend line-height 1.0. The SVG renderer is unaffected. |
 | Terminals and editors fall back to other fonts for Shavian, breaking the grid | The closed repertoire means Shawline Mono covers everything; setup docs say to set it for `.shaw` files. |
-| Parallel wires one cell apart are ambiguous to trace | SPEC v1 requires a gap between parallel wires; A1 diagnoses wires that touch. |
+| ASCII joints (`+ . '`) join an unrelated neighbouring stroke | SPEC §3: keep ASCII joints one cell from strokes they shouldn't meet. Canonical glyphs can't mis-join, and the formatter converts sketches to canonical form. |
 | Jitter straightening in the formatter is the hardest algorithm | B2 builds character normalization, spacing and snapping first, and straightening last, behind the P5 jitter corpus. |
 | `write-fonts` API churn | Pin the version. Fallback: emit a UFO and build it with `fontmake`. |
 | No suitably licensed English → Shavian lexicon | v1 transliteration needs no dictionary (SPEC §13). |

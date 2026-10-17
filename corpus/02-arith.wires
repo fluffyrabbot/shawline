@@ -1,0 +1,36 @@
+wire 0 cells 3
+  end 5:5 W open
+  end 5:7 E port 5:8
+wire 1 cells 5
+  end 5:13 W port 5:12
+  end 5:17 E port 5:18
+wire 2 cells 3
+  end 6:5 W open
+  end 6:7 E port 6:8
+wire 3 cells 3
+  end 10:5 W open
+  end 10:7 E port 10:8
+wire 4 cells 5
+  end 10:13 W port 10:12
+  end 10:17 E port 10:18
+wire 5 cells 3
+  end 11:5 W open
+  end 11:7 E port 11:8
+wire 6 cells 3
+  end 15:5 W open
+  end 15:7 E port 15:8
+wire 7 cells 5
+  end 15:13 W port 15:12
+  end 15:17 E port 15:18
+wire 8 cells 3
+  end 16:5 W open
+  end 16:7 E port 16:8
+wire 9 cells 3
+  end 20:5 W open
+  end 20:7 E port 20:8
+wire 10 cells 5
+  end 20:13 W port 20:12
+  end 20:17 E port 20:18
+wire 11 cells 3
+  end 21:5 W open
+  end 21:7 E port 21:8

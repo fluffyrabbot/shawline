@@ -2,3 +2,5 @@
 //!
 //! Contract: `ir.rs`, written by the lead at Gate P1 and read-only to agents.
 //! Built in Wave B (agent B5). See `docs/PLAN.md`.
+
+pub mod ir;

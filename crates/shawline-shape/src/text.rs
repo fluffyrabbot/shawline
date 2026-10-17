@@ -23,6 +23,8 @@ pub struct Text {
     pub owner: Option<usize>,
     /// The box whose top border holds this text as its title.
     pub title_of: Option<usize>,
+    /// The box one of whose dividers holds this text as a guard.
+    pub divider_of: Option<usize>,
 }
 
 pub(crate) fn find(grid: &Grid, diagnostics: &mut Vec<Diagnostic>) -> Vec<Text> {
@@ -41,14 +43,14 @@ pub(crate) fn find(grid: &Grid, diagnostics: &mut Vec<Diagnostic>) -> Vec<Text> 
                 '«' => {
                     let close = row[c + 1..].iter().position(|&ch| ch == '»');
                     if close.is_none() {
-                        diagnostics.push(Diagnostic::new(Pos::new(r, c), "unclosed «"));
+                        diagnostics.push(Diagnostic::new(Pos::new(r, c), "S002", "unclosed «"));
                     }
                     let inner_end = close.map_or(row.len(), |n| c + 1 + n);
                     let content = row[c + 1..inner_end].iter().collect();
                     (TextKind::Literal, content, (inner_end + 1).min(row.len()))
                 }
                 '»' => {
-                    diagnostics.push(Diagnostic::new(Pos::new(r, c), "» without «"));
+                    diagnostics.push(Diagnostic::new(Pos::new(r, c), "S003", "» without «"));
                     c += 1;
                     continue;
                 }
@@ -61,7 +63,7 @@ pub(crate) fn find(grid: &Grid, diagnostics: &mut Vec<Diagnostic>) -> Vec<Text> 
                     } else {
                         if digits > 0 {
                             let message = "digits and letters in one word";
-                            diagnostics.push(Diagnostic::new(Pos::new(r, c), message));
+                            diagnostics.push(Diagnostic::new(Pos::new(r, c), "S004", message));
                         }
                         TextKind::Word
                     };
@@ -79,6 +81,7 @@ pub(crate) fn find(grid: &Grid, diagnostics: &mut Vec<Diagnostic>) -> Vec<Text> 
                 content,
                 owner: None,
                 title_of: None,
+                divider_of: None,
             });
             c = end;
         }

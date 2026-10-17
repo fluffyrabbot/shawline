@@ -1,0 +1,74 @@
+wire 0 cells 20
+  tee 5:6
+  end 5:4 W open
+  end 5:13 E port 5:14
+  end 13:8 E port 13:9
+wire 1 cells 5
+  end 5:19 W port 5:18
+  end 8:20 S port 9:20
+wire 2 cells 1
+  end 6:13 E port 6:14
+  end 6:13 W open
+wire 3 cells 25
+  end 10:13 W open
+  end 10:37 E port 10:38
+wire 4 cells 12
+  tee 13:41
+  end 10:39 W port 10:38
+  end 13:39 W port 13:38
+  end 13:45 E port 13:46
+wire 5 cells 6
+  end 13:10 W port 13:9
+  end 13:15 E port 13:16
+wire 6 cells 4
+  end 13:21 W port 13:20
+  end 13:24 E port 13:25
+wire 7 cells 7
+  end 13:31 W port 13:30
+  end 13:37 E port 13:38
+wire 8 cells 1
+  end 14:15 E port 14:16
+  end 14:15 W open
+wire 9 cells 20
+  tee 23:6
+  end 23:4 W open
+  end 23:13 E port 23:14
+  end 31:8 E port 31:9
+wire 10 cells 5
+  end 23:19 W port 23:18
+  end 26:20 S port 27:20
+wire 11 cells 1
+  end 24:13 E port 24:14
+  end 24:13 W open
+wire 12 cells 25
+  end 28:13 W open
+  end 28:37 E port 28:38
+wire 13 cells 12
+  tee 31:41
+  end 28:39 W port 28:38
+  end 31:39 W port 31:38
+  end 31:45 E port 31:46
+wire 14 cells 6
+  end 31:10 W port 31:9
+  end 31:15 E port 31:16
+wire 15 cells 4
+  end 31:21 W port 31:20
+  end 31:24 E port 31:25
+wire 16 cells 5
+  end 31:33 W port 31:32
+  end 31:37 E port 31:38
+wire 17 cells 1
+  end 32:15 E port 32:16
+  end 32:15 W open
+wire 18 cells 3
+  end 41:5 W open
+  end 41:7 E port 41:8
+wire 19 cells 6
+  end 41:16 W port 41:15
+  end 41:21 E port 41:22
+wire 20 cells 3
+  end 45:5 W open
+  end 45:7 E port 45:8
+wire 21 cells 8
+  end 45:14 W port 45:13
+  end 45:21 E port 45:22

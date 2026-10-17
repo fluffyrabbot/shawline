@@ -1,6 +1,6 @@
 # Shawline language specification
 
-Status: **draft v0**. The lead completes and freezes it at Gate P1 (see [PLAN.md](PLAN.md)). After the freeze, changes go through the lead only.
+Status: **v1, frozen at Gate P1.** Changes go through the lead only (see [PLAN.md](PLAN.md)). The contracts that implement it are `shawline-shape/src/wire.rs`, `shawline-syntax/src/ast.rs`, `shawline-ir/src/ir.rs` and `shawline-vm/src/bytecode.rs`.
 
 Shawline is a dataflow language whose source is a drawing. Definitions are rounded boxes, calls are square boxes, values travel along wires, and every name is written in the Shavian alphabet.
 
@@ -39,6 +39,10 @@ Every stroke cell connects in a fixed set of directions. The table lives in `sha
 - **Crossing** (`┼`) is two wires passing over each other **without connecting**. Four-way junctions do not exist; draw two tees instead. This follows the schematic convention.
 - **Arrowheads** (`▶ ◀ ▲ ▼`) mark where a wire **ends**. Every wire ends in an arrowhead at each of its sinks.
 - **Dashed** strokes (`┄ ┆`) appear only in switch dividers (§8).
+
+**Touching.** Two adjacent stroke cells join only where each connects toward the other. Canonical glyphs say exactly where they connect, so strokes may run side by side: two wires on adjacent rows, or a wire hugging a box border, stay separate. The ASCII joints `+ . '` are the exception, because they join every neighbour that could join them. Keep an ASCII joint one cell away from strokes it shouldn't meet.
+
+A wire that runs into a stroke that doesn't join it, and isn't a port, is an error (`S010`).
 
 ## 4. Words
 
@@ -80,16 +84,17 @@ In code points, each tall letter's partner is +10 (U+10450 → U+1045A), and eac
 A sheet (one source file) holds definitions and comments. A **definition** is a rounded box with the definition's name in its top border:
 
 ```
-╭─ ·𐑛𐑳𐑚𐑩𐑤 ────────────────────╮
-│                             │
-│         ┌───┐               │
-▶ 𐑯 ──┬───▶ 𐑐 ├───────────────▶ 𐑛
-│     └───▶   │               │
-│         └───┘               │
-╰─────────────────────────────╯
+╭─ ·𐑛𐑳𐑚𐑩𐑤 ────────────╮
+│                     │
+│         ┌───┐       │
+▶ 𐑯 ──┬───▶ 𐑐 ├───────▶ 𐑬
+│     └───▶   │       │
+│         └───┘       │
+│                     │
+╰─────────────────────╯
 ```
 
-This is `double n = n 𐑐 n`, from [corpus/seed/01-double.shaw](../corpus/seed/01-double.shaw).
+This is `double n = n 𐑐 n`, from [corpus/03-double.shaw](../corpus/03-double.shaw).
 
 - **Inputs** are `▶` arrowheads on the left border. The input's name follows the arrowhead inside the box, and the input's wire starts after the name.
 - **Outputs** are `▶` arrowheads on the right border. The output's name follows the arrowhead outside the box.
@@ -103,23 +108,49 @@ This is `double n = n 𐑐 n`, from [corpus/seed/01-double.shaw](../corpus/seed/
 A **node** is a call. It is drawn as a square box containing exactly one word: the name of a definition or a primitive.
 
 - **Inputs** are `▶` arrowheads on the node's left border. Their top-to-bottom order is the argument order.
-- **Outputs** are `├` tees on the node's right border. Their top-to-bottom order is the result order.
+- **Outputs** are `├` tees on the node's right border. Their top-to-bottom order is the result order. An output nobody needs is still drawn, as a tee with no wire (see `𐑕` in [corpus/09-length.shaw](../corpus/09-length.shaw)).
 - The number of input and output ports must match the callee's arity exactly.
 
 Two shorthands avoid drawing a box:
 
-- **Inline node:** `─▶ 𐑖 ──`. A word that sits on a horizontal wire, between an arrowhead and a continuing wire with one space on each side, is a call with one input and one output.
-- **Constant:** `0 ──▶` or `«𐑣𐑦» ──▶`. A number or text literal followed by a space and then a wire is a source of that value. The zero-input primitive `𐑯𐑦𐑤` (the empty list) can be used the same way.
+- **Inline node:** `─▶ 𐑖 ──`. A word that sits on a horizontal wire, between an arrowhead and a continuing wire, is a call with one input and one output.
+- **Constant:** `0 ──▶` or `«𐑣𐑦» ──▶`. A number or text literal followed by a wire is a source of that value. `𐑯𐑦𐑤` (the empty list) works the same way.
+
+### Text meets wires across spaces
+
+Text and wires interact only **horizontally, on the same row, across spaces**. Nothing else may come between them. The canonical gap is exactly one space; rough input may use any number of spaces, including none. In the rules below, "open end" means a wire end that faces a non-stroke cell (`EndKind::Open`), and "free arrowhead" means an arrowhead that is not on a box border.
+
+| Pattern | Meaning |
+|---|---|
+| `▶` on a definition's left border, word, open end facing W | Input port: the word names it, and the wire is its source. |
+| `▶` on a definition's right border, then a word outside | Output port: the word names it. |
+| Literal (or `𐑯𐑦𐑤`), then an open end facing W, and no free arrowhead west of the literal | Constant. |
+| Free arrowhead pointing E, word, open end facing W | Inline node. |
+| Any other open end | Dangling wire (`Y003`). |
+| Any other free arrowhead | Dangling arrowhead (`Y004`). |
+| Any other word, number or literal | Stray text (`Y012`). Comments and titles are never stray. |
+
+Inline nodes are horizontal only. A vertical wire can't carry one.
 
 ## 7. Wires
 
 A **wire** is a connected set of stroke cells outside box borders. It links exactly one **source** to one or more **sinks**.
 
-- **Sources:** a definition input (after its name), a node output tee, a constant, an inline node's output, and the inner or outer side of a switch through-port (§8).
-- **Sinks:** a node input arrowhead, a definition output arrowhead, a switch selector `▼`, an inline node's input, and switch through-ports.
+Each wire end is a source or a sink, decided by what it meets:
+
+| The end meets | Role |
+|---|---|
+| An open end next to an input port name, a constant, or an inline node's word | Source |
+| A tee on a node's right border | Source |
+| A node's input `▶`, a definition's output `▶`, a selector `▼` | Sink |
+| A free arrowhead (an inline node's input) | Sink |
+| A switch's left through-port, from outside / from inside | Sink / source |
+| A switch's right through-port, from inside / from outside | Sink / source |
+
+- Every wire has exactly one source and at least one sink. Every sink is an arrowhead.
 - **Fan-out** is a tee in the middle of a wire.
-- **Merges** (two wires flowing into one) are errors, with one exception: the outputs of different arms of the same switch, at the same ordinal, may merge (§8).
-- A definition's wire graph must be acyclic. Repetition comes from recursion.
+- **Merges** (two sources on one wire) are errors (`Y006`), with one exception: the outer sides of the right through-ports of the same switch, at the same result ordinal, one per arm. Together they are that switch's output (§8).
+- A definition's wire graph must be acyclic (`C003`). Repetition comes from recursion.
 
 ## 8. Switches
 
@@ -137,14 +168,15 @@ A **switch** is a square box divided into **arms** by dashed dividers (`├┄�
 │     │  └──▶─────────────▶──┐    │
 │     │     ├┄┄┄┄┄┄┄┄┄┄┄┄┄┤  │    │
 │     │     │     ┌───┐   │  │    │
-│     │     │  0 ─▶ 𐑚 ├───▶──┴────▶ 𐑮
+│     │     │  0 ─▶ 𐑚 ├───▶──┴────▶ 𐑬
 │     └─────▶─────▶   │   │       │
 │           │     └───┘   │       │
 │           └─────────────┘       │
+│                                 │
 ╰─────────────────────────────────╯
 ```
 
-This is `abs n`, from [corpus/seed/02-abs.shaw](../corpus/seed/02-abs.shaw). `n 𐑤 0` is the selector. When it is `0` (that is, n ≥ 0), the first arm passes `n` through unchanged. Otherwise the default arm computes `0 𐑚 n`.
+This is `abs n`, from [corpus/04-abs.shaw](../corpus/04-abs.shaw). `n 𐑤 0` is the selector. When it is `0` (that is, n ≥ 0), the first arm passes `n` through unchanged. Otherwise the default arm computes `0 𐑚 n`.
 
 - **The selector** is a wire that ends in a `▼` on the switch's top border.
 - **Guards** are written the same way as titles. An arm's guard is a literal in a gap in the line just above the arm: the top border for the first arm, and the divider for each later arm (`├┄ 1 ┄┄┤`). An arm with no guard is the **default arm**. There is at most one default arm, and it must come last.
@@ -164,6 +196,17 @@ This is `abs n`, from [corpus/seed/02-abs.shaw](../corpus/seed/02-abs.shaw). `n 
 | List | Either empty (`𐑯𐑦𐑤`) or a head and a tail. |
 
 Checking is dynamic in v1, so a type mismatch is a runtime error.
+
+**Output.** Running a program prints main's outputs top to bottom, one per line:
+
+| Value | Printed as |
+|---|---|
+| Int | Decimal, with `-` when negative |
+| Text | Bare at top level; `«quoted»` inside a pair or list |
+| Pair | `(a b)` |
+| List | `[a b c]`; the empty list is `[]` |
+
+A runtime error prints nothing on stdout. It prints `error ROW:COL CODE: message` on stderr and exits with status 1. The position is the failing node's word (or the switch's selector), zero-based as in every dump. The corpus `.out` files hold stdout, or, for a program that fails, the single line `error ROW:COL CODE`.
 
 **Primitives.** Each mirrored pair names a pair of duals.
 
@@ -209,7 +252,7 @@ Full automatic layout (`shawline fmt --relayout`) is a later milestone.
 These are measurable stand-ins for taste. The formatter fixes what it can; the checker reports the rest as warnings.
 
 - **Mixed box style:** a box with some rounded and some square corners.
-- **Wire too short:** a wire with fewer than 2 cells before its arrowhead.
+- **Wire too short:** an arrowhead with no line cell before it (`0 ▶`).
 - **Too many bends:** a wire with more than 3 bends between its source and a sink.
 - **Too many crossings:** more than 2 crossings in a definition. Most of these are better solved by re-arranging.
 - **Ink too dense:** more than 60% non-space cells in a definition's interior.
@@ -222,3 +265,73 @@ The thresholds live in one table in `shawline-fmt`. They get tuned against the c
 Shawline is typed through **phonemic ASCII transliteration**. Each Shavian letter has a short ASCII key sequence, and the language server replaces the sequence as you type. The mapping is one-to-one and needs no dictionary.
 
 `shawline-word` owns the table, and it is reproduced here at Gate A. An English-word → Shavian dictionary is an optional extra, adopted only if a suitably licensed lexicon exists; the A2 brief covers that check.
+
+## 14. Diagnostics
+
+Every diagnostic has a stable code. The corpus checks codes and positions, never message wording, so implementers own the messages. The first letter of a code names the stage that reports it; `W` (warning) and `L` (lint) codes don't stop a program from running.
+
+| Code | Stage | Meaning |
+|---|---|---|
+| G001 | grid | Tab character |
+| G002 | grid | Stray carriage return |
+| G003 | grid | Character outside the repertoire |
+| S001 | shape | Boxes overlap without nesting |
+| S002 | shape | `«` without `»` |
+| S003 | shape | `»` without `«` |
+| S004 | shape | Digits and letters in one word |
+| S010 | shape | Wire runs into a stroke that doesn't join it |
+| S011 | shape | Crossing on a box border |
+| Y001 | syntax | Definition title is not a `·`-word |
+| Y002 | syntax | Node box doesn't hold exactly one word |
+| Y003 | syntax | Dangling wire end |
+| Y004 | syntax | Dangling arrowhead |
+| Y005 | syntax | Wire with no sink |
+| Y006 | syntax | Two sources on one wire (a merge outside a switch) |
+| Y007 | syntax | Guard after the default arm |
+| Y008 | syntax | More than one default arm |
+| Y009 | syntax | Port without a name |
+| Y010 | syntax | Switch without a selector |
+| Y011 | syntax | Arms with different numbers of results |
+| Y012 | syntax | Stray text |
+| Y013 | syntax | Single-letter definition name (reserved for primitives) |
+| Y014 | syntax | Rounded box inside a definition (definitions don't nest) |
+| Y015 | syntax | Box with mixed corner styles |
+| Y016 | syntax | A guard on a box that has no dividers |
+| C001 | check | Unknown name |
+| C002 | check | Arity mismatch |
+| C003 | check | Cycle in a definition's wires |
+| C004 | check | Two definitions with one name |
+| C005 | check | No `·𐑥𐑱𐑯` |
+| C006 | check | `·𐑥𐑱𐑯` has inputs |
+| W001 | check | Switch without a default arm |
+| W002 | check | Unused definition input |
+| R001 | runtime | Integer overflow |
+| R002 | runtime | Division by zero |
+| R003 | runtime | Split of an empty list |
+| R004 | runtime | Type mismatch |
+| R005 | runtime | No arm matches |
+| R006 | runtime | `𐑠` (read) of text that isn't a number |
+| L001–L006 | fmt | The lints of §12, in table order |
+
+**Where a diagnostic points.** Positions are fixed so the corpus can check them:
+
+| Diagnostic is about | Position |
+|---|---|
+| A node or inline node (`Y002`, `C001`, `C002`, `R001`–`R004`, `R006`) | Its word |
+| A constant | The literal's first cell |
+| A switch (`Y010`, `Y011`, `W001`, `R005`) | Its selector `▼`; for `Y010`, its top-left corner |
+| A guard (`Y007`) | The guard's first cell |
+| A definition (`Y001`, `Y013`, `C004`, `C006`) | Its namer dot |
+| A port (`Y009`, `W002`) | Its arrowhead |
+| A wire end (`Y003`, `Y004`, `S010`) | The end's cell |
+| A whole wire (`Y005`, `Y006`) | The wire's first cell in row-major order |
+| A cycle (`C003`) | The word of the cycle's first node in row-major order |
+| No main (`C005`) | `0:0` |
+
+A wire with a dangling end gets `Y003` (or `Y004`) only, never also `Y005`.
+
+The corpus `.check` files list every static diagnostic (grid, shape, syntax, check, warnings), one per line as `ROW:COL CODE`, sorted.
+
+## 15. Bytecode
+
+The VM is a register machine with heap-allocated frames. Instructions, values, primitives and the `.shawasm` text format are specified in `shawline-vm/src/bytecode.rs`. Tail calls compile to `TailCall` (§10). Switch guards compile to `JumpIfNe` against a constant, falling through to the default arm or to `NoMatch`.
