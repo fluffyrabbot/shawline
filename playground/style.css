@@ -1,0 +1,311 @@
+/* The palette is shawline-render's Theme::LIGHT and Theme::DARK, so the page
+   and the drawings are one surface. Error and warning inks are the only
+   additions, kept muted to sit beside them. */
+
+@font-face {
+  font-family: "Shawline Mono";
+  src: url("ShawlineMono.ttf") format("truetype");
+  font-display: block;
+}
+
+:root {
+  --background: #faf9f6;
+  --text: #1b1d22;
+  --border: #4a4f59;
+  --wire: #2a5b8f;
+  --comment: #737882;
+  --error: #b0472f;
+  --warning: #9a6b14;
+  --rule: color-mix(in srgb, var(--border) 18%, transparent);
+  --wash: color-mix(in srgb, var(--border) 6%, transparent);
+
+  --mono: "Shawline Mono", ui-monospace, monospace;
+  /* Shawline Mono after the text faces, for Shavian inside prose. */
+  --serif: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, "Shawline Mono", serif;
+  --sans: system-ui, -apple-system, "Segoe UI", "Shawline Mono", sans-serif;
+  --cell: 20px;
+  --pad: 20px;
+  color-scheme: light;
+}
+
+:root[data-theme="dark"] {
+  --background: #17191e;
+  --text: #e8e6e1;
+  --border: #a9aeb8;
+  --wire: #86b0df;
+  --comment: #757b86;
+  --error: #e08b73;
+  --warning: #d8ad62;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+
+html {
+  background: var(--background);
+  color: var(--text);
+  font: 15px/1.55 var(--sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+body {
+  margin: 0 auto;
+  max-width: 1600px;
+  padding: 48px clamp(20px, 4vw, 64px) 40px;
+}
+
+h1, h2, p { margin: 0; }
+
+button, select, input { font: inherit; color: inherit; }
+
+:focus-visible { outline: 2px solid var(--wire); outline-offset: 2px; }
+
+/* Header */
+
+header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 24px 40px;
+  margin-bottom: 40px;
+}
+
+.title { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 16px; }
+
+h1 {
+  font: 400 34px/1 var(--serif);
+  letter-spacing: -0.01em;
+}
+
+.shavian {
+  font: 28px/1 var(--mono);
+  color: var(--wire);
+}
+
+.title p {
+  flex-basis: 100%;
+  color: var(--comment);
+  font: italic 17px/1.4 var(--serif);
+}
+
+.controls { display: flex; align-items: center; gap: 28px; }
+
+.label, h2 {
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--comment);
+}
+
+.picker { display: flex; align-items: center; gap: 10px; }
+
+select {
+  appearance: none;
+  background: transparent url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%23888' stroke-width='1.4'/%3E%3C/svg%3E") no-repeat right 10px center;
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  padding: 5px 30px 5px 10px;
+  cursor: pointer;
+}
+
+select option { background: var(--background); }
+
+.switch { display: flex; align-items: center; gap: 10px; cursor: pointer; user-select: none; }
+.switch input { position: absolute; opacity: 0; pointer-events: none; }
+.switch .track {
+  width: 30px; height: 18px;
+  border-radius: 9px;
+  background: var(--rule);
+  position: relative;
+  transition: background 0.2s;
+}
+.switch .track::after {
+  content: "";
+  position: absolute; top: 3px; left: 3px;
+  width: 12px; height: 12px;
+  border-radius: 50%;
+  background: var(--background);
+  transition: transform 0.2s;
+}
+.switch input:checked + .track { background: var(--wire); }
+.switch input:checked + .track::after { transform: translateX(12px); }
+.switch input:focus-visible + .track { outline: 2px solid var(--wire); outline-offset: 2px; }
+
+button {
+  border: 1px solid var(--rule);
+  background: transparent;
+  border-radius: 6px;
+  padding: 5px 14px;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+button:hover { background: var(--wash); border-color: color-mix(in srgb, var(--border) 35%, transparent); }
+button.primary { background: var(--wire); border-color: var(--wire); color: var(--background); font-weight: 500; }
+button.primary:hover { background: color-mix(in srgb, var(--wire) 88%, var(--text)); }
+button.primary.running { background: transparent; color: var(--wire); }
+
+:root[data-theme="light"] .when-dark,
+:root[data-theme="dark"] .when-light { display: none; }
+
+/* Panes */
+
+main {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 40px 48px;
+}
+
+.pane { min-width: 0; }
+
+.pane-head {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  /* Fixed, so the source and drawing rows start level. */
+  height: 46px;
+  padding-bottom: 10px;
+  margin-bottom: 18px;
+  border-bottom: 1px solid var(--rule);
+}
+
+.spacer { flex: 1; }
+.meta { color: var(--comment); font-size: 13px; font-variant-numeric: tabular-nums; }
+
+/* The editor: a textarea sized to its content, with diagnostic marks laid
+   under it. Every repertoire character is one cell, so a mark sits at
+   (col ch, row em). */
+
+.editor {
+  position: relative;
+  overflow: auto;
+  font: var(--cell)/1 var(--mono);
+}
+
+.editor textarea, #marks {
+  font: inherit;
+  padding: 0 0 var(--pad);
+  margin: 0;
+}
+
+.editor textarea {
+  position: relative;
+  display: block;
+  min-width: 100%;
+  min-height: 12em;
+  border: 0;
+  outline: 0;
+  resize: none;
+  overflow: hidden;
+  background: transparent;
+  color: var(--text);
+  caret-color: var(--wire);
+  tab-size: 1;
+  white-space: pre;
+}
+
+.editor textarea::selection { background: color-mix(in srgb, var(--wire) 22%, transparent); }
+
+#marks { position: absolute; inset: 0; pointer-events: none; }
+
+.mark {
+  position: absolute;
+  width: 1ch;
+  height: 1em;
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--ink) 16%, transparent);
+  box-shadow: inset 0 -2px 0 var(--ink);
+  transition: background 0.15s;
+}
+.mark.hot { background: color-mix(in srgb, var(--ink) 34%, transparent); }
+
+.error { --ink: var(--error); }
+.warning { --ink: var(--warning); }
+.lint { --ink: var(--comment); }
+
+/* The drawing */
+
+/* Drawn at the editor's scale and pulled up and left by the renderer's
+   margin, so each row of the drawing sits level with its source row. */
+#drawing { overflow: auto; font: var(--cell)/0 var(--mono); }
+#drawing svg { display: block; margin: -0.5em 0 0 -1ch; max-width: calc(100% + 1ch); height: auto; cursor: text; }
+#drawing svg.stale { opacity: 0.35; transition: opacity 0.2s; }
+#drawing .cell { fill: var(--ink); opacity: 0.22; transition: opacity 0.15s; }
+#drawing .cell.hot { opacity: 0.45; }
+
+/* Diagnostics and output */
+
+#problems { list-style: none; margin: 0; padding: 0; }
+
+#problems li {
+  display: grid;
+  grid-template-columns: 4.5em 3.5em 1fr;
+  align-items: baseline;
+  gap: 12px;
+  padding: 7px 10px;
+  margin: 0 -10px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+#problems li:hover, #problems li.hot { background: var(--wash); }
+#problems li.clear { cursor: default; color: var(--comment); grid-template-columns: 1fr; }
+#problems li.clear:hover { background: none; }
+
+.pos { color: var(--comment); font-variant-numeric: tabular-nums; font-size: 13px; }
+.code { color: var(--ink); font-weight: 600; font-size: 13px; letter-spacing: 0.02em; }
+.message { font-family: var(--sans); }
+
+#output {
+  margin: 0;
+  font: var(--cell)/1.3 var(--mono);
+  white-space: pre-wrap;
+  min-height: 3em;
+}
+#output .hint, #drawing .hint { font: italic 15px/1.55 var(--serif); color: var(--comment); }
+#output .failure { color: var(--error); cursor: pointer; font: 15px/1.55 var(--sans); }
+
+/* Footer */
+
+footer {
+  margin-top: 64px;
+  padding-top: 20px;
+  border-top: 1px solid var(--rule);
+  color: var(--comment);
+}
+
+summary { cursor: pointer; width: max-content; font: italic 16px/1.6 var(--serif); }
+summary:hover { color: var(--text); }
+details p { max-width: 64ch; margin: 14px 0 20px; }
+
+kbd {
+  font: 13px var(--sans);
+  padding: 1px 6px;
+  margin: 0 1px;
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  color: var(--text);
+}
+
+#keys {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 24px;
+  display: grid;
+  /* Ten to a row stacks each letter over its mirror: 𐑐 over 𐑚. */
+  grid-template-columns: repeat(10, minmax(0, 72px));
+  gap: 4px 12px;
+}
+#keys li { display: flex; align-items: baseline; gap: 10px; }
+#keys .letter { font: 26px/1.2 var(--mono); color: var(--text); width: 1ch; }
+#keys .keys { font: 13px var(--sans); }
+
+.colophon { font: italic 15px/1.6 var(--serif); margin-top: 8px; }
+
+@media (max-width: 900px) {
+  body { padding-top: 32px; }
+  main { grid-template-columns: minmax(0, 1fr); }
+  .controls { flex-wrap: wrap; gap: 16px 24px; }
+  :root { --cell: 18px; }
+  #keys { grid-template-columns: repeat(5, minmax(0, 72px)); }
+}
