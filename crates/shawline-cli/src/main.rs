@@ -55,7 +55,7 @@ fn main() -> ExitCode {
         "fmt" => match shawline_cli::format(&src) {
             Ok(text) if flag("--write") => {
                 if text != src
-                    && let Err(e) = fs::write(path, &text)
+                    && let Err(e) = replace(path, &text)
                 {
                     eprintln!("shawline: {path}: {e}");
                     return ExitCode::FAILURE;
@@ -105,6 +105,18 @@ fn main() -> ExitCode {
         }
     }
     ExitCode::SUCCESS
+}
+
+/// Writes `text` over `path` without ever leaving it half-written: the new
+/// text goes to a sibling file first, which then replaces the original.
+fn replace(path: &str, text: &str) -> std::io::Result<()> {
+    let target = std::path::Path::new(path);
+    let name = target.file_name().map(|n| n.to_string_lossy()).unwrap_or_default();
+    let temp = target.with_file_name(format!(".{name}.shawline-tmp"));
+    fs::write(&temp, text)?;
+    fs::rename(&temp, target).inspect_err(|_| {
+        let _ = fs::remove_file(&temp);
+    })
 }
 
 /// Prints `d` with its source line and a caret. Every repertoire character is
