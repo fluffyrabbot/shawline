@@ -10,6 +10,15 @@ use crate::bytecode::{FuncId, Instr, Module, Prim, Reg, Value};
 use crate::value::equal;
 use crate::verify::verify;
 
+/// The deepest calls may nest (SPEC §10). Beyond it a program stops with
+/// `R007` instead of growing until the machine runs out of memory.
+pub const MAX_FRAMES: usize = 1_000_000;
+
+/// The most values the live frames may hold together: 256 MB of registers.
+/// It bounds memory for definitions with many values, which reach it in
+/// fewer than [`MAX_FRAMES`] calls.
+pub const MAX_REGISTERS: usize = 1 << 24;
+
 /// An activation record. Its registers are `regs[base..base + registers]` in
 /// the shared register file, so a call costs a resize, not an allocation.
 struct Frame {
@@ -24,7 +33,7 @@ struct Frame {
 /// Runs `main` with no arguments and returns its results.
 ///
 /// The module is verified first; a malformed one is reported as `A001`.
-/// Runtime errors are `R001`–`R006`, positioned at the failing instruction's
+/// Runtime errors are `R001`–`R007`, positioned at the failing instruction's
 /// span.
 pub fn run(module: &Module) -> Result<Vec<Value>, Diagnostic> {
     execute(module).map(|(results, _)| results)
@@ -70,6 +79,11 @@ pub(crate) fn execute(module: &Module) -> Result<(Vec<Value>, usize), Diagnostic
                 pc += 1;
             }
             Instr::Call { func, base: args, argc, dst } => {
+                let needed = module.functions[func as usize].registers as usize;
+                if frames.len() >= MAX_FRAMES || regs.len() + needed > MAX_REGISTERS {
+                    let message = format!("call stack exhausted {} calls deep", frames.len());
+                    return Err(Diagnostic::new(f.spans[pc], "R007", message));
+                }
                 frames.last_mut().expect("a running frame").pc = pc + 1;
                 f = &module.functions[func as usize];
                 let callee = regs.len();
@@ -225,5 +239,31 @@ main 𐑥𐑱𐑯
         let (results, peak) = execute(&assemble(src).unwrap()).unwrap();
         assert_eq!(results, [Value::Int(1_000_000)]);
         assert_eq!(peak, 2, "main and one reused frame");
+    }
+
+    /// Runaway recursion stops at the call, long before memory runs out.
+    #[test]
+    fn runaway_recursion_is_r007() {
+        let deep = |registers: u16| {
+            format!(
+                "
+fn 𐑛𐑰𐑐 params 1 results 1 registers {registers}
+  call 𐑛𐑰𐑐 r0 1 r1 at 3:4
+  ret r1 1
+end
+fn 𐑥𐑱𐑯 params 0 results 1 registers 1
+  const k0 0
+  const r0 k0
+  call 𐑛𐑰𐑐 r0 1 r0
+  ret r0 1
+end
+main 𐑥𐑱𐑯
+"
+            )
+        };
+        for registers in [2, 60_000] {
+            let err = run(&assemble(&deep(registers)).unwrap()).unwrap_err();
+            assert_eq!((err.code, err.at), ("R007", Pos::new(3, 4)), "{registers} registers");
+        }
     }
 }

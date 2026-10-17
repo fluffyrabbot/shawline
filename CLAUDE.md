@@ -10,6 +10,7 @@ A dataflow programming language whose source is a drawing: Shavian-alphabet word
 - `cargo run --bin shawline -- check|run|fmt|render [--dark]|diagram|ast <file.shaw>`
 - `cargo run -p shawline-font --example build -- <out.ttf>`: build Shawline Mono
 - `cargo clippy --workspace --all-targets`
+- `scripts/capped [--mem MB] [--time S] -- <command>`: run a command under a memory and time cap
 
 ## Rules for agents
 
@@ -18,6 +19,7 @@ A dataflow programming language whose source is a drawing: Shavian-alphabet word
 - Your oracle is your crate's tests and your corpus stage. Corpus failures in other stages are expected while a wave is in flight.
 - Don't review or test other agents' crates, add harness or mock crates, or introduce snapshot frameworks.
 - New crates.io dependencies go in your own crate's `Cargo.toml` only.
+- Run anything that executes generated or mutated programs (fuzzers, property loops, scratch harnesses, `shawline run` on inputs you made up) under `scripts/capped`. It kills the whole process tree past 2 GB or 120 s. Keep such loops finite. macOS ignores `ulimit -v`, and an uncapped fuzzer once took this machine to 46 GB and froze it. The VM's call limit (`R007`) bounds recursion, but nothing bounds parser, formatter or harness code.
 
 ## Code conventions
 

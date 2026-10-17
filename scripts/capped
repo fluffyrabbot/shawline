@@ -1,0 +1,62 @@
+#!/usr/bin/env bash
+# Runs a command under a memory and time cap, killing its whole process tree
+# when either is exceeded. macOS ignores `ulimit -v`, so this polls instead.
+#
+#   scripts/capped [--mem MB] [--time SECONDS] -- command [args...]
+#
+# Defaults: 2048 MB resident across the tree, 120 s. On a breach it prints why
+# on stderr and exits 137; otherwise it exits with the command's own status.
+set -u
+
+mem=2048
+limit=120
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --mem) mem=$2; shift 2 ;;
+    --time) limit=$2; shift 2 ;;
+    --) shift; break ;;
+    *) break ;;
+  esac
+done
+if [ $# -eq 0 ]; then
+  echo "usage: scripts/capped [--mem MB] [--time SECONDS] -- command [args...]" >&2
+  exit 2
+fi
+
+"$@" &
+pid=$!
+
+# The command and every process it started, however deep.
+tree() {
+  local all=$1 frontier=$1 next p
+  while [ -n "$frontier" ]; do
+    next=""
+    for p in $frontier; do
+      next="$next $(pgrep -P "$p" | tr '\n' ' ')"
+    done
+    frontier=$(echo $next)
+    all="$all $frontier"
+  done
+  echo $all
+}
+
+start=$SECONDS
+while kill -0 "$pid" 2>/dev/null; do
+  pids=$(tree "$pid")
+  rss=$(ps -o rss= -p "$(echo $pids | tr ' ' ',')" 2>/dev/null | awk '{s += $1} END {print s + 0}')
+  elapsed=$((SECONDS - start))
+  reason=""
+  if [ "$rss" -gt $((mem * 1024)) ]; then
+    reason="$((rss / 1024)) MB resident, over the $mem MB cap"
+  elif [ "$elapsed" -ge "$limit" ]; then
+    reason="still running after $limit s"
+  fi
+  if [ -n "$reason" ]; then
+    kill -9 $pids 2>/dev/null
+    wait "$pid" 2>/dev/null
+    echo "capped: killed $* ($reason)" >&2
+    exit 137
+  fi
+  sleep 0.2
+done
+wait "$pid"

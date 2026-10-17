@@ -180,10 +180,10 @@ enum Callee<'a> {
 
 fn callee<'a>(sheet: &'a Sheet, name: &Name) -> Callee<'a> {
     let mut chars = name.text.chars();
-    if let (Some(c), None) = (chars.next(), chars.next()) {
-        if let Some(p) = Prim::from_letter(c) {
-            return Callee::Primitive(p);
-        }
+    if let (Some(c), None) = (chars.next(), chars.next())
+        && let Some(p) = Prim::from_letter(c)
+    {
+        return Callee::Primitive(p);
     }
     sheet
         .definitions

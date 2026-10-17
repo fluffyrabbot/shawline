@@ -11,7 +11,7 @@ mod vm;
 
 pub use asm::{assemble, disassemble};
 pub use value::equal;
-pub use vm::run;
+pub use vm::{MAX_FRAMES, MAX_REGISTERS, run};
 
 /// The code for malformed bytecode or `.shawasm`, which SPEC §14 leaves
 /// unassigned: `A` for assembler.

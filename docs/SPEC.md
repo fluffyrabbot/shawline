@@ -231,6 +231,7 @@ A runtime error prints nothing on stdout. It prints `error ROW:COL CODE: message
 - Nodes run in dependency order. The order among independent nodes is unobservable.
 - A switch evaluates only the arm it selects.
 - Calls must not consume the host stack, and recursion at least 100 000 deep must work.
+- Calls are bounded: a program that nests more than 1 000 000 calls, or whose live calls hold more than 16 777 216 values together (256 MB), stops with `R007` at the call that went too deep. Without the bound, a recursion whose base case is never reached grows until the machine runs out of memory. Tail calls don't nest, so they never reach it.
 - A call whose outputs go only to the enclosing definition's outputs, in the same order (directly, or through switch arm outputs), is a **tail call**, and it must run in constant stack. A call whose results reach the outputs reordered or duplicated is an ordinary call.
 
 ## 11. Canonical form
@@ -347,6 +348,7 @@ Every diagnostic has a stable code. The corpus checks codes and positions, never
 | R004 | runtime | Type mismatch |
 | R005 | runtime | No arm matches |
 | R006 | runtime | `𐑠` (read) of text that isn't a number |
+| R007 | runtime | Call stack exhausted: calls nested too deep (§10) |
 | A001 | asm | Malformed `.shawasm` or bytecode |
 | L001–L006 | fmt | The lints of §12, in table order |
 
@@ -354,7 +356,7 @@ Every diagnostic has a stable code. The corpus checks codes and positions, never
 
 | Diagnostic is about | Position |
 |---|---|
-| A node or inline node (`Y002`, `C001`, `C002`, `R001`–`R004`, `R006`) | Its word |
+| A node or inline node (`Y002`, `C001`, `C002`, `R001`–`R004`, `R006`, `R007`) | Its word |
 | A constant or literal (`Y017`) | The literal's first cell |
 | A switch (`Y010`, `Y011`, `W001`, `R005`) | Its selector `▼`; for `Y010`, its top-left corner |
 | A guard (`Y007`) | The guard's first cell |

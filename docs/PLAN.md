@@ -92,6 +92,7 @@ These prevent the cross-verification churn that swarms tend to accumulate:
 - No intermediate-form parsers exist just for tests. Dumps (`.diagram`, `.ast`) are output-only. A stage that needs upstream input either builds it in its own unit tests or waits for the gate. The VM's `.shawasm` assembler is the one exception, and it ships as a product feature.
 - No wave is re-run for review. A gate failure is fixed by the lead, or by one targeted fix agent briefed with the failing corpus case, and the oracle is then re-run once.
 - The audit fleet runs once per milestone (P5), with at most two lenses, and the lead triages the findings. Fixes are never applied automatically.
+- No agent, audit agents included, runs generated or mutated programs outside `scripts/capped` (see Mechanics).
 
 ### Verification budget
 
@@ -111,6 +112,7 @@ These prevent the cross-verification churn that swarms tend to accumulate:
 - **Spawning:** a wave launches in a single message: one `Agent` call per brief, `isolation: "worktree"`, background, general-purpose agents. An agent may instead run through the `codex-56-implement` or `grok-45-implement` skill with the same brief. At most 5 agents run at once; more agents would mean more seams than crates.
 - **Done means:** the agent's own crate tests are green, clippy is clean for its crate, its own corpus stage passes where it has one, and the work is committed on its branch. It ends with a report of at most 200 words covering what landed, any friction with the contract, and any deviations from the brief.
 - **Contract change mid-wave:** if a change blocks an agent, the lead edits the contract on `main`, commits, and tells the affected agents (`SendMessage`) to rebase. Otherwise the change waits for the gate.
+- **Resource caps:** every brief, audit briefs included, says to run generated or mutated programs (fuzzers, property loops, scratch harnesses) under `scripts/capped`, which kills the whole process tree past 2 GB or 120 s, and to keep such loops finite. macOS has no working `ulimit -v`.
 - **Dependencies:** an agent may add crates.io dependencies to its own crate only. These are pre-approved: `kurbo` (glyph, font), `write-fonts`/`read-fonts` (font), `resvg`/`tiny-skia` (dev-only previews), `tower-lsp`/`tokio` (lsp), `wasm-bindgen` (playground), `miette` (cli). Anything else is mentioned in the report. Accepted at gates: `skrifa` (font, dev-only), `lsp-server`/`lsp-types` (lsp: maintained, and synchronous, so a typed key's edit always arrives before its transliteration request), `js-sys` (wasm, without its default features).
 
 ### Agent brief template
@@ -233,6 +235,16 @@ Done by one mind, because this is where conceptual integrity is set.
 - One audit pass, with lenses picked via the `agent-fleet` skill (at most two; likely `dijkstra-correctness-auditor` on VM/IR and `data-integrity-architect` on formatter round-trips). The lead triages and batches the fixes.
 - A jitter corpus: the canonical programs with random one-cell perturbations must format back to their canonical form.
 - `shawline fmt --fix`: repairs ragged boxes, which plain formatting must leave alone (SPEC §11 rule 6).
+
+Progress:
+- [x] Jitter corpus (`crates/shawline-corpus/tests/jitter.rs`): 15 canonical programs × 24 seeds. Perturbations are glyph swaps to ASCII (never the `+ . '` joints), trailing spaces, doubled blank lines, text gaps filled with wire (rule 4), and one-cell wire bumps (rule 5, wire cells only). All 360 format back exactly. The test asserts that bumps and fills actually fired, so it can't pass vacuously.
+- [x] Incident and fix: the formatter-integrity audit agent built a scratch fuzzer that also *ran* random mutants. A mutant whose base case was never reached recursed without bound, because the VM's heap frames had no limit. It peaked at 46 GB, and macOS froze. Fixes:
+  - the VM caps calls at 1 000 000 frames and 16 M live registers, stopping with the new `R007` (SPEC §10, §14);
+  - corpus case `83-runaway`;
+  - `scripts/capped` and the rule above for every agent.
+- [ ] Audit pass: both audits were cut short by the freeze. The formatter fuzzer left 18 unverified "meaning changed" mutants in `/tmp/fmtfuzz/out` (scratch, outside the repo), to be triaged when the audits re-run under `scripts/capped`.
+- [ ] `fmt --fix`.
+- [ ] Gallery review and lint tuning.
 
 ## Risks
 

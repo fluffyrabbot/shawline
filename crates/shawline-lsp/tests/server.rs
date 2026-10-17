@@ -79,10 +79,10 @@ impl Client {
     /// Waits for the next published diagnostics.
     fn diagnostics(&self) -> Vec<Value> {
         loop {
-            if let Message::Notification(n) = self.conn.receiver.recv().unwrap() {
-                if n.method == "textDocument/publishDiagnostics" {
-                    return n.params["diagnostics"].as_array().unwrap().clone();
-                }
+            if let Message::Notification(n) = self.conn.receiver.recv().unwrap()
+                && n.method == "textDocument/publishDiagnostics"
+            {
+                return n.params["diagnostics"].as_array().unwrap().clone();
             }
         }
     }
