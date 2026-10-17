@@ -1,0 +1,32 @@
+wire 0 cells 4
+  end 2:1 E open
+  end 4:0 S blocked
+wire 1 cells 15
+  end 2:10 W open
+  end 4:22 S blocked
+wire 2 cells 1
+  end 5:0 E arrow
+  end 5:0 W open
+wire 3 cells 10
+  tee 5:6
+  end 5:4 W open
+  end 5:9 E port 5:10
+  end 6:9 E port 6:10
+wire 4 cells 8
+  end 5:15 W port 5:14
+  end 5:22 E arrow
+wire 5 cells 27
+  end 6:0 N blocked
+  end 8:22 N open
+wire 6 cells 1
+  end 6:22 N blocked
+  end 6:22 S open
+wire 7 cells 1
+  end 7:24 N open
+  end 7:24 S open
+wire 8 cells 3
+  end 14:5 W open
+  end 14:7 E port 14:8
+wire 9 cells 5
+  end 14:17 W port 14:16
+  end 14:21 E port 14:22

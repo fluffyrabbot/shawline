@@ -244,7 +244,7 @@ A runtime error prints nothing on stdout. It prints `error ROW:COL CODE: message
   - **Calls** (`R007`, at the call that went too deep): more than 1 000 000 calls nested below `·𐑥𐑱𐑯`, or more than 16 777 216 values held by live calls together (about 400 MB). Tail calls don't nest, so they never reach the first limit.
   - **Heap** (`R008`, at the node that allocated): more than 8 388 608 pairs and list cells alive at once. This catches a tail loop that keeps growing a list, which the call limit can't see.
   - **Output** (`R009`, at `·𐑥𐑱𐑯`'s namer dot): a result whose printed form would exceed 1 000 000 characters. Pairs can share parts, so a few cells can describe an astronomically large value.
-- A call whose outputs are exactly the enclosing definition's outputs, all of them, in the same order, and read by nothing else (directly, or through switch arm outputs), is a **tail call**, and it must run in constant stack. A call whose results reach the outputs reordered, duplicated or only partly is an ordinary call.
+- A call whose outputs are exactly the enclosing definition's outputs, all of them, in the same order, and read by nothing else (directly, or through switch arm outputs), is a **tail call**, and it must run in constant stack. A call whose results reach the outputs reordered, duplicated or only partly is an ordinary call. Calls inside `·𐑥𐑱𐑯` itself are never tail calls, so its results can be measured (`R009`) before the program ends.
 
 ## 11. Canonical form
 

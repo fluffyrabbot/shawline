@@ -242,7 +242,13 @@ Progress:
   - the VM caps calls at 1 000 000 frames and 16 M live registers, stopping with the new `R007` (SPEC §10, §14);
   - corpus case `83-runaway`;
   - `scripts/capped` and the rule above for every agent.
-- [ ] Audit pass: both audits were cut short by the freeze. The formatter fuzzer left 18 unverified "meaning changed" mutants in `/tmp/fmtfuzz/out` (scratch, outside the repo), to be triaged when the audits re-run under `scripts/capped`.
+- [x] VM/IR audit (`jackson-counterexample-auditor`), re-run under the cap.
+  - **No miscompile** in about 310 000 programs differentially fuzzed against a reference interpreter.
+  - **Ten defects**, triaged into SPEC (`Y019`, a reserved `𐑯𐑦𐑤`, a defined runtime-error order, `R008` heap and `R009` output limits) and fixed by agent V. New cases: `14-nil-box`, `84-heap-runaway` and `static/01`–`02`.
+  - **The lead added `I001`:** `check` guarantees a program whenever there are no errors, so the CLI and playground can't panic.
+  - **Deviation accepted:** `·𐑥𐑱𐑯`'s own calls are never tail calls.
+  - **Lesson:** the lead ran case 84 through a stale prebuilt binary, uncapped, and it reached 5.1 GB. The rule now requires `cargo run` under `scripts/capped`.
+- [ ] Formatter audit (`data-integrity-architect`): still running, re-run under the cap; it is triaging its 18 fuzzed "meaning changed" mutants.
 - [x] Design for `fmt --fix`, recorded in SPEC §3 (near boxes), §11 rule 6 and §14 (`S012`), with cases in `corpus/fix/`. While designing it, it turned out that one slipped border cell made the whole box unrecognizable and produced 24 cascading diagnostics, none at the cause. Near boxes therefore become an error-recovery feature of the shape stage: the box is still recognized, its slipped cells are recorded, and the user gets one `S012` at the slipped cell. `fmt --fix` then moves recorded slips into place.
 - [ ] Wave P5 (after audit triage). The formatter keeps a single writer.
   - **F**, one agent owning `shawline-shape` (outside `wire.rs`) and `shawline-fmt`, does three things: near-box recognition (slips recorded on `BoxShape`, excluded from wire tracing, `S012`), `fix` and `fmt --fix`, and the confirmed formatter audit findings.

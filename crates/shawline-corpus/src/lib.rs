@@ -94,7 +94,7 @@ pub fn root() -> PathBuf {
 }
 
 /// Every `.shaw` program under `dir`, sorted. Expected formatter output
-/// (`*.fmt.shaw`) is not itself a program.
+/// (`*.fmt.shaw`, `*.fix.shaw`) is not itself a program.
 pub fn programs(dir: &Path) -> Vec<PathBuf> {
     let mut found = Vec::new();
     let mut pending = vec![dir.to_path_buf()];
@@ -104,7 +104,7 @@ pub fn programs(dir: &Path) -> Vec<PathBuf> {
             if path.is_dir() {
                 pending.push(path);
             } else if path.extension().is_some_and(|e| e == "shaw")
-                && !path.to_string_lossy().ends_with(".fmt.shaw")
+                && ![".fmt.shaw", ".fix.shaw"].iter().any(|e| path.to_string_lossy().ends_with(e))
             {
                 found.push(path);
             }

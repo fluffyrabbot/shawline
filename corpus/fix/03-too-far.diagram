@@ -1,0 +1,22 @@
+box 0 square 4:10-7:14
+  port 5:10 side W arrow E
+  port 5:14 side E tee E
+  port 6:10 side W arrow E
+box 1 rounded 11:0-17:22
+  port 14:22 side E arrow E
+box 2 square 13:8-15:16 in 1
+  port 14:8 side W arrow E
+  port 14:16 side E tee E
+text comment 0:0 "𐑛𐑳𐑚𐑩𐑤"
+text word 2:3 "·𐑛𐑳𐑚𐑩𐑤"
+text word 5:2 "𐑯"
+text word 5:12 "𐑐" in 0
+text word 5:24 "𐑬"
+text word 11:3 "·𐑥𐑱𐑯" title 1
+text number 14:2 "21" in 1
+text word 14:10 "𐑛𐑳𐑚𐑩𐑤" in 2
+text word 14:24 "𐑬"
+diagnostic 4:0 S010: wire runs S into a stroke that doesn't join it
+diagnostic 4:22 S010: wire runs S into a stroke that doesn't join it
+diagnostic 6:0 S010: wire runs N into a stroke that doesn't join it
+diagnostic 6:22 S010: wire runs N into a stroke that doesn't join it

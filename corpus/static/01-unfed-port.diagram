@@ -1,0 +1,11 @@
+box 0 rounded 2:0-9:19
+  port 5:19 side E arrow E
+box 1 square 4:8-7:12 in 0
+  port 5:8 side W arrow E
+  port 5:12 side E tee E
+  port 6:8 side W arrow E
+text comment 0:0 "𐑳𐑯𐑓𐑧𐑛"
+text word 2:3 "·𐑥𐑱𐑯" title 0
+text number 5:2 "5" in 0
+text word 5:10 "𐑐" in 1
+text word 5:21 "𐑬"

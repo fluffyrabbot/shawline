@@ -1,0 +1,3 @@
+wire 0 cells 8
+  end 5:11 W port 5:10
+  end 5:18 E port 5:19

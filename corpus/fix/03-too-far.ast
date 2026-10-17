@@ -1,0 +1,9 @@
+def ·? at 4:10 box 4:10-7:14
+  param 0 𐑐 at 5:12 arrow 5:10
+  param 1 ? at 6:10 arrow 6:10
+def ·𐑥𐑱𐑯 at 11:3 box 11:0-17:22
+  result 0 𐑬 at 14:24 arrow 14:22
+  node 0 call 𐑛𐑳𐑚𐑩𐑤 at 14:10 box 13:8-15:16 in 14:8 out 14:16
+  node 1 const 21 cells 14:2-14:3 out 14:5
+  edge wire 8: node 1 out 0 -> node 0 in 0
+  edge wire 9: node 0 out 0 -> result 0
