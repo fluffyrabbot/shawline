@@ -121,3 +121,139 @@ fn unfed_slot_is_reported_by_lowering_too() {
     let got: Vec<_> = diags.iter().map(|d| (d.at, d.code)).collect();
     assert_eq!(got, [(Pos::new(2, 2), "Y019")]);
 }
+
+mod order {
+    //! Evaluation order around results-producing instructions (SPEC §10),
+    //! built as IR so each case is exactly the shape under test.
+
+    use shawline_grid::Pos;
+    use shawline_syntax::ast::Literal;
+    use shawline_vm::bytecode::{Instr, Prim, Value as VmValue};
+
+    use crate::compile;
+    use crate::ir::{Arm, Block, Function, Inst, Op, Program, Value};
+
+    fn at(row: usize) -> Pos {
+        Pos::new(row, 0)
+    }
+
+    fn inst(op: Op, row: usize) -> Inst {
+        Inst { op, at: at(row) }
+    }
+
+    fn int(n: i64) -> Op {
+        Op::Const(Literal::Int(n))
+    }
+
+    fn out(inst: u32) -> Value {
+        Value::Out { inst, output: 0 }
+    }
+
+    fn prim(prim: Prim, args: &[Value]) -> Op {
+        Op::Prim { prim, args: args.to_vec() }
+    }
+
+    fn function(name: &str, body: Block, row: usize) -> Function {
+        Function { name: name.into(), body, at: at(row) }
+    }
+
+    /// `1 ÷ 0`, whose output nothing reads, at `row`.
+    fn dead_division(first: u32, row: usize) -> [Inst; 3] {
+        let div = prim(Prim::Div, &[out(first), out(first + 1)]);
+        [inst(int(1), row), inst(int(0), row), inst(div, row)]
+    }
+
+    fn run(functions: Vec<Function>, main: u32) -> Result<Vec<VmValue>, String> {
+        let module = compile(&Program { functions, main });
+        shawline_vm::run(&module).map_err(|d| format!("{} {}", d.at, d.code))
+    }
+
+    /// A switch is not a tail call: its `R005` comes before a later node's
+    /// `R002`, even though the switch's outputs are main's results.
+    #[test]
+    fn results_switch_keeps_its_place() {
+        let body = Block { params: 0, insts: vec![inst(int(9), 2)], results: vec![out(0)] };
+        let arm = Arm { guard: Some(Literal::Int(0)), args: Vec::new(), body };
+        let mut insts = vec![
+            inst(int(1), 1),
+            inst(Op::Switch { selector: out(0), arms: vec![arm], outputs: 1 }, 2),
+        ];
+        insts.extend(dead_division(2, 3));
+        let main = function("𐑥𐑱𐑯", Block { params: 0, insts, results: vec![out(1)] }, 0);
+        assert_eq!(run(vec![main], 0), Err("2:0 R005".into()));
+    }
+
+    /// Main's calls are never tail calls, so a call feeding main's results
+    /// runs before a later independent node.
+    #[test]
+    fn main_call_keeps_its_place() {
+        let failing = Block {
+            params: 0,
+            insts: vec![
+                inst(Op::Const(Literal::Text("𐑐".into())), 1),
+                inst(prim(Prim::Read, &[out(0)]), 1),
+            ],
+            results: vec![out(1)],
+        };
+        let mut insts = vec![inst(Op::Call { func: 0, args: Vec::new() }, 5)];
+        insts.extend(dead_division(1, 6));
+        let main = function("𐑥𐑱𐑯", Block { params: 0, insts, results: vec![out(0)] }, 4);
+        assert_eq!(run(vec![function("𐑓𐑱𐑤", failing, 0), main], 1), Err("1:0 R006".into()));
+    }
+
+    /// `·𐑒𐑬𐑯𐑑(n)`: a switch on `n` whose default arm tail-calls itself with
+    /// `n − 1`, then `trailing` after the switch. With `fail_in_arm`, the arm
+    /// first reads a word as a number, which fails.
+    fn countdown(fail_in_arm: bool, trailing: Vec<Inst>) -> Function {
+        let mut insts = vec![
+            inst(int(1), 3),
+            inst(prim(Prim::Sub, &[Value::Param(0), out(0)]), 3),
+            inst(Op::Call { func: 0, args: vec![out(1)] }, 3),
+        ];
+        if fail_in_arm {
+            insts.push(inst(Op::Const(Literal::Text("𐑐".into())), 4));
+            insts.push(inst(prim(Prim::Read, &[out(3)]), 4));
+        }
+        let default = Block { params: 1, insts, results: vec![out(2)] };
+        let base = Block { params: 0, insts: vec![inst(int(0), 2)], results: vec![out(0)] };
+        let arms = vec![
+            Arm { guard: Some(Literal::Int(0)), args: Vec::new(), body: base },
+            Arm { guard: None, args: vec![Value::Param(0)], body: default },
+        ];
+        let mut insts = vec![inst(Op::Switch { selector: Value::Param(0), arms, outputs: 1 }, 1)];
+        insts.extend(trailing);
+        function("𐑒𐑬𐑯𐑑", Block { params: 1, insts, results: vec![out(0)] }, 0)
+    }
+
+    fn calling(n: i64) -> Function {
+        let insts = vec![inst(int(n), 9), inst(Op::Call { func: 0, args: vec![out(0)] }, 9)];
+        function("𐑥𐑱𐑯", Block { params: 0, insts, results: vec![out(1)] }, 8)
+    }
+
+    /// The arm's own nodes run where the switch is, before the nodes after
+    /// it; only the tail call itself waits until last.
+    #[test]
+    fn switch_arm_runs_before_later_nodes() {
+        let mut f = countdown(true, Vec::new());
+        f.body.insts.extend(dead_division(1, 6));
+        assert_eq!(run(vec![f, calling(3)], 1), Err("4:0 R006".into()));
+    }
+
+    /// Nodes after a tail-position switch still let its arms tail-call, and
+    /// they run on every pass, before the tail call.
+    #[test]
+    fn deferred_nodes_keep_tail_calls() {
+        // `10 ÷ n`: fails only once the countdown reaches 0.
+        let trailing = vec![inst(int(10), 6), inst(prim(Prim::Div, &[out(1), Value::Param(0)]), 7)];
+        let f = countdown(false, trailing.clone());
+        let module = compile(&Program { functions: vec![f.clone(), calling(3)], main: 1 });
+        assert!(module.functions[0].code.iter().any(|i| matches!(i, Instr::TailCall { .. })));
+        assert_eq!(run(vec![f, calling(3)], 1), Err("7:0 R002".into()));
+
+        // `10 + n` never fails, and deep recursion still runs in constant stack.
+        let mut fine = trailing;
+        fine[1].op = prim(Prim::Add, &[out(1), Value::Param(0)]);
+        let f = countdown(false, fine);
+        assert_eq!(run(vec![f, calling(2_000_000)], 1), Ok(vec![VmValue::Int(0)]));
+    }
+}

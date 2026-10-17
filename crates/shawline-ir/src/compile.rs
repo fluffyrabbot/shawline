@@ -16,9 +16,11 @@ use crate::ir::{Block, Function, Op, Program, Value};
 /// `TailCall`, including through the arms of a switch whose results are, in
 /// turn, exactly the enclosing results (SPEC §10).
 ///
-/// Main is the exception: its tail call still runs last but as a plain call,
-/// so main's frame survives to its own `Return`. Every `Return` sits at its
-/// definition's namer dot, which is where `R009` points (SPEC §14).
+/// Only a tail call runs out of row-major order. A switch whose outputs are the
+/// results stays in place, and the nodes after it run inside each arm, before
+/// the arm's own tail call or return. Main has no tail calls, so its frame
+/// survives to its own `Return`. Every `Return` sits at its definition's namer
+/// dot, which is where `R009` points (SPEC §14).
 pub fn compile(program: &Program) -> bc::Module {
     let functions = program
         .functions
@@ -45,7 +47,7 @@ fn function(program: &Program, f: &Function, tail_calls: bool) -> bc::Function {
         high: 0,
     };
     let params: Vec<Reg> = (0..f.body.params).map(|_| e.alloc()).collect();
-    e.block(&f.body, &params, true, Ctx::Tail, f.at);
+    e.block(&f.body, &params, true, Ctx::Tail, f.at, &[]);
     let results = f.body.results.len();
     let registers = e.high.max(params.len()).max(results);
     bc::Function {
@@ -71,6 +73,14 @@ enum Ctx<'a> {
     /// They are a switch's outputs: move them into these registers. The
     /// switch emits the jump to its end.
     Join(&'a [Reg]),
+}
+
+/// Nodes that row-major order puts after a tail-position switch, rebuilt as a
+/// block that reads the enclosing values it needs as parameters.
+#[derive(Clone)]
+struct Deferred {
+    block: Block,
+    params: Vec<Reg>,
 }
 
 struct Emitter<'p> {
@@ -161,16 +171,30 @@ impl Emitter<'_> {
 
     /// Emits `b` with its parameters in `params`. `owned` says whether the
     /// block may reuse its parameters' registers: an arm's parameters belong
-    /// to the enclosing block.
-    fn block(&mut self, b: &Block, params: &[Reg], owned: bool, ctx: Ctx, at: Pos) {
-        let tail = match ctx {
-            Ctx::Tail => self.tail_inst(b),
-            Ctx::Join(_) => None,
+    /// to the enclosing block. In tail context, `deferred` runs just before
+    /// the block's tail call or return.
+    fn block(
+        &mut self,
+        b: &Block,
+        params: &[Reg],
+        owned: bool,
+        ctx: Ctx,
+        at: Pos,
+        deferred: &[Deferred],
+    ) {
+        let direct = match ctx {
+            Ctx::Tail => self.direct_inst(b),
+            Ctx::Join(_) => {
+                debug_assert!(deferred.is_empty(), "only tail blocks defer");
+                None
+            }
         };
-        // Nothing reads the tail instruction's outputs, so it can go last.
+        // Only a tail call may run out of row-major order (SPEC §10). Nothing
+        // reads its outputs, so it can go last.
+        let moved = direct.filter(|&i| self.tail_calls && matches!(b.insts[i].op, Op::Call { .. }));
         let order: Vec<usize> = (0..b.insts.len())
-            .filter(|&i| Some(i) != tail)
-            .chain(tail)
+            .filter(|&i| Some(i) != moved)
+            .chain(moved)
             .collect();
         let mut last: HashMap<Value, usize> = HashMap::new();
         for (p, &i) in order.iter().enumerate() {
@@ -242,7 +266,8 @@ impl Emitter<'_> {
                         .first()
                         .copied()
                         .filter(|&r0| srcs.iter().enumerate().all(|(j, &r)| r == r0 + reg(j)));
-                    if tail == Some(i) && self.tail_calls {
+                    if moved == Some(i) {
+                        self.run_deferred(deferred, inst.at);
                         // The frame is replaced, so arguments already in a
                         // run can stay put.
                         let base = in_run.unwrap_or_else(|| self.moved_run(&srcs, k, inst.at));
@@ -286,12 +311,20 @@ impl Emitter<'_> {
                         .iter()
                         .map(|a| a.args.iter().map(src).collect())
                         .collect();
-                    if tail == Some(i) {
-                        self.switch(sel, arms, &arm_params, Ctx::Tail, inst.at);
+                    if direct == Some(i) {
+                        // The arms return, so whatever follows the switch
+                        // runs in each arm, ahead of what outer blocks defer.
+                        let rest = &order[p + 1..];
+                        let mut chain = Vec::with_capacity(deferred.len() + 1);
+                        if !rest.is_empty() {
+                            chain.push(defer(b, rest, &regs));
+                        }
+                        chain.extend_from_slice(deferred);
+                        self.switch(sel, arms, &arm_params, Ctx::Tail, inst.at, &chain);
                         return;
                     }
                     let outs: Vec<Reg> = (0..*outputs).map(|_| self.alloc()).collect();
-                    self.switch(sel, arms, &arm_params, Ctx::Join(&outs), inst.at);
+                    self.switch(sel, arms, &arm_params, Ctx::Join(&outs), inst.at, &[]);
                     dying.iter().for_each(|&r| self.free(r));
                     outs
                 }
@@ -319,6 +352,7 @@ impl Emitter<'_> {
                 }
             }
             Ctx::Tail => {
+                self.run_deferred(deferred, at);
                 let count = reg(results.len());
                 let contiguous = results.windows(2).all(|w| w[1] == w[0] + 1);
                 let base = match results.first() {
@@ -352,6 +386,7 @@ impl Emitter<'_> {
         params: &[Vec<Reg>],
         ctx: Ctx,
         at: Pos,
+        deferred: &[Deferred],
     ) {
         let mut to_end = Vec::new();
         for (arm, params) in arms.iter().zip(params) {
@@ -368,7 +403,7 @@ impl Emitter<'_> {
             });
             // Arms are exclusive, so each starts from the same registers.
             let saved = self.busy.clone();
-            self.block(&arm.body, params, false, ctx, at);
+            self.block(&arm.body, params, false, ctx, at, deferred);
             if matches!(ctx, Ctx::Join(_)) && skip.is_some() {
                 to_end.push(self.emit(Instr::Jump { target: 0 }, at));
             }
@@ -395,9 +430,17 @@ impl Emitter<'_> {
         }
     }
 
+    /// Emits deferred nodes in order. Their outputs feed only each other.
+    fn run_deferred(&mut self, deferred: &[Deferred], at: Pos) {
+        for d in deferred {
+            self.block(&d.block, &d.params, false, Ctx::Join(&[]), at, &[]);
+        }
+    }
+
     /// The call or switch whose outputs are exactly `b`'s results, in order,
-    /// and feed nothing else in `b`.
-    fn tail_inst(&self, b: &Block) -> Option<usize> {
+    /// and feed nothing else in `b`: its results can be returned directly.
+    /// Whether it may also run last is the caller's decision.
+    fn direct_inst(&self, b: &Block) -> Option<usize> {
         let Value::Out { inst, .. } = *b.results.first()? else {
             return None;
         };
@@ -419,6 +462,72 @@ impl Emitter<'_> {
             .flat_map(|i| operands(&i.op))
             .any(|v| matches!(v, Value::Out { inst: k, .. } if k == inst));
         (exact && !read_elsewhere).then_some(inst as usize)
+    }
+}
+
+/// Rebuilds instructions `idxs` of `b` as a block of their own. Values they
+/// read from the rest of `b` become its parameters, held in `regs`.
+fn defer(b: &Block, idxs: &[usize], regs: &HashMap<Value, Reg>) -> Deferred {
+    let renumbered: HashMap<u32, u32> = idxs
+        .iter()
+        .enumerate()
+        .map(|(j, &i)| (i as u32, j as u32))
+        .collect();
+    let mut outer: Vec<Value> = Vec::new();
+    let mut map = |v: Value| match v {
+        Value::Out { inst, output } if renumbered.contains_key(&inst) => Value::Out {
+            inst: renumbered[&inst],
+            output,
+        },
+        _ => {
+            let k = outer.iter().position(|&o| o == v).unwrap_or_else(|| {
+                outer.push(v);
+                outer.len() - 1
+            });
+            Value::Param(k as u32)
+        }
+    };
+    let insts = idxs
+        .iter()
+        .map(|&i| {
+            let inst = &b.insts[i];
+            let op = match &inst.op {
+                Op::Const(lit) => Op::Const(lit.clone()),
+                Op::Prim { prim, args } => Op::Prim {
+                    prim: *prim,
+                    args: args.iter().map(|&v| map(v)).collect(),
+                },
+                Op::Call { func, args } => Op::Call {
+                    func: *func,
+                    args: args.iter().map(|&v| map(v)).collect(),
+                },
+                Op::Switch {
+                    selector,
+                    arms,
+                    outputs,
+                } => Op::Switch {
+                    selector: map(*selector),
+                    arms: arms
+                        .iter()
+                        .map(|a| crate::ir::Arm {
+                            guard: a.guard.clone(),
+                            args: a.args.iter().map(|&v| map(v)).collect(),
+                            body: a.body.clone(),
+                        })
+                        .collect(),
+                    outputs: *outputs,
+                },
+            };
+            crate::ir::Inst { op, at: inst.at }
+        })
+        .collect();
+    Deferred {
+        block: Block {
+            params: outer.len() as u32,
+            insts,
+            results: Vec::new(),
+        },
+        params: outer.iter().map(|v| regs[v]).collect(),
     }
 }
 

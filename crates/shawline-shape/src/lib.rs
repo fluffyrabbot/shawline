@@ -11,6 +11,7 @@ mod text;
 mod trace;
 pub mod wire;
 
+use std::collections::HashSet;
 use std::fmt;
 
 use shawline_grid::{Diagnostic, Grid, Pos};
@@ -33,11 +34,16 @@ pub struct Diagram {
 }
 
 pub fn recognize(grid: &Grid) -> Diagram {
-    let strokes = StrokeMap::new(grid);
-    let boxes = boxes::find(grid, &strokes);
-    let mut diagnostics = boxes::overlaps(&boxes);
-    diagnostics.extend(boxes::slips(&boxes));
+    // Text comes first so literals can't draw geometry. Comments need no
+    // mask: they end before the first stroke on their row.
+    let mut diagnostics = Vec::new();
     let mut texts = text::find(grid, &mut diagnostics);
+    let masked: HashSet<Pos> =
+        texts.iter().filter(|t| masks(grid, t)).flat_map(Text::cells).collect();
+    let strokes = StrokeMap::masking(grid, |p| masked.contains(&p));
+    let boxes = boxes::find(grid, &strokes);
+    diagnostics.extend(boxes::overlaps(&boxes));
+    diagnostics.extend(boxes::slips(&boxes));
 
     for t in &mut texts {
         let last = Pos::new(t.pos.row, t.pos.col + t.width - 1);
@@ -61,6 +67,13 @@ pub fn recognize(grid: &Grid) -> Diagram {
     let wires = trace::trace(grid, &strokes, &boxes, &mut diagnostics);
     diagnostics.sort_by_key(|d| d.at);
     Diagram { boxes, wires, texts, diagnostics, strokes }
+}
+
+/// Whether `t`'s cells are hidden from stroke recognition: only a closed
+/// literal's. An unclosed one is already `S002`, and masking the rest of its
+/// row would also erase the border of the box it sits in.
+fn masks(grid: &Grid, t: &Text) -> bool {
+    t.kind == TextKind::Literal && grid.get(Pos::new(t.pos.row, t.pos.col + t.width - 1)) == '»'
 }
 
 /// The dump format checked by the corpus. One fact per line, stable order.
@@ -222,6 +235,46 @@ mod tests {
         let d = diagram(NODE);
         assert!(d.boxes[0].slips.is_empty());
         assert!(!d.to_string().contains("slip"));
+    }
+
+    #[test]
+    fn literals_draw_nothing() {
+        let d = diagram("«─» ─\n");
+        assert!(d.boxes.is_empty(), "{d}");
+        assert_eq!(d.wires.len(), 1, "{d}");
+        assert_eq!(d.wires[0].cells, [Pos::new(0, 4)]);
+        assert!(d.diagnostics.is_empty(), "{:?}", d.diagnostics);
+        // The literal's spaces are not blank border cells either.
+        let src = NODE.replace("└───┘", "└─ ─┘").replace("┘\n", "┘\n «─»\n");
+        let d = diagram(&src);
+        assert!(d.boxes.is_empty(), "{d}");
+        assert!(!codes(&d).iter().any(|&(_, c)| c == "S012"));
+    }
+
+    #[test]
+    fn comment_stops_at_the_first_stroke() {
+        let d = diagram("※ 𐑯 ─\n");
+        let comment = &d.texts[0];
+        assert_eq!((comment.kind, comment.content.as_str(), comment.width), (TextKind::Comment, "𐑯", 3));
+        assert_eq!(d.wires.len(), 1, "{d}");
+        assert_eq!(d.wires[0].cells, [Pos::new(0, 4)]);
+    }
+
+    #[test]
+    fn comment_inside_a_box_keeps_its_border() {
+        let d = diagram("╭─ ·𐑥𐑱𐑯 ─╮\n│ ※ 𐑯𐑴   │\n╰────────╯\n");
+        assert_eq!(d.boxes.len(), 1, "{d}");
+        assert_eq!(d.boxes[0].rect.right, 9);
+        let comment = d.texts.iter().find(|t| t.kind == TextKind::Comment).unwrap();
+        assert_eq!((comment.content.as_str(), comment.width, comment.owner), ("𐑯𐑴", 4, Some(0)));
+        assert!(d.wires.is_empty() && d.diagnostics.is_empty(), "{d}");
+    }
+
+    #[test]
+    fn unclosed_literal_keeps_its_box() {
+        let d = diagram("┌────┐\n│ «𐑐 │\n└────┘\n");
+        assert_eq!(d.boxes.len(), 1, "{d}");
+        assert!(codes(&d).contains(&(Pos::new(1, 2), "S002")));
     }
 
     #[test]

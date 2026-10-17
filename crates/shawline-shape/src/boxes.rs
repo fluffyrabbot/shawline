@@ -402,7 +402,7 @@ fn slipped<T>(
     dirs: &[Dir],
     fits: impl Fn(char) -> Option<T>,
 ) -> Option<(Pos, T)> {
-    if grid.get(home) != ' ' {
+    if grid.get(home) != ' ' || strokes.is_masked(home) {
         return None;
     }
     let mut found = dirs
