@@ -284,6 +284,69 @@ The interaction model for a visual editor is designed in the [Shawline Studio do
     - dragging it into the border is refused with "the box would leave its definition" shown beside it.
   - The grid-native model is proven, and Studio Phase 1 can build on it.
 
+### P7: Studio Phase 1, hands on (planned)
+
+**Goal.** Whole programs editable mostly by mouse: wire by dragging, a context palette, and live value badges. It builds on P6's router and checked edits, and follows Phase 1 of the [Shawline Studio doc](https://claude.ai/code/artifact/923d6730-3f54-4722-8a46-ea15abf1dd1f).
+
+**In scope:**
+- **Wire by dragging.** Press on a source and drag. The router previews the path live and compatible sinks glow. What happens on release depends on where:
+  - on a sink: connect;
+  - on an existing wire: join it as a fan-out with a tee;
+  - on empty canvas: open the context palette.
+- **Context palette.** Primitives (with their SPEC §9 meaning and mirror partner) and definitions (with their port names), filtered to callees with a free input. Picking one places the node where the drag ended and wires it in.
+- **Delete a node** (the `Delete` key), with its wires.
+- **Live value badges.** Every wire shows the value it carried during the first call of its definition, refreshed after each edit.
+
+**Out of scope, for Phase 2 or later:** placing constants by mouse (typing covers them), drawing switches and their arms, re-wiring a switch's merged outputs, inserting rows and columns, extracting definitions, and scrubbing.
+
+**Contracts.** The lead writes these first; they are frozen for the wave.
+- **Naming endpoints by cell:**
+  - A source is named by its cell: a node's output tee, a definition input's arrowhead, a constant's first cell, or an arm's left through-port.
+  - A sink is named by its arrowhead.
+  - A switch's merged-output wire isn't editable in Phase 1; any edit to it is refused with that reason.
+- **`shawline-edit`.** Every function is a checked edit that returns new canonical text or a `Refusal` (P6 semantics):
+
+| Function | Semantics |
+|---|---|
+| `connect(src, from, to)` | Adds sink `to` to source `from`'s wire, creating the wire or joining the existing one with a tee. The edge set becomes the old set plus that pair, and nothing else changes. |
+| `remove_wire(src, at)` | Removes the wire through cell `at`. On one branch of a fan-out, removes only that branch, and turns a tee left with two arms back into a plain stroke. |
+| `place_node(src, corner, word, inputs, outputs)` | A canonical node box with the given ports, inside a definition. Refused if it would overlap something or leave the definition. |
+| `remove_node(src, corner)` | Removes the box, the wires it sources, and the branches into its inputs. |
+| `palette(src, from: Option<Pos>) -> Vec<Candidate>` | `Candidate { word, inputs, outputs, gloss, mirror }`. Primitives first, then definitions, in a fixed order. With `from`, only candidates with at least one input. |
+
+- **Trace:**
+  - `shawline_vm::run_traced(&Module, steps) -> Traced` records the outputs of every instruction during the first activation of each function. When it runs out of `steps` it stops cleanly, with `stopped: true` rather than an error code.
+  - `shawline_vm::show(&Value, max_chars)` prints a value in the SPEC §9 format, shortened with `…`.
+  - `shawline_ir::trace(&Sheet, &Program, steps) -> SheetTrace { wires: Vec<(usize, Value)>, error, stopped }` maps those outputs to `Diagram` wire indices. A definition's parameter wires take the values its first call received.
+  - `shawline_cli::trace(src)` is the lead's glue for the CLI and playground.
+
+**Construction.** One wave, two agents, disjoint:
+- **W** owns `shawline-edit` (behind the contract), the `shawline-wasm` exports and the playground UI: dragging wires, the palette, `Delete`, and badges. W builds the badges last. If T hasn't merged by then, the lead resumes W after the gate merges T, for a short second round.
+- **T** owns `run_traced` and `show` in `shawline-vm`, and `trace` in `shawline-ir`.
+
+**Gate tests.** The lead writes these in `shawline-corpus` before the wave, so the agents can't adjust their own oracle:
+- **`studio_rewire`.** For each valid corpus program:
+  - remove every wire except switch-output wires;
+  - reconnect each original (source, sink) pair, sinks in row-major order;
+  - a program whose connects all succeed must keep its diagnostic codes, its output and its edge set, and be canonical;
+  - at most one program in five may end with a refusal, and every refusal has a reason.
+- **`studio_rebuild`.** For each node box in each valid program:
+  - `palette` offers the node's word with its arity;
+  - `remove_node`, then `place_node` at the original corner, then reconnect the node's original edges;
+  - the same requirements apply, with at most a fifth of nodes refused.
+- **`studio_trace`.** For each valid program:
+  - every wire in `·𐑥𐑱𐑯` has a value;
+  - the values reaching `·𐑥𐑱𐑯`'s outputs print exactly the `.out` lines;
+  - runtime-error programs report the `.out` error;
+  - `10-countdown` completes, or stops at the step budget, within 2 s.
+- **By hand**, first the lead and then the user, in the playground:
+  - wire `03-double` from scratch by dragging;
+  - add a node by dropping a wire on empty canvas;
+  - delete a node and undo;
+  - watch the badges change after each edit.
+
+**Gate honesty.** The roadmap's Phase 1 gate says "every corpus program can be built with the mouse alone". Rewire plus rebuild covers every wire and every node box. Constants are still typed and switches still drawn by hand, both deferred to Phase 2.
+
 ## Risks
 
 | Risk | Mitigation |
