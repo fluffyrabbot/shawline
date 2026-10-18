@@ -341,7 +341,9 @@ The interaction model for a visual editor is designed in the [Shawline Studio do
   - every wire in `·𐑥𐑱𐑯` has a value;
   - the values reaching `·𐑥𐑱𐑯`'s outputs print exactly the `.out` lines;
   - runtime-error programs report the `.out` error;
-  - every corpus program traces to completion within 5 s in a debug build (budget `TRACE_STEPS` = 5 000 000).
+  - every valid program traces to completion within 5 s in a debug build (budget `TRACE_STEPS` = 5 000 000). A runtime-error program may instead stop at the budget.
+  - Lead decision at merge: T proposed raising the budget to 30M so `84-heap-runaway` (about 25M steps) reaches its error. The budget stays 5M, because a runaway would otherwise freeze the badges for about 4 s per edit.
+  - Known effect: recorded values keep their cells alive, so a traced run can hit `R008` slightly sooner than `run`.
 - **By hand**, first the lead and then the user, in the playground:
   - wire `03-double` from scratch by dragging;
   - add a node by dropping a wire on empty canvas;
