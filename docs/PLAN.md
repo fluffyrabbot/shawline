@@ -284,7 +284,7 @@ The interaction model for a visual editor is designed in the [Shawline Studio do
     - dragging it into the border is refused with "the box would leave its definition" shown beside it.
   - The grid-native model is proven, and Studio Phase 1 can build on it.
 
-### P7: Studio Phase 1, hands on (planned)
+### P7: Studio Phase 1, hands on ✅
 
 **Goal.** Whole programs editable mostly by mouse: wire by dragging, a context palette, and live value badges. It builds on P6's router and checked edits, and follows Phase 1 of the [Shawline Studio doc](https://claude.ai/code/artifact/923d6730-3f54-4722-8a46-ea15abf1dd1f).
 
@@ -349,6 +349,21 @@ The interaction model for a visual editor is designed in the [Shawline Studio do
   - add a node by dropping a wire on empty canvas;
   - delete a node and undo;
   - watch the badges change after each edit.
+
+**Gate (done).**
+
+- **Agent T, tracing:**
+  - `run` and `run_traced` share one dispatch loop. Untraced speed is unchanged: 1147→1161 ms on a 30M-iteration loop and 42.9→41.3 ms on 1M-deep recursion, both noise.
+  - Instruction outputs map to wires through a private `compile_mapped`.
+- **Agent W, editing:** the six edits, plus UI helpers outside the contract (`endpoints`, `preview`, `wire_sources`). `studio_rewire`: 16 programs, 0 refused. `studio_rebuild`: 57 nodes, 0 refused.
+- **Gate run:** 240 tests, clippy clean on host and wasm, playground build (536 KB wasm) and its Node checks green, all under `scripts/capped`.
+- **Lead's trial,** with synthetic pointer events through the UI's own handlers, because the browser pane wasn't on screen. On `03-double`:
+  - delete `main`'s node;
+  - drag from `21` to empty space, which opens the palette (primitives with gloss, arity and mirror; `𐑯𐑦𐑤` correctly absent);
+  - pick `𐑛𐑳𐑚𐑩𐑤`, then drag its output to `main`'s output;
+  - result: no diagnostics, Run prints `42`, badges read `21`/`42`, undo reverts.
+- W had already tried the same flow with real mouse drags.
+- **Follow-up (Phase 2 polish):** a node placed from the palette lands with its input one row off the source, so its wire jogs (`21 ┘` into `┌─▶`). Placing the node so its first input lines up with the source's row would keep the wire straight.
 
 **Gate honesty.** The roadmap's Phase 1 gate says "every corpus program can be built with the mouse alone". Rewire plus rebuild covers every wire and every node box. Constants are still typed and switches still drawn by hand, both deferred to Phase 2.
 
