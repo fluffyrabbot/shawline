@@ -118,21 +118,177 @@ pub fn boxes(src: &str) -> Array {
 /// is unchanged.
 #[wasm_bindgen]
 pub fn move_box(src: &str, row: u32, col: u32, dr: i32, dc: i32) -> Object {
-    let result = Object::new();
-    let corner = Pos::new(row as usize, col as usize);
-    match shawline_edit::move_box(src, corner, dr as isize, dc as isize) {
+    edited(shawline_edit::move_box(src, at(row, col), dr as isize, dc as isize))
+}
+
+/// The result of a checked edit, as `move_box` returns it.
+fn edited(result: Result<String, shawline_edit::Refusal>) -> Object {
+    let o = Object::new();
+    match result {
         Ok(text) => {
-            set(&result, "ok", &true.into());
-            set(&result, "text", &text.into());
+            set(&o, "ok", &true.into());
+            set(&o, "text", &text.into());
         }
         Err(refusal) => {
-            set(&result, "ok", &false.into());
-            set(&result, "row", &(refusal.at.row as u32).into());
-            set(&result, "col", &(refusal.at.col as u32).into());
-            set(&result, "reason", &refusal.reason.into());
+            set(&o, "ok", &false.into());
+            set(&o, "row", &(refusal.at.row as u32).into());
+            set(&o, "col", &(refusal.at.col as u32).into());
+            set(&o, "reason", &refusal.reason.into());
         }
     }
-    result
+    o
+}
+
+fn at(row: u32, col: u32) -> Pos {
+    Pos::new(row as usize, col as usize)
+}
+
+fn cell(p: Pos) -> JsValue {
+    let o = Object::new();
+    set(&o, "row", &(p.row as u32).into());
+    set(&o, "col", &(p.col as u32).into());
+    o.into()
+}
+
+/// Connects the source at `from_row`, `from_col` to the sink arrowhead at
+/// `to_row`, `to_col` (`shawline_edit::connect`): a new wire, or a branch
+/// joining the source's wire with a tee. Returns what `move_box` returns.
+#[wasm_bindgen]
+pub fn connect(src: &str, from_row: u32, from_col: u32, to_row: u32, to_col: u32) -> Object {
+    edited(shawline_edit::connect(src, at(from_row, from_col), at(to_row, to_col)))
+}
+
+/// Removes the whole wire through the cell, with every branch.
+#[wasm_bindgen]
+pub fn remove_wire(src: &str, row: u32, col: u32) -> Object {
+    edited(shawline_edit::remove_wire(src, at(row, col)))
+}
+
+/// Removes only the branch reaching the sink arrowhead at the cell.
+#[wasm_bindgen]
+pub fn disconnect(src: &str, row: u32, col: u32) -> Object {
+    edited(shawline_edit::disconnect(src, at(row, col)))
+}
+
+/// Places a canonical node box for `word` with its top-left corner at the
+/// cell, `inputs` arrowheads and `outputs` tees, and no wires.
+#[wasm_bindgen]
+pub fn place_node(src: &str, row: u32, col: u32, word: &str, inputs: u16, outputs: u16) -> Object {
+    edited(shawline_edit::place_node(src, at(row, col), word, inputs, outputs))
+}
+
+/// Removes the node box with its top-left corner at the cell, the wires it
+/// feeds and the branches into its inputs.
+#[wasm_bindgen]
+pub fn remove_node(src: &str, row: u32, col: u32) -> Object {
+    edited(shawline_edit::remove_node(src, at(row, col)))
+}
+
+/// What the context palette offers: an array of `{ word, inputs, outputs,
+/// gloss, mirror }` (`mirror` is `null` but for primitives). Pass the
+/// dragged source's cell to offer only callees with an input.
+#[wasm_bindgen]
+pub fn palette(src: &str, from_row: Option<u32>, from_col: Option<u32>) -> Array {
+    let from = from_row.zip(from_col).map(|(r, c)| at(r, c));
+    shawline_edit::palette(src, from)
+        .into_iter()
+        .map(|c| {
+            let o = Object::new();
+            set(&o, "word", &c.word.into());
+            set(&o, "inputs", &c.inputs.into());
+            set(&o, "outputs", &c.outputs.into());
+            set(&o, "gloss", &c.gloss.into());
+            set(&o, "mirror", &c.mirror.map_or(JsValue::NULL, JsValue::from));
+            JsValue::from(o)
+        })
+        .collect()
+}
+
+/// Every source and sink, for dragging wires: `{ sources, sinks }`, each an
+/// array of `{ row, col, span, scope, wired }`. `span` cells from `col`
+/// eastward name the endpoint; a source reaches only sinks with the same
+/// `scope` string, and a `wired` sink takes no second wire.
+#[wasm_bindgen]
+pub fn endpoints(src: &str) -> Object {
+    let (sources, sinks) = shawline_edit::endpoints(src);
+    let list = |ends: Vec<shawline_edit::Endpoint>| -> Array {
+        ends.into_iter()
+            .map(|e| {
+                let o = Object::new();
+                set(&o, "row", &(e.at.row as u32).into());
+                set(&o, "col", &(e.at.col as u32).into());
+                set(&o, "span", &(e.span as u32).into());
+                set(&o, "scope", &format!("{}:{}", e.scope.0, e.scope.1).into());
+                set(&o, "wired", &e.wired.into());
+                JsValue::from(o)
+            })
+            .collect()
+    };
+    let o = Object::new();
+    set(&o, "sources", &list(sources));
+    set(&o, "sinks", &list(sinks));
+    o
+}
+
+/// The cells a wire dragged from the source at `from_row`, `from_col` would
+/// take if released at `to_row`, `to_col`, as an array of `{ row, col }`;
+/// `undefined` when nothing fits. Nothing is edited.
+#[wasm_bindgen]
+pub fn preview(src: &str, from_row: u32, from_col: u32, to_row: u32, to_col: u32) -> Option<Array> {
+    let path = shawline_edit::preview(src, at(from_row, from_col), at(to_row, to_col))?;
+    Some(path.into_iter().map(cell).collect())
+}
+
+/// Every wire, for hit-testing and value badges: an array of `{ wire,
+/// cells, source }`, where `wire` is the index `trace` reports, `cells` its
+/// `{ row, col }` cells in row-major order, and `source` the cell naming its
+/// source for `connect` (`null` when the wire isn't editable by mouse).
+#[wasm_bindgen]
+pub fn wires(src: &str) -> Array {
+    let Ok(grid) = shawline_grid::Grid::parse(src) else { return Array::new() };
+    let diagram = shawline_shape::recognize(&grid);
+    let sources = shawline_edit::wire_sources(src);
+    diagram
+        .wires
+        .iter()
+        .enumerate()
+        .map(|(i, w)| {
+            let o = Object::new();
+            set(&o, "wire", &(i as u32).into());
+            set(&o, "cells", &w.cells.iter().copied().map(cell).collect::<Array>());
+            let source = sources.get(i).copied().flatten();
+            set(&o, "source", &source.map_or(JsValue::NULL, cell));
+            JsValue::from(o)
+        })
+        .collect()
+}
+
+/// The value on every wire, for live badges (`shawline_cli::trace`):
+/// `{ wires, error, stopped }`. `wires` holds `{ wire, value }` with each
+/// value printed as SPEC §9 prints it, cut to 24 characters. `error` is the
+/// runtime error that ended the run, or the first static error when the
+/// sheet can't run (then `wires` is empty), as a diagnostic object; `null`
+/// otherwise. `stopped` says the run hit its step budget.
+#[wasm_bindgen]
+pub fn trace(src: &str) -> Object {
+    let o = Object::new();
+    let values = Array::new();
+    let (error, stopped) = match shawline_cli::trace(src) {
+        Ok(found) => {
+            for (wire, value) in &found.wires {
+                let pair = Object::new();
+                set(&pair, "wire", &(*wire as u32).into());
+                set(&pair, "value", &shawline_vm::show(value, 24).into());
+                values.push(&pair);
+            }
+            (found.error.as_ref().map_or(JsValue::NULL, diagnostic), found.stopped)
+        }
+        Err(errors) => (errors.first().map_or(JsValue::NULL, diagnostic), false),
+    };
+    set(&o, "wires", &values);
+    set(&o, "error", &error);
+    set(&o, "stopped", &stopped.into());
+    o
 }
 
 /// The transliteration table (SPEC §13) as an array of `[keys, letter]`.

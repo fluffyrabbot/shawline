@@ -585,6 +585,8 @@ dependencies = [
  "shawline-fmt",
  "shawline-grid",
  "shawline-shape",
+ "shawline-syntax",
+ "shawline-vm",
 ]
 
 [[package]]
@@ -688,6 +690,7 @@ dependencies = [
  "shawline-edit",
  "shawline-grid",
  "shawline-shape",
+ "shawline-vm",
  "shawline-word",
  "wasm-bindgen",
 ]

@@ -1,7 +1,10 @@
 // The Shawline playground: an editor, a live drawing, diagnostics, and a
 // Run button. All language work happens in the wasm package; this file only
 // wires it to the page.
-import init, { check, render, format, table, boxes, move_box, Transliterator } from "./pkg/shawline_wasm.js";
+import init, {
+  check, render, format, table, boxes, move_box, connect, remove_wire, remove_node, place_node,
+  palette, endpoints, preview, wires, Transliterator,
+} from "./pkg/shawline_wasm.js";
 
 const $ = (id) => document.getElementById(id);
 const editor = $("editor");
@@ -12,6 +15,7 @@ const output = $("output");
 const runButton = $("run");
 const translit = $("translit");
 const examples = $("examples");
+const values = $("values");
 
 // One cell in the renderer's SVG units (shawline-glyph CELL_WIDTH/HEIGHT).
 const CELL_W = 600;
@@ -136,6 +140,7 @@ function refresh() {
   shown = check(editor.value);
   showProblems();
   showDrawing();
+  scheduleTrace();
 }
 
 function el(tag, className, text) {
@@ -205,6 +210,7 @@ function showDrawing() {
       return cell;
     }),
   );
+  showOverlays();
 }
 
 /** The drawing's cell under a pointer event, or null off the sheet. */
@@ -218,41 +224,119 @@ function cellAt(e) {
   return x >= 0 && y >= 0 ? { row: Math.floor(y / CELL_H), col: Math.floor(x / CELL_W) } : null;
 }
 
+// The drawing as an editor (Studio Phase 1). Every gesture is one checked
+// edit to the text (shawline-edit), applied through the textarea so undo
+// works as it does for typing; a refused edit changes nothing and says why
+// beside the cell it is about.
+//
+// - Drag from a source (an output tee, an input, a constant, an arm's
+//   input) or from a wire: release on a free arrowhead to connect, or on
+//   empty space to pick a node from the palette, placed there and wired in.
+// - Drag from a free arrowhead back to a source or a wire: connect, joining
+//   that wire as a fan-out.
+// - Drag anything else on a box to move the box.
+// - Click a node or a wire to select it; Delete removes it.
+
+const SVG = "http://www.w3.org/2000/svg";
+const keyOf = ({ row, col }) => `${row}:${col}`;
+const same = (a, b) => a && b && a.row === b.row && a.col === b.col;
+
 let dragged = false;
+let drag = null;
+let selected = null;
+let menu = null;
+
+// What the sheet offers to the pointer, read once per text.
+let sheet = { src: null };
+
+function current() {
+  const src = editor.value;
+  if (sheet.src === src) return sheet;
+  const ends = endpoints(src);
+  const list = wires(src);
+  const byCell = new Map();
+  for (const w of list) {
+    for (const c of w.cells) {
+      const k = keyOf(c);
+      byCell.set(k, [...(byCell.get(k) ?? []), w]);
+    }
+  }
+  sheet = { src, boxes: boxes(src), sources: ends.sources, sinks: ends.sinks, wires: list, byCell };
+  return sheet;
+}
+
+const sourceAt = (at) =>
+  current().sources.find((s) => s.row === at.row && at.col >= s.col && at.col < s.col + s.span);
+const sinkAt = (at) => current().sinks.find((s) => same(s, at));
+/** The editable wire through a cell, if any. */
+const wireAt = (at) => (current().byCell.get(keyOf(at)) ?? []).find((w) => w.source) ?? null;
+const charAt = ({ row, col }) => [...(editor.value.split("\n")[row] ?? "")][col] ?? " ";
 
 drawing.addEventListener("click", (e) => {
   // The click that ends a drag isn't a request for the caret.
   if (dragged) return void (dragged = false);
   const at = cellAt(e);
-  if (at) jumpTo(at, false);
+  if (!at) return;
+  const wire = wireAt(at);
+  const box = boxAt(at);
+  if (wire) select({ kind: "wire", at, wire });
+  else if (box?.kind === "node") select({ kind: "node", box });
+  else {
+    select(null);
+    jumpTo(at, false);
+  }
 });
 
-// Moving boxes. Press on a node or a definition and drag: the box snaps by
-// whole cells and a ghost shows where it would land. On release the move is
-// one checked edit to the text (shawline-edit), undoable like typing; a
-// refused move leaves everything as it was and says why.
-
-let drag = null;
-let found = { src: null, list: [] };
+drawing.addEventListener("dblclick", (e) => {
+  const at = cellAt(e);
+  if (at && charAt(at) === " " && boxAt(at) && boxAt(at).kind !== "node") openMenu(at, null);
+});
 
 /** The innermost box under a cell: a node before its definition. */
 function boxAt(at) {
-  if (found.src !== editor.value) found = { src: editor.value, list: boxes(editor.value) };
   const area = (b) => (b.bottom - b.top + 1) * (b.right - b.left + 1);
-  return found.list
-    .filter((b) => at.row >= b.top && at.row <= b.bottom && at.col >= b.left && at.col <= b.right)
+  return current()
+    .boxes.filter((b) => at.row >= b.top && at.row <= b.bottom && at.col >= b.left && at.col <= b.right)
     .sort((a, b) => area(a) - area(b))[0];
 }
 
+function svgEl(tag, className, attrs = {}) {
+  const node = document.createElementNS(SVG, tag);
+  Object.entries(attrs).forEach(([k, v]) => node.setAttribute(k, v));
+  if (className) node.setAttribute("class", className);
+  return node;
+}
+
 function svgRect(className, { top, left, bottom, right }) {
-  const rect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
-  const attrs = {
+  return svgEl("rect", className, {
     x: left * CELL_W, y: top * CELL_H,
     width: (right - left + 1) * CELL_W, height: (bottom - top + 1) * CELL_H, rx: 90,
-  };
-  Object.entries(attrs).forEach(([k, v]) => rect.setAttribute(k, v));
-  rect.setAttribute("class", className);
-  return rect;
+  });
+}
+
+const cellRect = (className, { row, col }, span = 1) =>
+  svgRect(className, { top: row, left: col, bottom: row, right: col + span - 1 });
+const centre = ({ row, col }) => `${col * CELL_W + CELL_W / 2},${row * CELL_H + CELL_H / 2}`;
+
+/** Selection and value badges, drawn again over every fresh drawing. */
+function showOverlays() {
+  const svg = drawing.querySelector("svg");
+  if (!svg) return;
+  svg.querySelectorAll(".overlay").forEach((n) => n.remove());
+  if (selected && selected.src !== editor.value) selected = null;
+  if (selected?.kind === "node") svg.append(svgRect("overlay selected", selected.box));
+  if (selected?.kind === "wire") {
+    const group = svgEl("g", "overlay selected-wire");
+    selected.wire.cells.forEach((c) => group.append(cellRect("", c)));
+    svg.append(group);
+  }
+  showBadges(svg);
+}
+
+function select(target) {
+  selected = target && { ...target, src: editor.value };
+  showOverlays();
+  if (target) drawing.focus({ preventScroll: true });
 }
 
 function showGhost() {
@@ -265,72 +349,378 @@ function showGhost() {
 
 function endDrag() {
   drag?.ghost?.remove();
+  drag?.marks?.forEach((n) => n.remove());
+  drag?.path?.remove();
   drag = null;
-  drawing.classList.remove("dragging");
+  drawing.classList.remove("dragging", "wiring");
 }
 
 /** Shows a refusal's reason by the cell it is about, for a moment. */
 function refuse({ row, col, reason }) {
   const svg = drawing.querySelector("svg");
   if (!svg) return;
-  const cell = svgRect("refused", { top: row, left: col, bottom: row, right: col });
+  const cell = cellRect("refused", { row, col });
   svg.append(cell);
-  const view = svg.viewBox.baseVal;
-  const box = svg.getBoundingClientRect();
-  const host = drawing.getBoundingClientRect();
   const tip = el("div", "refusal", reason);
   tip.setAttribute("role", "status");
-  tip.style.left = `${((col * CELL_W - view.x) * box.width) / view.width + box.left - host.left + drawing.scrollLeft}px`;
-  tip.style.top = `${(((row + 1) * CELL_H - view.y) * box.height) / view.height + box.top - host.top + drawing.scrollTop}px`;
+  place(tip, { row: row + 1, col });
   drawing.append(tip);
   setTimeout(() => (tip.remove(), cell.remove()), 2800);
 }
 
-drawing.addEventListener("pointerdown", (e) => {
-  if (e.button !== 0) return;
-  const at = cellAt(e);
-  const box = at && boxAt(at);
-  if (!box) return;
-  e.preventDefault();
-  drawing.setPointerCapture(e.pointerId);
-  drawing.classList.add("dragging");
-  drag = { box, from: at, dr: 0, dc: 0, ghost: null };
-});
+/** Positions an HTML element inside #drawing at a cell's top-left corner. */
+function place(node, { row, col }) {
+  const svg = drawing.querySelector("svg");
+  const view = svg.viewBox.baseVal;
+  const box = svg.getBoundingClientRect();
+  const host = drawing.getBoundingClientRect();
+  node.style.left = `${((col * CELL_W - view.x) * box.width) / view.width + box.left - host.left + drawing.scrollLeft}px`;
+  node.style.top = `${((row * CELL_H - view.y) * box.height) / view.height + box.top - host.top + drawing.scrollTop}px`;
+}
 
-drawing.addEventListener("pointermove", (e) => {
-  const at = cellAt(e);
-  if (!drag) {
-    drawing.querySelector("svg")?.classList.toggle("over-box", Boolean(at && boxAt(at)));
-    return;
-  }
-  if (!at) return;
-  const [dr, dc] = [at.row - drag.from.row, at.col - drag.from.col];
-  if (dr === drag.dr && dc === drag.dc) return;
-  Object.assign(drag, { dr, dc });
-  showGhost();
-});
-
-drawing.addEventListener("pointerup", () => {
-  if (!drag) return;
-  const { box, dr, dc } = drag;
-  endDrag();
-  if (!dr && !dc) return;
-  dragged = true;
-  const result = move_box(editor.value, box.top, box.left, dr, dc);
-  if (!result.ok) return refuse(result);
-  // Replacing the whole text through the editor keeps it on the undo stack.
+/** Replaces the whole text through the editor, so the edit can be undone. */
+function applyText(text) {
   const caret = posOf(editor.value, editor.selectionStart);
   editor.focus({ preventScroll: true });
   editor.select();
-  insertText(result.text);
+  insertText(text);
   settle();
   const at = offsetOf(editor.value, caret.row, caret.col);
   editor.setSelectionRange(at, at);
   clearTimeout(refreshTimer);
   refresh();
+  drawing.focus({ preventScroll: true });
+}
+
+function apply(result) {
+  if (!result.ok) return void refuse(result);
+  applyText(result.text);
+}
+
+// Dragging.
+
+drawing.addEventListener("pointerdown", (e) => {
+  if (e.button !== 0) return;
+  closeMenu();
+  const at = cellAt(e);
+  if (!at) return;
+  const source = sourceAt(at);
+  const sink = sinkAt(at);
+  const wire = wireAt(at);
+  let start = null;
+  if (source) start = { kind: "wire", from: { row: source.row, col: source.col }, scope: source.scope };
+  else if (sink && !sink.wired) start = { kind: "sink", sink, scope: sink.scope };
+  else if (wire) {
+    const from = sourceAt(wire.source) ?? wire.source;
+    start = { kind: "wire", from: { row: from.row, col: from.col }, scope: from.scope };
+  } else {
+    const box = boxAt(at);
+    if (box) start = { kind: "box", box, dr: 0, dc: 0, ghost: null };
+  }
+  if (!start) return;
+  e.preventDefault();
+  drawing.setPointerCapture(e.pointerId);
+  drag = { ...start, start: at, at };
+  drawing.classList.add(drag.kind === "box" ? "dragging" : "wiring");
+  if (drag.kind !== "box") glow();
+});
+
+/** Lights up where the drag can end: free sinks for a source, sources for a sink. */
+function glow() {
+  const svg = drawing.querySelector("svg");
+  const { sources, sinks } = current();
+  const marks =
+    drag.kind === "wire"
+      ? sinks.filter((s) => !s.wired && s.scope === drag.scope).map((s) => cellRect("glow", s))
+      : sources.filter((s) => s.scope === drag.scope).map((s) => cellRect("glow", s, s.span));
+  svg?.append(...marks);
+  drag.marks = marks;
+}
+
+/** The source a sink-first drag would connect to, under the pointer. */
+function sourceUnder(at) {
+  const source = sourceAt(at);
+  if (source) return source;
+  const wire = wireAt(at);
+  return wire && (sourceAt(wire.source) ?? wire.source);
+}
+
+function showPath() {
+  const svg = drawing.querySelector("svg");
+  if (!svg) return;
+  const src = editor.value;
+  const { at } = drag;
+  let cells;
+  if (drag.kind === "wire") {
+    const sink = sinkAt(at);
+    const free = sink && !sink.wired && sink.scope === drag.scope;
+    const to = free ? sink : at;
+    const found = !same(to, drag.from) && preview(src, drag.from.row, drag.from.col, to.row, to.col);
+    if (found && free) cells = [sink, ...found, drag.from];
+    else if (found) cells = [...found, drag.from];
+    else cells = [at, drag.from];
+  } else {
+    const source = sourceUnder(at);
+    const found = source && source.scope === drag.scope &&
+      preview(src, source.row, source.col, drag.sink.row, drag.sink.col);
+    cells = found ? [drag.sink, ...found, source] : [drag.sink, at];
+  }
+  drag.path?.remove();
+  drag.path = svgEl("polyline", cells.length > 2 ? "wire-preview" : "wire-preview loose", {
+    points: cells.map(centre).join(" "),
+  });
+  svg.append(drag.path);
+}
+
+drawing.addEventListener("pointermove", (e) => {
+  const at = cellAt(e);
+  if (!drag) {
+    const over = at && (sourceAt(at) || sinkAt(at)?.wired === false || wireAt(at));
+    const svg = drawing.querySelector("svg");
+    svg?.classList.toggle("over-source", Boolean(over));
+    svg?.classList.toggle("over-box", Boolean(!over && at && boxAt(at)));
+    return;
+  }
+  if (!at || same(at, drag.at)) return;
+  drag.at = at;
+  if (drag.kind === "box") {
+    Object.assign(drag, { dr: at.row - drag.start.row, dc: at.col - drag.start.col });
+    showGhost();
+  } else {
+    showPath();
+  }
+});
+
+drawing.addEventListener("pointerup", () => {
+  if (!drag) return;
+  const finished = drag;
+  endDrag();
+  if (same(finished.at, finished.start)) return;
+  dragged = true;
+  const src = editor.value;
+  const { at } = finished;
+  if (finished.kind === "box") {
+    apply(move_box(src, finished.box.top, finished.box.left, finished.dr, finished.dc));
+  } else if (finished.kind === "sink") {
+    const source = sourceUnder(at);
+    if (!source) return refuse({ ...at, reason: "Drop on a source or a wire to connect this arrowhead." });
+    apply(connect(src, source.row, source.col, finished.sink.row, finished.sink.col));
+  } else {
+    const { from } = finished;
+    const sink = sinkAt(at);
+    const wire = wireAt(at);
+    if (sink) apply(connect(src, from.row, from.col, sink.row, sink.col));
+    else if (wire) {
+      const reason = same(wire.source, from) || same(sourceAt(wire.source), sourceAt(from))
+        ? "This wire already carries that value. Drop on an arrowhead to add a branch."
+        : "That wire has a source of its own. Drop on a free arrowhead.";
+      refuse({ ...at, reason });
+    } else if (charAt(at) === " ") openMenu(at, from);
+    else refuse({ ...at, reason: "Drop on a free arrowhead to connect, or on empty space for a new node." });
+  }
 });
 
 drawing.addEventListener("pointercancel", endDrag);
+
+drawing.addEventListener("keydown", (e) => {
+  const mod = e.metaKey || e.ctrlKey;
+  if (mod && e.key.toLowerCase() === "z") {
+    // The drawing has no history of its own: undo is the editor's.
+    e.preventDefault();
+    editor.focus({ preventScroll: true });
+    document.execCommand(e.shiftKey ? "redo" : "undo");
+    drawing.focus({ preventScroll: true });
+  } else if ((e.key === "Delete" || e.key === "Backspace") && selected) {
+    e.preventDefault();
+    const src = editor.value;
+    const target = selected;
+    selected = null;
+    if (target.kind === "node") apply(remove_node(src, target.box.top, target.box.left));
+    else apply(remove_wire(src, target.at.row, target.at.col));
+  } else if (e.key === "Escape") {
+    endDrag();
+    closeMenu();
+    select(null);
+  }
+});
+
+// The context palette: callees to place where a drag ended, wired from the
+// dragged source into the new node's first input.
+
+function closeMenu() {
+  menu?.remove();
+  menu = null;
+}
+
+function openMenu(at, from) {
+  closeMenu();
+  const offered = palette(editor.value, from?.row, from?.col);
+  menu = el("div", "palette");
+  menu.setAttribute("role", "dialog");
+  menu.setAttribute("aria-label", "Place a node");
+  const filter = el("input");
+  filter.placeholder = from ? "Feed it into…" : "Place a node…";
+  filter.setAttribute("aria-label", "Filter by meaning or letter");
+  const list = el("ul");
+  list.setAttribute("role", "listbox");
+  menu.append(filter, list);
+
+  const pick = (c) => {
+    closeMenu();
+    // The first input lands on the drop point; the box's top border above it.
+    const corner = { row: Math.max(0, at.row - 1), col: at.col };
+    const placed = place_node(editor.value, corner.row, corner.col, c.word, c.inputs, c.outputs);
+    if (!placed.ok) return refuse(placed);
+    if (!from || !c.inputs) return applyText(placed.text);
+    const wired = connect(placed.text, from.row, from.col, corner.row + 1, corner.col);
+    applyText(wired.ok ? wired.text : placed.text);
+    if (!wired.ok) refuse(wired);
+  };
+
+  const show = () => {
+    const q = filter.value.trim().toLowerCase();
+    const items = offered.filter((c) => !q || c.word.includes(q) || c.gloss.toLowerCase().includes(q));
+    list.replaceChildren(
+      ...items.map((c, i) => {
+        const item = el("li");
+        item.setAttribute("role", "option");
+        if (i === 0) item.classList.add("first");
+        const arity = `${c.inputs}→${c.outputs}`;
+        item.append(el("span", "word", c.word), el("span", "gloss", c.gloss), el("span", "arity", arity));
+        if (c.mirror) item.append(el("span", "mirror", `⇄ ${c.mirror}`));
+        item.title = c.mirror ? `${c.gloss}; its mirror ${c.mirror} is the dual` : c.gloss;
+        item.addEventListener("pointerdown", (e) => e.stopPropagation());
+        item.addEventListener("click", (e) => {
+          e.stopPropagation();
+          pick(c);
+        });
+        return item;
+      }),
+    );
+    menu.items = items;
+  };
+  filter.addEventListener("input", show);
+  filter.addEventListener("keydown", (e) => {
+    e.stopPropagation();
+    if (e.key === "Escape") closeMenu();
+    if (e.key === "Enter" && menu.items[0]) pick(menu.items[0]);
+  });
+  menu.addEventListener("pointerdown", (e) => e.stopPropagation());
+  menu.addEventListener("click", (e) => e.stopPropagation());
+  show();
+  place(menu, { row: at.row + 1, col: at.col });
+  drawing.append(menu);
+  // After the click that ends the drag, which would take focus back.
+  setTimeout(() => filter.focus({ preventScroll: true }));
+}
+
+document.addEventListener("pointerdown", (e) => {
+  if (menu && !menu.contains(e.target)) closeMenu();
+});
+
+// Live value badges: after each edit, a beat later, the sheet is traced off
+// the main thread and each wire shows the value it carried during the first
+// call of its definition. Tracing is optional: if it fails or isn't
+// available, the drawing simply has no badges.
+
+let tracer = null;
+let traceGen = 0;
+let traceTimer;
+let traceKill;
+let traced = { src: null, values: [] };
+
+function startTracer() {
+  tracer = new Worker("worker.js", { type: "module" });
+  tracer.onmessage = ({ data }) => {
+    if (data.gen !== traceGen) return;
+    clearTimeout(traceKill);
+    if (data.failed) stopTracer();
+    traced = { src: data.src, values: data.failed ? [] : data.wires };
+    showOverlays();
+  };
+  tracer.onerror = () => {
+    stopTracer();
+    traced = { src: null, values: [] };
+    showOverlays();
+  };
+}
+
+function stopTracer() {
+  tracer?.terminate();
+  tracer = null;
+}
+
+function scheduleTrace() {
+  clearTimeout(traceTimer);
+  traceTimer = setTimeout(requestTrace, 250);
+}
+
+function requestTrace() {
+  const src = editor.value;
+  if (!values.checked || shown.some((d) => d.severity === "error")) {
+    traced = { src, values: [] };
+    return showOverlays();
+  }
+  if (!tracer) startTracer();
+  const gen = ++traceGen;
+  tracer.postMessage({ kind: "trace", src, gen });
+  clearTimeout(traceKill);
+  traceKill = setTimeout(() => gen === traceGen && stopTracer(), 4000);
+}
+
+/** The cell a wire's badge sits on: the middle of its longest straight row. */
+function anchor(cells) {
+  let best = null;
+  let run = [];
+  const flush = () => {
+    if (run.length && (!best || run.length > best.length)) best = run;
+    run = [];
+  };
+  for (const c of cells) {
+    const last = run[run.length - 1];
+    if (last && (last.row !== c.row || last.col + 1 !== c.col)) flush();
+    if (charAt(c) === "─") run.push(c);
+    else flush();
+  }
+  flush();
+  return best ? best[Math.floor((best.length - 1) / 2)] : cells[0];
+}
+
+function showBadges(svg) {
+  if (!values.checked || traced.src !== editor.value) return;
+  const { wires: list } = current();
+  const group = svgEl("g", "overlay badges");
+  svg.append(group);
+  for (const { wire, value } of traced.values) {
+    const w = list[wire];
+    if (!w) continue;
+    const at = anchor(w.cells);
+    const badge = svgEl("g", "badge");
+    const label = svgEl("text", "", {
+      x: at.col * CELL_W + CELL_W / 2,
+      y: at.row * CELL_H + CELL_H / 2,
+      "text-anchor": "middle",
+      "dominant-baseline": "central",
+    });
+    label.textContent = value;
+    const title = svgEl("title");
+    title.textContent = value;
+    badge.append(title, label);
+    group.append(badge);
+    const box = label.getBBox();
+    const pad = { x: 140, y: 40 };
+    badge.prepend(svgEl("rect", "", {
+      x: box.x - pad.x, y: box.y - pad.y,
+      width: box.width + 2 * pad.x, height: box.height + 2 * pad.y,
+      rx: (box.height + 2 * pad.y) / 2,
+    }));
+  }
+}
+
+values.addEventListener("change", () => {
+  store.set("values", values.checked);
+  requestTrace();
+});
 
 editor.addEventListener("input", changed);
 
@@ -466,6 +856,7 @@ async function main() {
     }),
   );
   translit.checked = store.get("translit") !== "false";
+  values.checked = store.get("values") !== "false";
   startWorker();
 
   const names = await fetch("examples/index.json").then((r) => r.json());
