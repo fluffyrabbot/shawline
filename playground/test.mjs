@@ -180,4 +180,44 @@ test("trace returns values per wire, or no badges with the reason", () => {
   assert.equal(found.wires.find((v) => v.wire === output.wire)?.value, "42");
 });
 
+// The guided tour reads the sheet, not the clicks: drive 03-double through
+// the edits each step asks for and check that it advances to the end.
+
+const { Tour } = await import("./tour.js");
+
+function fakeHost() {
+  const part = () => ({ textContent: "", addEventListener() {} });
+  const parts = {};
+  return { hidden: true, querySelector: (sel) => (parts[sel] ??= part()) };
+}
+
+test("the tour walks 03-double to the end", () => {
+  const view = (src) => ({ src, boxes: shawline.boxes(src), wires: shawline.wires(src), ...shawline.endpoints(src) });
+  const tour = new Tour(fakeHost(), () => {});
+  let src = double;
+  const step = (edit) => {
+    assert.ok(tour.rings().length > 0, `step ${tour.step + 1} rings nothing`);
+    const result = edit(tour.parts);
+    assert.equal(result.ok, true, result.reason);
+    src = result.text;
+    const before = tour.step;
+    tour.update(view(src));
+    assert.equal(tour.step, before + 1, `step ${before + 1} didn't advance`);
+  };
+  tour.start(view(src));
+  assert.equal(tour.step, 0);
+  step(({ outWire }) => shawline.remove_wire(src, outWire.cells[0].row, outWire.cells[0].col));
+  step(({ tee, sink }) => shawline.connect(src, tee.row, tee.col, sink.row, sink.col));
+  step(({ node }) => shawline.remove_node(src, node.top, node.left));
+  step(({ constant }) => {
+    const placed = shawline.place_node(src, constant.row - 1, constant.col + 8, "𐑛𐑳𐑚𐑩𐑤", 1, 1);
+    return placed.ok ? shawline.connect(placed.text, constant.row, constant.col, constant.row, constant.col + 8) : placed;
+  });
+  step(({ tee, sink }) => shawline.connect(src, tee.row, tee.col, sink.row, sink.col));
+  assert.deepEqual(outputsOf(src), ["42"]);
+  tour.ran(view(src));
+  assert.equal(tour.finished, true);
+  assert.deepEqual(tour.rings(), []);
+});
+
 process.exit(failed ? 1 : 0);

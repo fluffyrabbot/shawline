@@ -5,6 +5,7 @@ import init, {
   check, render, format, table, boxes, move_box, connect, remove_wire, remove_node, place_node,
   palette, endpoints, preview, wires, Transliterator,
 } from "./pkg/shawline_wasm.js";
+import { Tour, TOUR_EXAMPLE } from "./tour.js";
 
 const $ = (id) => document.getElementById(id);
 const editor = $("editor");
@@ -16,6 +17,7 @@ const runButton = $("run");
 const translit = $("translit");
 const examples = $("examples");
 const values = $("values");
+const tour = new Tour($("tour"), () => showOverlays());
 
 // One cell in the renderer's SVG units (shawline-glyph CELL_WIDTH/HEIGHT).
 const CELL_W = 600;
@@ -138,6 +140,7 @@ function changed() {
 
 function refresh() {
   shown = check(editor.value);
+  tour.update(current());
   showProblems();
   showDrawing();
   scheduleTrace();
@@ -318,11 +321,13 @@ const cellRect = (className, { row, col }, span = 1) =>
   svgRect(className, { top: row, left: col, bottom: row, right: col + span - 1 });
 const centre = ({ row, col }) => `${col * CELL_W + CELL_W / 2},${row * CELL_H + CELL_H / 2}`;
 
-/** Selection and value badges, drawn again over every fresh drawing. */
+/** The tour's rings, selection and value badges, drawn again over every
+ * fresh drawing. */
 function showOverlays() {
   const svg = drawing.querySelector("svg");
   if (!svg) return;
   svg.querySelectorAll(".overlay").forEach((n) => n.remove());
+  svg.append(...tour.rings().map((r) => svgRect("overlay beacon", r)));
   if (selected && selected.src !== editor.value) selected = null;
   if (selected?.kind === "node") svg.append(svgRect("overlay selected", selected.box));
   if (selected?.kind === "wire") {
@@ -368,14 +373,23 @@ function refuse({ row, col, reason }) {
   setTimeout(() => (tip.remove(), cell.remove()), 2800);
 }
 
-/** Positions an HTML element inside #drawing at a cell's top-left corner. */
-function place(node, { row, col }) {
+/** A cell's top-left corner in viewport pixels. */
+function clientOf({ row, col }) {
   const svg = drawing.querySelector("svg");
   const view = svg.viewBox.baseVal;
   const box = svg.getBoundingClientRect();
+  return {
+    x: ((col * CELL_W - view.x) * box.width) / view.width + box.left,
+    y: ((row * CELL_H - view.y) * box.height) / view.height + box.top,
+  };
+}
+
+/** Positions an HTML element inside #drawing at a cell's top-left corner. */
+function place(node, at) {
+  const { x, y } = clientOf(at);
   const host = drawing.getBoundingClientRect();
-  node.style.left = `${((col * CELL_W - view.x) * box.width) / view.width + box.left - host.left + drawing.scrollLeft}px`;
-  node.style.top = `${((row * CELL_H - view.y) * box.height) / view.height + box.top - host.top + drawing.scrollTop}px`;
+  node.style.left = `${x - host.left + drawing.scrollLeft}px`;
+  node.style.top = `${y - host.top + drawing.scrollTop}px`;
 }
 
 /** Replaces the whole text through the editor, so the edit can be undone. */
@@ -401,6 +415,9 @@ function apply(result) {
 
 drawing.addEventListener("pointerdown", (e) => {
   if (e.button !== 0) return;
+  // A drag isn't always followed by a click, so its flag mustn't outlive
+  // it and swallow the next real click.
+  dragged = false;
   closeMenu();
   const at = cellAt(e);
   if (!at) return;
@@ -565,16 +582,25 @@ function openMenu(at, from) {
   list.setAttribute("role", "listbox");
   menu.append(filter, list);
 
+  // The first input lands on the drop row, with the box's top border
+  // above it. A drop a row or two off the source's row snaps level with
+  // it first, so the new wire runs straight instead of jogging.
+  const rows = from && from.row !== at.row && Math.abs(from.row - at.row) <= 2 ? [from.row, at.row] : [at.row];
   const pick = (c) => {
     closeMenu();
-    // The first input lands on the drop point; the box's top border above it.
-    const corner = { row: Math.max(0, at.row - 1), col: at.col };
-    const placed = place_node(editor.value, corner.row, corner.col, c.word, c.inputs, c.outputs);
-    if (!placed.ok) return refuse(placed);
-    if (!from || !c.inputs) return applyText(placed.text);
-    const wired = connect(placed.text, from.row, from.col, corner.row + 1, corner.col);
-    applyText(wired.ok ? wired.text : placed.text);
-    if (!wired.ok) refuse(wired);
+    let first = null;
+    for (const row of rows) {
+      const corner = { row: Math.max(0, row - 1), col: at.col };
+      const placed = place_node(editor.value, corner.row, corner.col, c.word, c.inputs, c.outputs);
+      if (!placed.ok) continue;
+      if (!from || !c.inputs) return applyText(placed.text);
+      const wired = connect(placed.text, from.row, from.col, corner.row + 1, corner.col);
+      if (wired.ok) return applyText(wired.text);
+      first ??= { placed, wired };
+    }
+    if (!first) return refuse(place_node(editor.value, Math.max(0, at.row - 1), at.col, c.word, c.inputs, c.outputs));
+    applyText(first.placed.text);
+    refuse(first.wired);
   };
 
   const show = () => {
@@ -608,8 +634,14 @@ function openMenu(at, from) {
   menu.addEventListener("pointerdown", (e) => e.stopPropagation());
   menu.addEventListener("click", (e) => e.stopPropagation());
   show();
-  place(menu, { row: at.row + 1, col: at.col });
-  drawing.append(menu);
+  // Fixed over the page rather than inside the drawing's scroll box, which
+  // would clip it: below the drop point, or above it when there's no room.
+  document.body.append(menu);
+  const below = clientOf({ row: at.row + 1, col: at.col });
+  const above = clientOf(at).y - menu.offsetHeight - 8;
+  const room = below.y + menu.offsetHeight + 8 <= innerHeight;
+  menu.style.left = `${Math.max(8, Math.min(below.x, innerWidth - menu.offsetWidth - 8))}px`;
+  menu.style.top = `${Math.max(8, room || above < 8 ? below.y : above)}px`;
   // After the click that ends the drag, which would take focus back.
   setTimeout(() => filter.focus({ preventScroll: true }));
 }
@@ -617,6 +649,8 @@ function openMenu(at, from) {
 document.addEventListener("pointerdown", (e) => {
   if (menu && !menu.contains(e.target)) closeMenu();
 });
+// A fixed palette would drift from its drop point as the page scrolls.
+addEventListener("scroll", (e) => menu && !menu.contains(e.target) && closeMenu(), { capture: true, passive: true });
 
 // Live value badges: after each edit, a beat later, the sheet is traced off
 // the main thread and each wire shows the value it carried during the first
@@ -772,6 +806,7 @@ function finish(result) {
     say("·𐑥𐑱𐑯 has no outputs.");
   } else {
     output.textContent = result.outputs.join("\n");
+    tour.ran(current());
   }
 }
 
@@ -824,7 +859,9 @@ function label(name) {
   return `${number} · ${rest.replace(/-ascii$/, " (ASCII)").replaceAll("-", " ")}`;
 }
 
+/** Loads an example; any other than the tour's ends the tour. */
 async function loadExample(name) {
+  if (name !== TOUR_EXAMPLE) tour.stop();
   const text = await fetch(`examples/${name}.shaw`).then((r) => r.text());
   editor.value = text;
   examples.value = name;
@@ -837,6 +874,13 @@ async function loadExample(name) {
 }
 
 examples.addEventListener("change", () => loadExample(examples.value));
+
+async function startTour() {
+  await loadExample(TOUR_EXAMPLE);
+  tour.start(current());
+}
+
+$("tour-start").addEventListener("click", startTour);
 
 async function main() {
   try {
@@ -866,15 +910,18 @@ async function main() {
     if (names.includes(name) && name !== examples.value) loadExample(name);
   });
 
-  // A saved sheet wins unless the link names a different example.
+  // A saved sheet wins unless the link names a different example. A first
+  // visit with no link starts the tour.
   const linked = names.find((n) => `#${n}` === location.hash);
   const saved = store.get("source");
   if (saved !== null && (!linked || linked === store.get("example"))) {
     editor.value = saved;
     examples.value = store.get("example") ?? "";
     changed();
+  } else if (linked) {
+    await loadExample(linked);
   } else {
-    await loadExample(linked ?? "08-factorial");
+    await startTour();
   }
 }
 

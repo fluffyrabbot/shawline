@@ -31,11 +31,19 @@
         <span class="track" aria-hidden="true"></span>
         <span class="label">Transliterate</span>
       </label>
+      <button type="button" id="tour-start" class="quiet" title="Six moves that show the drawing is an editor">Tour</button>
       <button type="button" id="theme" class="quiet" aria-label="Switch theme">
         <span class="when-light">Dark</span><span class="when-dark">Light</span>
       </button>
     </nav>
   </header>
+
+  <aside id="tour" class="tour" hidden aria-label="Guided tour">
+    <span class="tour-count meta"></span>
+    <p class="tour-text" aria-live="polite"></p>
+    <button type="button" class="tour-next quiet"></button>
+    <button type="button" class="tour-close quiet" aria-label="End the tour">×</button>
+  </aside>
 
   <main>
     <section class="pane source" aria-labelledby="source-label">

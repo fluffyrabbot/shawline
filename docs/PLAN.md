@@ -364,6 +364,14 @@ The interaction model for a visual editor is designed in the [Shawline Studio do
   - result: no diagnostics, Run prints `42`, badges read `21`/`42`, undo reverts.
 - W had already tried the same flow with real mouse drags.
 - **Follow-up (Phase 2 polish):** a node placed from the palette lands with its input one row off the source, so its wire jogs (`21 ┘` into `┌─▶`). Placing the node so its first input lines up with the source's row would keep the wire straight.
+  - Done after the gate: a drop within two rows of the source snaps level with it first, and falls back to the drop row.
+- **First-run tour, after the gate.** The user's own trial found no obvious first move, because every wire in `03-double` is already connected. Changes:
+  - A first visit with no link opens `03-double` with a six-step tour (`playground/tour.js`): cut and redraw `·𐑥𐑱𐑯`'s output, delete its node, add one back from the palette, wire it, Run.
+  - Each step rings the cells to press. It advances when the sheet shows the step done, not on clicks, so undo and alternative routes still work. The header's Tour button restarts it.
+  - Its Node check walks the six steps through the wasm edits.
+  - The trial with real mouse input found two UI bugs, both fixed:
+    - a drag that no click followed swallowed the next real click;
+    - the palette was clipped inside the drawing's scroll box. It is now a fixed overlay that opens above the drop point when there's no room below, and closes on scroll.
 
 **Gate honesty.** The roadmap's Phase 1 gate says "every corpus program can be built with the mouse alone". Rewire plus rebuild covers every wire and every node box. Constants are still typed and switches still drawn by hand, both deferred to Phase 2.
 
