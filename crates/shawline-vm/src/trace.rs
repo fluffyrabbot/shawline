@@ -7,6 +7,8 @@
 use shawline_grid::Diagnostic;
 
 use crate::bytecode::{FuncId, Module, Value};
+use crate::record::Recorder;
+use crate::vm::{Halt, Limits, dispatch};
 
 /// One value an instruction wrote during the first activation of its
 /// function.
@@ -44,14 +46,18 @@ pub struct Traced {
 /// Runs `main` exactly as [`crate::run`] does, with the same limits and
 /// errors, recording as it goes, and executes at most `steps` instructions.
 pub fn run_traced(module: &Module, steps: u64) -> Traced {
-    let _ = (module, steps);
-    todo!("P7: agent T")
+    let mut rec = Recorder::new(steps);
+    match dispatch::<true>(module, Limits::SPEC, &mut rec) {
+        Ok((results, _)) => rec.traced.results = Some(results),
+        Err(Halt::Error(e)) => rec.traced.error = Some(e),
+        Err(Halt::Stopped) => rec.traced.stopped = true,
+    }
+    rec.traced
 }
 
 /// `value` printed as SPEC §9 prints it, cut to at most `max_chars`
 /// characters, the last of which is `…` when it was cut. Never builds the
 /// whole printed form, so a vast shared value is as cheap as a small one.
 pub fn show(value: &Value, max_chars: usize) -> String {
-    let _ = (value, max_chars);
-    todo!("P7: agent T")
+    crate::show::show(value, max_chars)
 }

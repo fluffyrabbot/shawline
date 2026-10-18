@@ -31,6 +31,5 @@ pub struct SheetTrace {
 /// maps the recorded values onto `sheet`'s wires. `program` must be what
 /// [`crate::lower`] made from `sheet`.
 pub fn trace(sheet: &Sheet, program: &Program, steps: u64) -> SheetTrace {
-    let _ = (sheet, program, steps);
-    todo!("P7: agent T")
+    crate::wires::trace(sheet, program, steps)
 }

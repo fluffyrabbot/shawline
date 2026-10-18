@@ -22,19 +22,46 @@ use crate::ir::{Block, Function, Op, Program, Value};
 /// survives to its own `Return`. Every `Return` sits at its definition's namer
 /// dot, which is where `R009` points (SPEC §14).
 pub fn compile(program: &Program) -> bc::Module {
-    let functions = program
+    compile_mapped(program).0
+}
+
+/// A block of the IR, named by the switch instructions and arms leading to
+/// it from its function's body: `[]` for the body itself.
+pub(crate) type Path = Rc<[(u32, u32)]>;
+
+/// The IR instruction a bytecode instruction carries out. Its outputs are
+/// that instruction's outputs, ordinal for ordinal.
+#[derive(Clone, Debug)]
+pub(crate) struct Site {
+    pub path: Path,
+    pub inst: u32,
+    /// A `TailCall`, whose outputs are its frame's eventual results.
+    pub tail: bool,
+}
+
+/// [`compile`], also giving, for each function and each of its bytecode
+/// instructions, the IR instruction it carries out. Moves, jumps and returns
+/// carry out none. An IR instruction after a tail-position switch is emitted
+/// once per arm, so several bytecode instructions may share a site.
+pub(crate) fn compile_mapped(program: &Program) -> (bc::Module, Vec<Vec<Option<Site>>>) {
+    let (functions, sites) = program
         .functions
         .iter()
         .enumerate()
         .map(|(i, f)| function(program, f, i as u32 != program.main))
-        .collect();
-    bc::Module {
+        .unzip();
+    let module = bc::Module {
         functions,
         main: program.main,
-    }
+    };
+    (module, sites)
 }
 
-fn function(program: &Program, f: &Function, tail_calls: bool) -> bc::Function {
+fn function(
+    program: &Program,
+    f: &Function,
+    tail_calls: bool,
+) -> (bc::Function, Vec<Option<Site>>) {
     let mut e = Emitter {
         program,
         tail_calls,
@@ -43,14 +70,19 @@ fn function(program: &Program, f: &Function, tail_calls: bool) -> bc::Function {
         const_ids: HashMap::new(),
         code: Vec::new(),
         spans: Vec::new(),
+        sites: Vec::new(),
         busy: Vec::new(),
         high: 0,
     };
     let params: Vec<Reg> = (0..f.body.params).map(|_| e.alloc()).collect();
-    e.block(&f.body, &params, true, Ctx::Tail, f.at, &[]);
+    let scope = Scope {
+        path: Rc::from([]),
+        origin: None,
+    };
+    e.block(&f.body, &params, true, Ctx::Tail(&[]), f.at, &scope);
     let results = f.body.results.len();
     let registers = e.high.max(params.len()).max(results);
-    bc::Function {
+    let function = bc::Function {
         name: f.name.clone(),
         params: reg(params.len()),
         results: reg(results),
@@ -58,6 +90,39 @@ fn function(program: &Program, f: &Function, tail_calls: bool) -> bc::Function {
         consts: e.consts,
         code: e.code,
         spans: e.spans,
+    };
+    (function, e.sites)
+}
+
+/// Where the block being emitted sits in the IR.
+#[derive(Clone)]
+struct Scope {
+    path: Path,
+    /// For a deferred block, each instruction's index in the block it was
+    /// taken from; otherwise instructions keep their own indices.
+    origin: Option<Vec<u32>>,
+}
+
+impl Scope {
+    fn site(&self, i: usize, tail: bool) -> Site {
+        let inst = self.origin.as_ref().map_or(i as u32, |o| o[i]);
+        Site {
+            path: self.path.clone(),
+            inst,
+            tail,
+        }
+    }
+
+    /// The scope of arm `arm` of the switch at index `i`.
+    fn arm(&self, i: usize, arm: usize) -> Scope {
+        let switch = self.site(i, false).inst;
+        let path = self
+            .path
+            .iter()
+            .copied()
+            .chain([(switch, arm as u32)])
+            .collect();
+        Scope { path, origin: None }
     }
 }
 
@@ -69,7 +134,8 @@ fn reg(n: usize) -> Reg {
 #[derive(Clone, Copy)]
 enum Ctx<'a> {
     /// They are the function's results: return them, or tail-call for them.
-    Tail,
+    /// These deferred nodes run just before the tail call or return.
+    Tail(&'a [Deferred]),
     /// They are a switch's outputs: move them into these registers. The
     /// switch emits the jump to its end.
     Join(&'a [Reg]),
@@ -81,6 +147,7 @@ enum Ctx<'a> {
 struct Deferred {
     block: Block,
     params: Vec<Reg>,
+    scope: Scope,
 }
 
 struct Emitter<'p> {
@@ -93,6 +160,8 @@ struct Emitter<'p> {
     const_ids: HashMap<Literal, ConstId>,
     code: Vec<Instr>,
     spans: Vec<Pos>,
+    /// Parallel to `code`.
+    sites: Vec<Option<Site>>,
     /// Which registers hold a live value.
     busy: Vec<bool>,
     high: usize,
@@ -102,6 +171,7 @@ impl Emitter<'_> {
     fn emit(&mut self, instr: Instr, at: Pos) -> usize {
         self.code.push(instr);
         self.spans.push(at);
+        self.sites.push(None);
         self.code.len() - 1
     }
 
@@ -171,23 +241,11 @@ impl Emitter<'_> {
 
     /// Emits `b` with its parameters in `params`. `owned` says whether the
     /// block may reuse its parameters' registers: an arm's parameters belong
-    /// to the enclosing block. In tail context, `deferred` runs just before
-    /// the block's tail call or return.
-    fn block(
-        &mut self,
-        b: &Block,
-        params: &[Reg],
-        owned: bool,
-        ctx: Ctx,
-        at: Pos,
-        deferred: &[Deferred],
-    ) {
-        let direct = match ctx {
-            Ctx::Tail => self.direct_inst(b),
-            Ctx::Join(_) => {
-                debug_assert!(deferred.is_empty(), "only tail blocks defer");
-                None
-            }
+    /// to the enclosing block. `scope` is where `b` sits in the IR.
+    fn block(&mut self, b: &Block, params: &[Reg], owned: bool, ctx: Ctx, at: Pos, scope: &Scope) {
+        let (direct, deferred) = match ctx {
+            Ctx::Tail(deferred) => (self.direct_inst(b), deferred),
+            Ctx::Join(_) => (None, &[][..]),
         };
         // Only a tail call may run out of row-major order (SPEC §10). Nothing
         // reads its outputs, so it can go last.
@@ -231,7 +289,8 @@ impl Emitter<'_> {
                 Op::Const(lit) => {
                     let idx = self.constant(lit);
                     let dst = self.alloc();
-                    self.emit(Instr::Const { dst, idx }, inst.at);
+                    let j = self.emit(Instr::Const { dst, idx }, inst.at);
+                    self.sites[j] = Some(scope.site(i, false));
                     vec![dst]
                 }
                 Op::Prim { prim, args } => {
@@ -247,7 +306,7 @@ impl Emitter<'_> {
                     for slot in &mut dst[..n] {
                         *slot = self.alloc();
                     }
-                    self.emit(
+                    let j = self.emit(
                         Instr::Prim {
                             prim: *prim,
                             dst,
@@ -255,6 +314,7 @@ impl Emitter<'_> {
                         },
                         inst.at,
                     );
+                    self.sites[j] = Some(scope.site(i, false));
                     dst[..n].to_vec()
                 }
                 Op::Call { func, args } => {
@@ -271,7 +331,7 @@ impl Emitter<'_> {
                         // The frame is replaced, so arguments already in a
                         // run can stay put.
                         let base = in_run.unwrap_or_else(|| self.moved_run(&srcs, k, inst.at));
-                        self.emit(
+                        let j = self.emit(
                             Instr::TailCall {
                                 func: *func,
                                 base,
@@ -279,6 +339,7 @@ impl Emitter<'_> {
                             },
                             inst.at,
                         );
+                        self.sites[j] = Some(scope.site(i, true));
                         return;
                     }
                     let reuse = in_run.filter(|&r0| {
@@ -290,7 +351,7 @@ impl Emitter<'_> {
                     let base = reuse.unwrap_or_else(|| self.moved_run(&srcs, k, inst.at));
                     dying.iter().for_each(|&r| self.free(r));
                     self.claim(base as usize, nres);
-                    self.emit(
+                    let j = self.emit(
                         Instr::Call {
                             func: *func,
                             base,
@@ -299,6 +360,7 @@ impl Emitter<'_> {
                         },
                         inst.at,
                     );
+                    self.sites[j] = Some(scope.site(i, false));
                     (0..nres).map(|j| base + reg(j)).collect()
                 }
                 Op::Switch {
@@ -317,14 +379,16 @@ impl Emitter<'_> {
                         let rest = &order[p + 1..];
                         let mut chain = Vec::with_capacity(deferred.len() + 1);
                         if !rest.is_empty() {
-                            chain.push(defer(b, rest, &regs));
+                            chain.push(defer(b, rest, &regs, scope));
                         }
                         chain.extend_from_slice(deferred);
-                        self.switch(sel, arms, &arm_params, Ctx::Tail, inst.at, &chain);
+                        let arm = |a| scope.arm(i, a);
+                        self.switch(sel, arms, &arm_params, Ctx::Tail(&chain), inst.at, &arm);
                         return;
                     }
                     let outs: Vec<Reg> = (0..*outputs).map(|_| self.alloc()).collect();
-                    self.switch(sel, arms, &arm_params, Ctx::Join(&outs), inst.at, &[]);
+                    let arm = |a| scope.arm(i, a);
+                    self.switch(sel, arms, &arm_params, Ctx::Join(&outs), inst.at, &arm);
                     dying.iter().for_each(|&r| self.free(r));
                     outs
                 }
@@ -351,7 +415,7 @@ impl Emitter<'_> {
                     }
                 }
             }
-            Ctx::Tail => {
+            Ctx::Tail(_) => {
                 self.run_deferred(deferred, at);
                 let count = reg(results.len());
                 let contiguous = results.windows(2).all(|w| w[1] == w[0] + 1);
@@ -386,10 +450,10 @@ impl Emitter<'_> {
         params: &[Vec<Reg>],
         ctx: Ctx,
         at: Pos,
-        deferred: &[Deferred],
+        scope: &dyn Fn(usize) -> Scope,
     ) {
         let mut to_end = Vec::new();
-        for (arm, params) in arms.iter().zip(params) {
+        for (a, (arm, params)) in arms.iter().zip(params).enumerate() {
             let skip = arm.guard.as_ref().map(|g| {
                 let idx = self.constant(g);
                 self.emit(
@@ -403,7 +467,7 @@ impl Emitter<'_> {
             });
             // Arms are exclusive, so each starts from the same registers.
             let saved = self.busy.clone();
-            self.block(&arm.body, params, false, ctx, at, deferred);
+            self.block(&arm.body, params, false, ctx, at, &scope(a));
             if matches!(ctx, Ctx::Join(_)) && skip.is_some() {
                 to_end.push(self.emit(Instr::Jump { target: 0 }, at));
             }
@@ -433,7 +497,7 @@ impl Emitter<'_> {
     /// Emits deferred nodes in order. Their outputs feed only each other.
     fn run_deferred(&mut self, deferred: &[Deferred], at: Pos) {
         for d in deferred {
-            self.block(&d.block, &d.params, false, Ctx::Join(&[]), at, &[]);
+            self.block(&d.block, &d.params, false, Ctx::Join(&[]), at, &d.scope);
         }
     }
 
@@ -467,7 +531,7 @@ impl Emitter<'_> {
 
 /// Rebuilds instructions `idxs` of `b` as a block of their own. Values they
 /// read from the rest of `b` become its parameters, held in `regs`.
-fn defer(b: &Block, idxs: &[usize], regs: &HashMap<Value, Reg>) -> Deferred {
+fn defer(b: &Block, idxs: &[usize], regs: &HashMap<Value, Reg>, scope: &Scope) -> Deferred {
     let renumbered: HashMap<u32, u32> = idxs
         .iter()
         .enumerate()
@@ -528,6 +592,10 @@ fn defer(b: &Block, idxs: &[usize], regs: &HashMap<Value, Reg>) -> Deferred {
             results: Vec::new(),
         },
         params: outer.iter().map(|v| regs[v]).collect(),
+        scope: Scope {
+            path: scope.path.clone(),
+            origin: Some(idxs.iter().map(|&i| scope.site(i, false).inst).collect()),
+        },
     }
 }
 

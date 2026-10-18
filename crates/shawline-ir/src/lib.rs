@@ -7,6 +7,7 @@ mod compile;
 pub mod ir;
 mod lower;
 pub mod trace;
+mod wires;
 
 #[cfg(test)]
 mod tests;

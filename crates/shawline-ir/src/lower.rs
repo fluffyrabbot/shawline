@@ -368,7 +368,7 @@ impl Checker<'_> {
 
 /// Where diagnostics about a node point: its word, a switch's selector, or a
 /// literal's first cell.
-fn word(node: &Node) -> Pos {
+pub(crate) fn word(node: &Node) -> Pos {
     match &node.kind {
         NodeKind::Call(name) | NodeKind::Inline(name) => name.at,
         NodeKind::Switch(sw) => sw.selector,

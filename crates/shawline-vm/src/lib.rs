@@ -5,6 +5,8 @@
 
 mod asm;
 pub mod bytecode;
+mod record;
+mod show;
 pub mod trace;
 mod value;
 mod verify;
