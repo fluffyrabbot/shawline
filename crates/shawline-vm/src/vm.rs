@@ -6,6 +6,7 @@ use shawline_grid::{Code, Diagnostic, Pos};
 
 use crate::MALFORMED;
 use crate::bytecode::{FuncId, Instr, Module, Prim, Reg, Value};
+use crate::record::Recorder;
 use crate::value::{equal, heap, printed_len};
 use crate::verify::verify;
 
@@ -70,6 +71,34 @@ pub(crate) fn execute(
     module: &Module,
     limits: Limits,
 ) -> Result<(Vec<Value>, usize), Diagnostic> {
+    match dispatch::<false>(module, limits, &mut Recorder::default()) {
+        Ok(done) => Ok(done),
+        Err(Halt::Error(e)) => Err(e),
+        Err(Halt::Stopped) => unreachable!("an untraced run has no step budget"),
+    }
+}
+
+/// Why a run ended without results.
+pub(crate) enum Halt {
+    Error(Diagnostic),
+    /// A traced run used up its steps.
+    Stopped,
+}
+
+impl From<Diagnostic> for Halt {
+    fn from(e: Diagnostic) -> Halt {
+        Halt::Error(e)
+    }
+}
+
+/// The one dispatch loop behind [`run`] and [`crate::run_traced`]. With
+/// `TRACE` false every recording branch is a constant and compiles away, so
+/// `rec` is never touched.
+pub(crate) fn dispatch<const TRACE: bool>(
+    module: &Module,
+    limits: Limits,
+    rec: &mut Recorder,
+) -> Result<(Vec<Value>, usize), Halt> {
     verify(module).map_err(|e| {
         let f = e.func.map(|i| &module.functions[i]);
         let at = f.zip(e.instr).and_then(|(f, pc)| f.spans.get(pc).copied());
@@ -86,17 +115,30 @@ pub(crate) fn execute(
     let mut scratch: Vec<Value> = Vec::new();
     let mut base = 0;
     let mut pc = 0;
+    if TRACE {
+        rec.start(module);
+    }
+    let running = |frames: &[Frame]| frames.last().expect("a running frame").func;
 
     // Verification guarantees every index below is in bounds.
     loop {
+        if TRACE && !rec.tick() {
+            return Err(Halt::Stopped);
+        }
         let r = |reg: Reg| base + reg as usize;
         match f.code[pc] {
             Instr::Const { dst, idx } => {
                 regs[r(dst)] = f.consts[idx as usize].clone();
+                if TRACE {
+                    rec.write(running(&frames), pc, 0, &regs[r(dst)]);
+                }
                 pc += 1;
             }
             Instr::Move { dst, src } => {
                 regs[r(dst)] = regs[r(src)].clone();
+                if TRACE {
+                    rec.write(running(&frames), pc, 0, &regs[r(dst)]);
+                }
                 pc += 1;
             }
             Instr::Prim { prim, dst, src } => {
@@ -105,11 +147,19 @@ pub(crate) fn execute(
                     .map_err(|(code, msg)| Diagnostic::new(f.spans[pc], code, msg))?;
                 if matches!(prim, Prim::Pair | Prim::Prepend) && heap::live() > limits.cells {
                     let message = format!("heap exhausted: {} cells alive", heap::live());
-                    return Err(Diagnostic::new(f.spans[pc], "R008", message));
+                    return Err(Diagnostic::new(f.spans[pc], "R008", message).into());
                 }
                 regs[r(dst[0])] = x;
-                if prim.arity().1 == 2 {
+                let two = prim.arity().1 == 2;
+                if two {
                     regs[r(dst[1])] = y;
+                }
+                if TRACE {
+                    let func = running(&frames);
+                    rec.write(func, pc, 0, &regs[r(dst[0])]);
+                    if two {
+                        rec.write(func, pc, 1, &regs[r(dst[1])]);
+                    }
                 }
                 pc += 1;
             }
@@ -119,12 +169,15 @@ pub(crate) fn execute(
                 // would reach below main.
                 if frames.len() > limits.frames || regs.len() + needed > limits.registers {
                     let message = format!("call stack exhausted {} calls deep", frames.len());
-                    return Err(Diagnostic::new(f.spans[pc], "R007", message));
+                    return Err(Diagnostic::new(f.spans[pc], "R007", message).into());
                 }
                 frames.last_mut().expect("a running frame").pc = pc + 1;
                 f = &module.functions[func as usize];
                 let callee = regs.len();
                 regs.extend_from_within(r(args)..r(args) + argc as usize);
+                if TRACE {
+                    rec.call(func, &regs[callee..]);
+                }
                 regs.resize(callee + f.registers as usize, Value::Int(0));
                 frames.push(Frame { func, pc: 0, base: callee, dst });
                 peak = peak.max(frames.len());
@@ -135,9 +188,12 @@ pub(crate) fn execute(
                 let needed = module.functions[func as usize].registers as usize;
                 if base + needed > limits.registers {
                     let message = format!("call stack exhausted {} calls deep", frames.len() - 1);
-                    return Err(Diagnostic::new(f.spans[pc], "R007", message));
+                    return Err(Diagnostic::new(f.spans[pc], "R007", message).into());
                 }
                 scratch.extend(regs.drain(r(args)..r(args) + argc as usize));
+                if TRACE {
+                    rec.tail(frames.len(), running(&frames), pc, func, &scratch);
+                }
                 regs.truncate(base);
                 regs.append(&mut scratch);
                 f = &module.functions[func as usize];
@@ -152,10 +208,16 @@ pub(crate) fn execute(
                 let Some(caller) = frames.last() else {
                     if scratch.iter().any(|v| printed_len(v, limits.output).is_none()) {
                         let message = format!("a result prints longer than {}", limits.output);
-                        return Err(Diagnostic::new(f.spans[pc], "R009", message));
+                        return Err(Diagnostic::new(f.spans[pc], "R009", message).into());
+                    }
+                    if TRACE {
+                        rec.ret(1, &scratch, None);
                     }
                     return Ok((mem::take(&mut scratch), peak));
                 };
+                if TRACE {
+                    rec.ret(frames.len() + 1, &scratch, Some((caller.func, caller.pc - 1)));
+                }
                 f = &module.functions[caller.func as usize];
                 base = caller.base;
                 pc = caller.pc;
@@ -173,7 +235,7 @@ pub(crate) fn execute(
                 };
             }
             Instr::NoMatch => {
-                return Err(Diagnostic::new(f.spans[pc], "R005", "no arm matches"));
+                return Err(Diagnostic::new(f.spans[pc], "R005", "no arm matches").into());
             }
         }
     }
