@@ -265,6 +265,85 @@ main {
   100% { opacity: 0; }
 }
 
+/* Wiring by dragging: a crosshair over sources, glowing cells where the
+   drag can end, the router's path as a dashed preview, the selection, and a
+   pill on each wire with the value it carried. */
+#drawing:focus-visible { outline: none; }
+#drawing svg.over-source { cursor: crosshair; }
+#drawing.wiring svg { cursor: crosshair; user-select: none; }
+#drawing .glow {
+  fill: var(--wire);
+  opacity: 0.2;
+  animation: glow 1.4s ease-in-out infinite alternate;
+}
+@keyframes glow { to { opacity: 0.42; } }
+#drawing .wire-preview {
+  fill: none;
+  stroke: var(--wire);
+  stroke-width: 110;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+  stroke-dasharray: 160 140;
+  opacity: 0.75;
+}
+#drawing .wire-preview.loose { opacity: 0.35; }
+#drawing .selected {
+  fill: color-mix(in srgb, var(--wire) 14%, transparent);
+  stroke: var(--wire);
+  stroke-width: 70;
+  stroke-dasharray: 220 120;
+}
+#drawing .selected-wire rect { fill: var(--wire); opacity: 0.22; }
+#drawing .badge { pointer-events: auto; }
+#drawing .badge rect {
+  fill: var(--background);
+  stroke: color-mix(in srgb, var(--wire) 55%, transparent);
+  stroke-width: 36;
+}
+#drawing .badge text {
+  font: 500 500px var(--sans);
+  font-variant-numeric: tabular-nums;
+  fill: var(--wire);
+}
+#drawing svg:not(:hover) .badge { opacity: 0.92; }
+.hint-line { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* The context palette: a short list by the drop point. */
+.palette {
+  position: absolute;
+  z-index: 2;
+  width: 22em;
+  margin-top: 4px;
+  font: 14px/1.4 var(--sans);
+  background: var(--background);
+  border: 1px solid color-mix(in srgb, var(--border) 35%, transparent);
+  border-radius: 8px;
+  box-shadow: 0 8px 28px color-mix(in srgb, var(--text) 16%, transparent);
+  overflow: hidden;
+}
+.palette input {
+  width: 100%;
+  border: 0;
+  border-bottom: 1px solid var(--rule);
+  padding: 8px 12px;
+  background: transparent;
+  outline: none;
+}
+.palette ul { list-style: none; margin: 0; padding: 4px; max-height: 18em; overflow: auto; }
+.palette li {
+  display: grid;
+  grid-template-columns: 4.2em 1fr auto auto;
+  align-items: baseline;
+  gap: 10px;
+  padding: 4px 8px;
+  border-radius: 5px;
+  cursor: pointer;
+}
+.palette li:hover, .palette li.first { background: var(--wash); }
+.palette .word { font: 20px/1.2 var(--mono); color: var(--text); }
+.palette .gloss { color: var(--text); }
+.palette .arity, .palette .mirror { color: var(--comment); font-size: 12px; font-variant-numeric: tabular-nums; }
+
 /* Diagnostics and output */
 
 #problems { list-style: none; margin: 0; padding: 0; }

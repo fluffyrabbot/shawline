@@ -14,6 +14,8 @@ shawline-grid.workspace = true
 shawline-shape.workspace = true
 shawline-edit.workspace = true
 shawline-word.workspace = true
+# `show`, for value badges.
+shawline-vm.workspace = true
 # Pinned to the installed wasm-bindgen CLI, which must match exactly.
 wasm-bindgen = "=0.2.126"
 # Plain JS objects and arrays for results, without a serde round trip. Its

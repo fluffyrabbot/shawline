@@ -19,9 +19,11 @@
 //! unchanged.
 
 mod check;
+mod model;
 mod mover;
 mod router;
 mod sheet;
+mod wiring;
 
 use std::collections::HashSet;
 
@@ -118,23 +120,20 @@ pub struct Candidate {
 /// Refused when `to` already has a wire, the cells aren't a source and a sink,
 /// or no route fits within the router's budget.
 pub fn connect(src: &str, from: Pos, to: Pos) -> Result<String, Refusal> {
-    let _ = (src, from, to);
-    todo!("P7: agent W")
+    wiring::connect(src, from, to)
 }
 
 /// Removes the whole wire that passes through cell `at`, with every branch.
 /// Refused when no editable wire passes through `at`.
 pub fn remove_wire(src: &str, at: Pos) -> Result<String, Refusal> {
-    let _ = (src, at);
-    todo!("P7: agent W")
+    wiring::remove_wire(src, at)
 }
 
 /// Removes only the branch of a wire that reaches sink `to`, back to the tee
 /// it leaves from. A tee left with two arms becomes a plain stroke. When the
 /// wire has no other sink, the whole wire goes, as with [`remove_wire`].
 pub fn disconnect(src: &str, to: Pos) -> Result<String, Refusal> {
-    let _ = (src, to);
-    todo!("P7: agent W")
+    wiring::disconnect(src, to)
 }
 
 /// Places a canonical node box for `word` with its top-left corner at
@@ -148,16 +147,14 @@ pub fn place_node(
     inputs: u16,
     outputs: u16,
 ) -> Result<String, Refusal> {
-    let _ = (src, corner, word, inputs, outputs);
-    todo!("P7: agent W")
+    wiring::place_node(src, corner, word, inputs, outputs)
 }
 
 /// Removes the node box whose top-left corner is `corner`. Every wire it
 /// sources goes too, and only the branches that reach its inputs
 /// ([`disconnect`]).
 pub fn remove_node(src: &str, corner: Pos) -> Result<String, Refusal> {
-    let _ = (src, corner);
-    todo!("P7: agent W")
+    wiring::remove_node(src, corner)
 }
 
 /// What the context palette offers, in a fixed order: primitives first in
@@ -165,8 +162,63 @@ pub fn remove_node(src: &str, corner: Pos) -> Result<String, Refusal> {
 /// order. With `from`, a wire is being dragged from that source, so only
 /// candidates with at least one input are offered.
 pub fn palette(src: &str, from: Option<Pos>) -> Vec<Candidate> {
-    let _ = (src, from);
-    todo!("P7: agent W")
+    wiring::palette(src, from)
+}
+
+// ---------------------------------------------------------------------------
+// Studio helpers beyond the P7 contract, for the playground's drag gesture.
+// They read the sheet exactly as the contract's edits do.
+
+/// A cell where a wire can start or end, for the UI to hit-test and
+/// highlight.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Endpoint {
+    /// The cell naming it, as [`connect`] takes it.
+    pub at: Pos,
+    /// Sources and sinks connect only within one scope: equal keys.
+    pub scope: (usize, usize),
+    /// A wire already meets it. A wired sink takes no other; a wired
+    /// source fans out.
+    pub wired: bool,
+    /// How many cells from `at` eastward name it too: a constant's whole
+    /// text, or an input's arrowhead through its name.
+    pub span: usize,
+}
+
+/// Every source and every sink of `src`, each in row-major order. Empty
+/// when the text has grid errors.
+pub fn endpoints(src: &str) -> (Vec<Endpoint>, Vec<Endpoint>) {
+    let Ok(grid) = Grid::parse(src) else { return (Vec::new(), Vec::new()) };
+    let diagram = recognize(&grid);
+    let model = model::Model::new(&grid, &diagram);
+    let (sources, sinks) = model.endpoints();
+    let sources = sources
+        .into_iter()
+        .map(|(at, s, wired)| {
+            let span = s.goal.col.saturating_sub(at.col).max(1);
+            Endpoint { at, scope: s.scope, wired, span }
+        })
+        .collect();
+    let sinks = sinks
+        .into_iter()
+        .map(|(s, wired)| Endpoint { at: s.at, scope: s.scope, wired, span: 1 })
+        .collect();
+    (sources, sinks)
+}
+
+/// The cells a wire dragged from source `from` would take if released at
+/// `to`: what [`connect`] would draw when `to` is a free sink in reach, or
+/// a route to the blank cell `to`. `None` when nothing fits. For a live
+/// preview; nothing is edited.
+pub fn preview(src: &str, from: Pos, to: Pos) -> Option<Vec<Pos>> {
+    wiring::preview(src, from, to)
+}
+
+/// For each wire of the recognized diagram (`Diagram::wires` order), the
+/// cell naming its source as [`connect`] takes it, when the wire is
+/// editable: so a drag may start on a wire to fan it out.
+pub fn wire_sources(src: &str) -> Vec<Option<Pos>> {
+    wiring::wire_sources(src)
 }
 
 /// A sheet as [`route`] sees it: blank cells are free except where a new

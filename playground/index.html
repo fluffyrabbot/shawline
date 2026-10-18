@@ -55,8 +55,18 @@
     </section>
 
     <section class="pane drawing" aria-labelledby="drawing-label">
-      <div class="pane-head"><h2 id="drawing-label">Drawing</h2></div>
-      <div id="drawing" title="Click a cell to put the cursor there, or drag a box to move it"></div>
+      <div class="pane-head">
+        <h2 id="drawing-label">Drawing</h2>
+        <span class="meta hint-line">Drag from a tee to wire it · Delete removes</span>
+        <span class="spacer"></span>
+        <label class="switch" title="Show the value each wire carries">
+          <input type="checkbox" id="values" checked>
+          <span class="track" aria-hidden="true"></span>
+          <span class="label">Values</span>
+        </label>
+      </div>
+      <div id="drawing" tabindex="0"
+        title="Drag from a source to wire it, drag a box to move it, double-click space for a node"></div>
     </section>
 
     <section class="pane problems" aria-labelledby="problems-label">
