@@ -85,6 +85,19 @@ impl Sink {
     }
 }
 
+/// The refusal for a cell that is neither a port nor text, as a source.
+pub(crate) fn no_source(at: Pos) -> Refusal {
+    Refusal::new(
+        at,
+        "nothing here feeds a wire: start at an output tee, an input, a constant or an arm's input",
+    )
+}
+
+/// The refusal for a cell that isn't an arrowhead, as a sink.
+pub(crate) fn no_sink(at: Pos) -> Refusal {
+    Refusal::new(at, "wires end at arrowheads: a node's input, an output or a switch port")
+}
+
 /// A source with the cell naming it, and whether a wire already starts there.
 pub(crate) type WiredSource = (Pos, Source, bool);
 
@@ -298,17 +311,12 @@ impl<'a> Model<'a> {
             }
             return Err(Refusal::new(at, format!("{} can't feed a wire", self.content(t))));
         }
-        Err(Refusal::new(
-            at,
-            "nothing here feeds a wire: start at an output tee, an input, a constant or an arm's input",
-        ))
+        Err(no_source(at))
     }
 
     /// The sink named by cell `at`: an arrowhead on a box border.
     pub(crate) fn sink(&self, at: Pos) -> Result<Sink, Refusal> {
-        let not = || {
-            Refusal::new(at, "wires end at arrowheads: a node's input, an output or a switch port")
-        };
+        let not = || no_sink(at);
         let (b, port) = self.port(at).ok_or_else(not)?;
         if port.kind != PortKind::Arrow {
             return Err(not());

@@ -57,11 +57,13 @@ pub fn raw_col(text: &str, p: Pos) -> usize {
 /// The LSP position of character index `col` on line `row`. Columns past the
 /// end of the line count one unit each, like the grid's implicit spaces.
 pub fn to_lsp(text: &str, enc: Encoding, row: usize, col: usize) -> Position {
-    let mut chars = line(text, row).chars();
-    let character = (0..col)
-        .map(|_| chars.next().map_or(1, |c| enc.units(c)))
-        .sum();
-    Position::new(row as u32, character)
+    let (mut units, mut seen) = (0u32, 0usize);
+    for c in line(text, row).chars().take(col) {
+        units += enc.units(c);
+        seen += 1;
+    }
+    let past = u32::try_from(col - seen).unwrap_or(u32::MAX);
+    Position::new(row as u32, units.saturating_add(past))
 }
 
 /// The LSP position of grid cell `p`.
@@ -80,19 +82,20 @@ pub fn cells_range(text: &str, enc: Encoding, p: Pos, width: usize) -> Range {
 
 /// The character index on its raw line of an LSP position. A UTF-16 offset
 /// that splits a surrogate pair rounds down to the start of that character.
+/// Past the end of the line each unit is one column, counted in one step:
+/// a client may send any `u32`.
 pub fn from_lsp(text: &str, enc: Encoding, pos: Position) -> usize {
-    let mut units = 0;
-    let mut col = 0;
-    let mut chars = line(text, pos.line as usize).chars();
-    while units < pos.character {
-        let step = chars.next().map_or(1, |c| enc.units(c));
-        if units + step > pos.character {
-            break;
+    let mut units = 0u32;
+    let mut col = 0usize;
+    for c in line(text, pos.line as usize).chars() {
+        let next = units.saturating_add(enc.units(c));
+        if next > pos.character {
+            return col;
         }
-        units += step;
+        units = next;
         col += 1;
     }
-    col
+    col.saturating_add((pos.character - units) as usize)
 }
 
 /// The grid cell of an LSP position.
@@ -175,6 +178,26 @@ mod tests {
         assert_eq!(cell_to_lsp(text, enc, Pos::new(0, 1)), Position::new(0, 3));
         assert_eq!(cell_to_lsp(text, enc, Pos::new(1, 1)), Position::new(1, 2));
         assert_eq!(lsp_to_cell(text, enc, Position::new(0, 3)), Pos::new(0, 1));
+    }
+
+    #[test]
+    fn far_past_the_end_takes_no_time() {
+        // Line 1 is 13 characters: 15 UTF-16 units, with its two letters.
+        let far = Position::new(1, u32::MAX);
+        let max = u32::MAX as usize;
+        assert_eq!(from_lsp(TEXT, Encoding::Utf16, far), 13 + (max - 15));
+        assert_eq!(from_lsp(TEXT, Encoding::Utf32, far), max);
+        assert_eq!(
+            lsp_to_cell(TEXT, Encoding::Utf16, far),
+            Pos::new(1, max - 2)
+        );
+        assert_eq!(
+            to_lsp(TEXT, Encoding::Utf16, 1, usize::MAX),
+            Position::new(1, u32::MAX)
+        );
+        // Just past the end, both ways agree.
+        assert_eq!(to_lsp(TEXT, Encoding::Utf16, 1, 20), Position::new(1, 22));
+        assert_eq!(from_lsp(TEXT, Encoding::Utf16, Position::new(1, 22)), 20);
     }
 
     #[test]

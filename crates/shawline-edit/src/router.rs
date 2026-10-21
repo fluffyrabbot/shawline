@@ -23,8 +23,9 @@ pub(crate) const CROSS: u32 = 60;
 pub(crate) const CLEARANCE: u32 = 1;
 /// A new fan-out point on an existing wire.
 pub(crate) const TEE: u32 = 4;
-/// Most search states expanded before giving up. A sheet's interior is a
-/// few thousand cells, four headings each, so this is several sheets' worth.
+/// Most search states one edit expands before giving up, over all its
+/// searches. A sheet's interior is a few thousand cells, four headings
+/// each, so this is several sheets' worth.
 pub(crate) const BUDGET: usize = 40_000;
 
 /// What a cell means to a new wire.
@@ -65,6 +66,15 @@ pub(crate) struct Start {
     pub straight: bool,
 }
 
+/// Why a search found no route.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Miss {
+    /// Every reachable state was tried: no route exists.
+    NoPath,
+    /// The budget ran out first: a route may exist.
+    GaveUp,
+}
+
 /// A route the search found.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct Found {
@@ -83,10 +93,15 @@ struct Node {
 
 type Key = (Pos, Option<Dir>, bool);
 
-/// The cheapest route from `start` to a goal of `terrain`, expanding at
-/// most `budget` states. Ties go to the route found first, so the result
-/// is deterministic.
-pub(crate) fn search(terrain: &impl Terrain, start: Start, budget: usize) -> Option<Found> {
+/// The cheapest route from `start` to a goal of `terrain`. Each state
+/// expanded takes one from `budget`, which an edit shares between all its
+/// searches. Ties go to the route found first, so the result is
+/// deterministic.
+pub(crate) fn search(
+    terrain: &impl Terrain,
+    start: Start,
+    budget: &mut usize,
+) -> Result<Found, Miss> {
     let mut nodes = vec![Node {
         pos: start.pos,
         heading: start.heading,
@@ -99,7 +114,6 @@ pub(crate) fn search(terrain: &impl Terrain, start: Start, budget: usize) -> Opt
     let mut heap = BinaryHeap::new();
     heap.push(Reverse((0u32, 0usize, 0usize, false)));
     let mut seq = 0;
-    let mut expanded = 0;
 
     while let Some(Reverse((cost, _, id, done))) = heap.pop() {
         if done {
@@ -110,16 +124,16 @@ pub(crate) fn search(terrain: &impl Terrain, start: Start, budget: usize) -> Opt
                 at = nodes[i].parent;
             }
             path.reverse();
-            return Some(Found { path, cost });
+            return Ok(Found { path, cost });
         }
         let (pos, heading, straight) = (nodes[id].pos, nodes[id].heading, nodes[id].straight);
         if best.get(&(pos, heading, straight)).is_some_and(|&b| b < cost) {
             continue;
         }
-        expanded += 1;
-        if expanded > budget {
-            return None;
+        if *budget == 0 {
+            return Err(Miss::GaveUp);
         }
+        *budget -= 1;
         for d in Dir::ALL {
             if let Some(h) = heading
                 && (d == h.opposite() || (straight && d != h))
@@ -153,7 +167,7 @@ pub(crate) fn search(terrain: &impl Terrain, start: Start, budget: usize) -> Opt
             heap.push(Reverse((next, seq, nodes.len() - 1, false)));
         }
     }
-    None
+    Err(Miss::NoPath)
 }
 
 /// The direction from `a` to its neighbour `b`.
@@ -212,7 +226,7 @@ mod tests {
     #[test]
     fn crosses_when_the_detour_is_long() {
         let field = Field::new("#|##\n.|.G\n#|##\n");
-        let found = search(&field, from(1, 0), BUDGET).unwrap();
+        let found = search(&field, from(1, 0), &mut { BUDGET }).unwrap();
         assert_eq!(found.path, [Pos::new(1, 0), Pos::new(1, 1), Pos::new(1, 2), Pos::new(1, 3)]);
         assert_eq!(found.cost, CROSS + 2 * CELL);
     }
@@ -221,14 +235,26 @@ mod tests {
     fn no_bend_inside_a_crossing() {
         // Turning down inside the line would be a four-way junction.
         let field = Field::new(".|.\n#.#\n#G#\n");
-        assert_eq!(search(&field, from(0, 0), BUDGET), None);
+        assert_eq!(search(&field, from(0, 0), &mut { BUDGET }), Err(Miss::NoPath));
+    }
+
+    #[test]
+    fn searches_share_one_budget() {
+        // Crossing a ten-cell corridor expands ten states.
+        let field = Field::new("..........G\n");
+        let mut budget = 15;
+        assert!(search(&field, from(0, 0), &mut budget).is_ok());
+        assert_eq!(budget, 5);
+        assert_eq!(search(&field, from(0, 0), &mut budget), Err(Miss::GaveUp));
+        // A walled-in start runs out of states, not budget.
+        assert_eq!(search(&Field::new(".#G\n"), from(0, 0), &mut { BUDGET }), Err(Miss::NoPath));
     }
 
     #[test]
     fn straight_start_goes_straight_first() {
         let field = Field::new("...\n...\n..G\n");
         let start = Start { pos: Pos::new(0, 0), heading: Some(Dir::S), straight: true };
-        let found = search(&field, start, BUDGET).unwrap();
+        let found = search(&field, start, &mut { BUDGET }).unwrap();
         assert_eq!(found.path[1], Pos::new(1, 0));
     }
 }
