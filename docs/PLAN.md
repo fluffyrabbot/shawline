@@ -375,6 +375,42 @@ The interaction model for a visual editor is designed in the [Shawline Studio do
 
 **Gate honesty.** The roadmap's Phase 1 gate says "every corpus program can be built with the mouse alone". Rewire plus rebuild covers every wire and every node box. Constants are still typed and switches still drawn by hand, both deferred to Phase 2.
 
+### Review after P7: UX and architecture
+
+Two read-only Codex audits, one on UX (checked against WAI, MDN, Blender and Unreal conventions) and one on architecture, gave 33 findings. The lead merged them into 30 items in six batches, reproducing the worst three in the browser and checking the rest in the code. One claim was dropped: muted text measures 4.74:1 (light) and 4.93:1 (dark), which passes AA.
+
+**Batch 1 landed** (two sessions, disjoint files):
+- **Playground** (`playground/` only):
+  - every example and the tour keep their own draft, so switching examples no longer destroys edits, and Reset restores the original;
+  - dragging a wired arrowhead away disconnects that branch, and Delete on a selected arrowhead calls `disconnect`;
+  - the trace status shows complete, stopped at the budget, runtime error or unavailable;
+  - a palette drop places nothing unless its wire connects;
+  - drags track their pointer, and releasing off the sheet or pressing Escape cancels;
+  - refusals persist in a status line;
+  - focus rings and reduced motion are respected;
+  - runtime errors show one-based;
+  - worker, fetch and storage failures are handled;
+  - also fixed: Chrome's redo dropped a line from whole-text replacements, and the tour lost `21` once main moved.
+- **`shawline-edit`:**
+  - targets resolve on the text as given and carry over to the canonical sheet by identity (`canon.rs`). Before this, a leading or doubled blank line made every edit below it miss;
+  - one router budget covers a whole edit, and running out is refused as "gave up";
+  - a definition can't be moved past the sheet's reachable area.
+- **`shawline-lsp`:** positions past a line's end are computed arithmetically.
+
+**Gate.** `studio_rewire` and `studio_rebuild` also start from one jittered copy of each program (`shawline_corpus::jitter`), and must end exactly as the canonical start does. On `099b8ed`'s `shawline-edit`, seed 0 fails both with the bug's own refusals. One seed rather than three keeps the studio tests at about 26 s.
+- 250 tests, all under `scripts/capped`.
+- Clippy clean on host and wasm.
+- The playground build (540 875-byte wasm) and its 28 Node checks are green.
+- By hand in the browser: drafts survive a switch, and a real drag disconnects one branch and undoes.
+
+**Next, in order:**
+1. **Hardening.** The codegen `u16` register `expect` becomes a diagnostic. Near-box candidate products and all-pairs cycle reachability are confirmed by a finite fuzz before fixing.
+2. **Document spine.** One parse per revision (today a refresh recognizes the same text six times), with `edit` and `lsp` no longer depending on `shawline-cli`. Then revision IDs on worker messages, compound checked edits with typed `Refusal` kinds, and keeping crossing ownership in `wire.rs`. Oracle upgrades come first. This all precedes Phase 2.
+3. **Keyboard and semantic selection.** A real palette combobox with phonemic search, zoom and pan, and a node inspector.
+4. **Repair in place.** `fix` in the playground and as an LSP quick fix, and richer diagnostics.
+5. **Onboarding.** A tour that tracks undo, README prerequisites, VS Code server status, and CLI `--help`.
+6. **Phase 2 order.** Insert rows and columns, constants by mouse, switch outputs, drawing switches, extracting definitions, then scrubbing.
+
 ## Risks
 
 | Risk | Mitigation |
