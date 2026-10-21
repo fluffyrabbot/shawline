@@ -15,11 +15,19 @@
 //! output, the same wires (each source cell with its sink cells), and a
 //! canonical text. Refusals are allowed, each with a reason, but for at most
 //! a fifth of the programs (rewire) or nodes (rebuild).
+//!
+//! Rewire and rebuild also start from jittered copies of each program (the
+//! jitter corpus's perturbations), naming their first edit in the jittered
+//! text's own cells, as an editor showing that text would. Every edit
+//! returns canonical text, so the later ones name canonical cells. A
+//! jittered start must end exactly where the canonical one does: the same
+//! text, or the same refusal.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashSet};
 use std::fs;
 use std::time::{Duration, Instant};
 
+use shawline_corpus::jitter::{Fired, Jittered, Rng, jitter};
 use shawline_corpus::{STAGES, programs, root};
 use shawline_grid::{Grid, Pos};
 use shawline_syntax::ast::{Endpoint, Graph, NodeKind, Sheet};
@@ -51,6 +59,21 @@ fn clean_programs(limit: u32) -> Vec<(String, String)> {
         })
         .map(|p| (p.file_name().unwrap().to_string_lossy().into_owned(), fs::read_to_string(&p).unwrap()))
         .collect()
+}
+
+/// Jitter seeds each rewire and rebuild also starts from.
+const JITTER_SEEDS: u64 = 1;
+
+/// The texts a loop starts from: `src` itself, then jittered copies.
+fn starts(src: &str) -> Vec<(String, Jittered)> {
+    let diagram = shawline_shape::recognize(&Grid::parse(src).unwrap());
+    let wire: HashSet<Pos> = diagram.wires.iter().flat_map(|w| w.cells.iter().copied()).collect();
+    let mut out = vec![("canonical".to_owned(), Jittered::none(src))];
+    for seed in 0..JITTER_SEEDS {
+        let jittered = jitter(src, &wire, &mut Rng(seed), &mut Fired::default());
+        out.push((format!("jitter seed {seed}"), jittered));
+    }
+    out
 }
 
 fn sheet(src: &str) -> Sheet {
@@ -146,6 +169,21 @@ fn pairs(link: &Link) -> Vec<(Pos, Pos)> {
     link.to.iter().map(|&to| (link.from, to)).collect()
 }
 
+/// How a loop ended, as compared between starts: its text, or the step
+/// that was refused and why.
+type Outcome = Result<String, (String, String)>;
+
+/// Checks a jittered start's outcome against the canonical start's.
+fn same_end(what: &str, start: &str, got: &Outcome, want: &Outcome, failures: &mut Vec<String>) {
+    if got != want {
+        let show = |o: &Outcome| match o {
+            Ok(text) => format!("ends with\n{text}"),
+            Err((step, why)) => format!("refuses {step}: {why}"),
+        };
+        failures.push(format!("{what} from {start} {}\nbut from canonical text {}", show(got), show(want)));
+    }
+}
+
 #[test]
 fn studio_rewire() {
     let (mut tried, mut refused, mut failures) = (0, 0, Vec::new());
@@ -161,39 +199,46 @@ fn studio_rewire() {
         let cuts: Vec<Pos> = editable.iter().map(|l| diagram.wires[l.wire].cells[0]).collect();
         let mut connects: Vec<(Pos, Pos)> = editable.iter().flat_map(|l| pairs(l)).collect();
         connects.sort_by_key(|&(_, to)| to);
+        let steps: Vec<(&str, Pos, Option<Pos>)> = cuts
+            .iter()
+            .map(|&at| ("remove_wire", at, None))
+            .chain(connects.iter().map(|&(from, to)| ("connect", from, Some(to))))
+            .collect();
 
-        let mut text = src.clone();
-        let steps = cuts.iter().map(|&at| ("remove_wire", at, None)).chain(
-            connects.iter().map(|&(from, to)| ("connect", from, Some(to))),
-        );
-        let mut refusal = None;
-        for (what, at, to) in steps {
-            let result = match to {
-                None => shawline_edit::remove_wire(&text, at),
-                Some(to) => shawline_edit::connect(&text, at, to),
-            };
-            match result {
-                Ok(next) => text = next,
-                Err(r) => {
-                    refusal = Some(format!("{name}: {what} at {at} refused: {}", r.reason));
-                    if r.reason.trim().is_empty() {
-                        failures.push(format!("{name}: {what} at {at} refused without a reason"));
-                    }
-                    break;
+        let rewire = |shown: &Jittered| -> Outcome {
+            let mut text = shown.text.clone();
+            for (k, &(what, at, to)) in steps.iter().enumerate() {
+                // Only the first edit sees the shown text.
+                let (cell, end) = if k == 0 { (shown.at(at), to.map(|t| shown.at(t))) } else { (at, to) };
+                let result = match end {
+                    None => shawline_edit::remove_wire(&text, cell),
+                    Some(end) => shawline_edit::connect(&text, cell, end),
+                };
+                text = result.map_err(|r| (format!("{what} at {at}"), r.reason))?;
+            }
+            Ok(text)
+        };
+        let starts = starts(&src);
+        let want = rewire(&starts[0].1);
+        match &want {
+            Err((step, why)) => {
+                refused += 1;
+                if why.trim().is_empty() {
+                    failures.push(format!("{name}: {step} refused without a reason"));
                 }
             }
-        }
-        match refusal {
-            Some(_) => refused += 1,
-            None => {
-                if let Err(why) = same_program(&src, &text) {
+            Ok(text) => {
+                if let Err(why) = same_program(&src, text) {
                     failures.push(format!("{name}: rewired, but {why}"));
                 }
             }
         }
+        for (start, shown) in &starts[1..] {
+            same_end(&name, start, &rewire(shown), &want, &mut failures);
+        }
     }
     assert!(tried >= 10, "only {tried} programs tried");
-    assert!(failures.is_empty(), "{} of {tried} programs fail; first:\n{}", failures.len(), failures[0]);
+    assert!(failures.is_empty(), "{} failures over {tried} programs; first:\n{}", failures.len(), failures[0]);
     assert!(refused * 5 <= tried, "{refused} of {tried} programs refused: more than a fifth");
 }
 
@@ -203,6 +248,7 @@ fn studio_rebuild() {
     for (name, src) in clean_programs(80) {
         let original = sheet(&src);
         let all = links(&original);
+        let starts = starts(&src);
         let mut boxes = Vec::new();
         for def in &original.definitions {
             collect_calls(&def.body, &mut boxes);
@@ -218,10 +264,13 @@ fn studio_rebuild() {
             tried += 1;
             let what = format!("{name}: {word} at {corner}");
             let from = touching.iter().find(|l| l.to.iter().any(|t| inputs.contains(t))).map(|l| l.from);
-            let offered = shawline_edit::palette(&src, from);
             let arity = (inputs.len() as u16, outputs.len() as u16);
-            if !offered.iter().any(|c| c.word == word && (c.inputs, c.outputs) == arity) {
-                failures.push(format!("{what}: the palette doesn't offer it"));
+            let offers = |shown: &Jittered| {
+                let offered = shawline_edit::palette(&shown.text, from.map(|f| shown.at(f)));
+                offered.iter().any(|c| c.word == word && (c.inputs, c.outputs) == arity)
+            };
+            if let Some((start, _)) = starts.iter().find(|(_, shown)| !offers(shown)) {
+                failures.push(format!("{what} from {start}: the palette doesn't offer it"));
                 continue;
             }
             // Incoming branches first, then everything the node feeds.
@@ -231,42 +280,39 @@ fn studio_rebuild() {
                 .collect();
             connects.extend(touching.iter().filter(|l| outputs.contains(&l.from)).flat_map(|l| pairs(l)));
 
-            let mut text = src.clone();
-            let mut refusal = None;
-            let removed = shawline_edit::remove_node(&text, corner)
-                .and_then(|t| shawline_edit::place_node(&t, corner, &word, arity.0, arity.1));
-            match removed {
-                Ok(next) => text = next,
-                Err(r) => refusal = Some(r),
-            }
-            if refusal.is_none() {
+            let rebuild = |shown: &Jittered| -> Outcome {
+                // Only the removal sees the shown text.
+                let refused = |step: &'static str| move |r: shawline_edit::Refusal| (step.to_owned(), r.reason);
+                let mut text = shawline_edit::remove_node(&shown.text, shown.at(corner))
+                    .map_err(refused("remove_node"))?;
+                text = shawline_edit::place_node(&text, corner, &word, arity.0, arity.1)
+                    .map_err(refused("place_node"))?;
                 for &(from, to) in &connects {
-                    match shawline_edit::connect(&text, from, to) {
-                        Ok(next) => text = next,
-                        Err(r) => {
-                            refusal = Some(r);
-                            break;
-                        }
-                    }
+                    text = shawline_edit::connect(&text, from, to).map_err(refused("connect"))?;
                 }
-            }
-            match refusal {
-                Some(r) => {
+                Ok(text)
+            };
+            let want = rebuild(&starts[0].1);
+            match &want {
+                Err((_, why)) => {
                     refused += 1;
-                    if r.reason.trim().is_empty() {
+                    if why.trim().is_empty() {
                         failures.push(format!("{what}: refused without a reason"));
                     }
                 }
-                None => {
-                    if let Err(why) = same_program(&src, &text) {
+                Ok(text) => {
+                    if let Err(why) = same_program(&src, text) {
                         failures.push(format!("{what}: rebuilt, but {why}"));
                     }
                 }
             }
+            for (start, shown) in &starts[1..] {
+                same_end(&what, start, &rebuild(shown), &want, &mut failures);
+            }
         }
     }
     assert!(tried >= 20, "only {tried} nodes tried");
-    assert!(failures.is_empty(), "{} of {tried} nodes fail; first:\n{}", failures.len(), failures[0]);
+    assert!(failures.is_empty(), "{} failures over {tried} nodes; first:\n{}", failures.len(), failures[0]);
     assert!(refused * 5 <= tried, "{refused} of {tried} nodes refused: more than a fifth");
 }
 

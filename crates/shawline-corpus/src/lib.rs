@@ -9,6 +9,8 @@
 //! only rewrite files that already exist; to add one, create it empty first.
 //! Only the lead blesses; see `CLAUDE.md`.
 
+pub mod jitter;
+
 use std::fs;
 use std::path::{Path, PathBuf};
 
