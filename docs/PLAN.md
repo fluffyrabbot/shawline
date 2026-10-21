@@ -403,13 +403,22 @@ Two read-only Codex audits, one on UX (checked against WAI, MDN, Blender and Unr
 - The playground build (540 875-byte wasm) and its 28 Node checks are green.
 - By hand in the browser: drafts survive a switch, and a real drag disconnects one branch and undoes.
 
+**Batch 2 landed: hardening.**
+- **`C007`.** A sheet whose definition needed more than 65,535 registers passed `check` and then panicked in codegen. The checker now bounds every frame (SPEC §14, §15), and the generated test `limits.rs` covers 65,535 and 65,536 inputs.
+- **Both suspected quadratic paths were real** (release builds, under `scripts/capped`):
+  - near-box recognition on a 256×256 corner grid went from killed at 2 GB to 237 ms and 19 MB; each corner now walks only to the first stroke a border can't hold;
+  - the cycle check on a 30,000-node chain went from 1.0 GB to 4 ms; it is now an iterative Tarjan pass.
+  
+  Both are tested against the old algorithms on thousands of seeded inputs, and diagnostics are unchanged.
+- **Gate:** 259 tests, clippy clean on host and wasm, and the playground build (546 865-byte wasm) with 28 Node checks green.
+- **Found, not fixed:** box parent and overlap checks are quadratic in the number of boxes (3.9 s at 65,536 boxes), and the CLI's diagnostic printer rescans the source for each diagnostic.
+
 **Next, in order:**
-1. **Hardening.** The codegen `u16` register `expect` becomes a diagnostic. Near-box candidate products and all-pairs cycle reachability are confirmed by a finite fuzz before fixing.
-2. **Document spine.** One parse per revision (today a refresh recognizes the same text six times), with `edit` and `lsp` no longer depending on `shawline-cli`. Then revision IDs on worker messages, compound checked edits with typed `Refusal` kinds, and keeping crossing ownership in `wire.rs`. Oracle upgrades come first. This all precedes Phase 2.
-3. **Keyboard and semantic selection.** A real palette combobox with phonemic search, zoom and pan, and a node inspector.
-4. **Repair in place.** `fix` in the playground and as an LSP quick fix, and richer diagnostics.
-5. **Onboarding.** A tour that tracks undo, README prerequisites, VS Code server status, and CLI `--help`.
-6. **Phase 2 order.** Insert rows and columns, constants by mouse, switch outputs, drawing switches, extracting definitions, then scrubbing.
+1. **Document spine.** One parse per revision (today a refresh recognizes the same text six times), with `edit` and `lsp` no longer depending on `shawline-cli`. Then revision IDs on worker messages, compound checked edits with typed `Refusal` kinds, and keeping crossing ownership in `wire.rs`. Oracle upgrades come first. This all precedes Phase 2.
+2. **Keyboard and semantic selection.** A real palette combobox with phonemic search, zoom and pan, and a node inspector.
+3. **Repair in place.** `fix` in the playground and as an LSP quick fix, and richer diagnostics.
+4. **Onboarding.** A tour that tracks undo, README prerequisites, VS Code server status, and CLI `--help`.
+5. **Phase 2 order.** Insert rows and columns, constants by mouse, switch outputs, drawing switches, extracting definitions, then scrubbing.
 
 ## Risks
 
