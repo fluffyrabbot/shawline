@@ -74,7 +74,10 @@ fn function(
         busy: Vec::new(),
         high: 0,
     };
-    let params: Vec<Reg> = (0..f.body.params).map(|_| e.alloc()).collect();
+    // Parameters take the first registers, as allocating them one by one
+    // would, without a search per parameter.
+    let params: Vec<Reg> = (0..f.body.params as usize).map(reg).collect();
+    e.claim(0, params.len());
     let scope = Scope {
         path: Rc::from([]),
         origin: None,
@@ -82,6 +85,7 @@ fn function(
     e.block(&f.body, &params, true, Ctx::Tail(&[]), f.at, &scope);
     let results = f.body.results.len();
     let registers = e.high.max(params.len()).max(results);
+    debug_assert!(registers <= frame_bound(program, f), "{} outgrew its bound", f.name);
     let function = bc::Function {
         name: f.name.clone(),
         params: reg(params.len()),
@@ -127,7 +131,43 @@ impl Scope {
 }
 
 fn reg(n: usize) -> Reg {
-    Reg::try_from(n).expect("a frame fits in u16 registers")
+    Reg::try_from(n).expect("the checker bounds every frame (C007)")
+}
+
+/// The most registers a frame can have: register numbers are `u16`.
+pub(crate) const MAX_REGISTERS: usize = Reg::MAX as usize;
+
+/// An upper bound on the registers [`compile`] gives `f`'s frame: its
+/// parameters and results, plus, for every instruction at any depth, the
+/// larger of its operand and output counts. A switch's operands are its
+/// selector and its arms' arguments.
+///
+/// No claim reaches further past the highest busy register than its own
+/// size, and no instruction's claims add up to more than its share here: a
+/// call's run for its arguments, which then holds its results; a switch's
+/// outputs; or, for a switch in tail position, the run its arms return. The
+/// nodes a tail switch defers are emitted once per arm, but arms reuse each
+/// other's registers, so they count once.
+pub(crate) fn frame_bound(program: &Program, f: &Function) -> usize {
+    let mut bound = f.body.params as usize + f.body.results.len();
+    let mut blocks = vec![&f.body];
+    while let Some(b) = blocks.pop() {
+        for inst in &b.insts {
+            let (operands, outputs) = match &inst.op {
+                Op::Const(_) => (0, 1),
+                Op::Prim { prim, args } => (args.len(), usize::from(prim.arity().1)),
+                Op::Call { func, args } => {
+                    (args.len(), program.functions[*func as usize].body.results.len())
+                }
+                Op::Switch { arms, outputs, .. } => {
+                    blocks.extend(arms.iter().map(|a| &a.body));
+                    (1 + arms.iter().map(|a| a.args.len()).sum::<usize>(), *outputs as usize)
+                }
+            };
+            bound += operands.max(outputs);
+        }
+    }
+    bound
 }
 
 /// Where a block's results go.

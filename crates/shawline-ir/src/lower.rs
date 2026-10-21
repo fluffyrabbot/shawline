@@ -7,6 +7,7 @@ use shawline_grid::{Diagnostic, Pos};
 use shawline_syntax::ast::{self, Endpoint, Graph, Literal, Node, NodeKind, Sheet};
 use shawline_vm::bytecode::Prim;
 
+use crate::compile::{MAX_REGISTERS, frame_bound};
 use crate::ir::{self, Block, FuncId, Function, Inst, Op, Program, Value};
 
 /// `·𐑥𐑱𐑯`, the entry point, without its namer dot.
@@ -14,7 +15,7 @@ const MAIN: &str = "𐑥𐑱𐑯";
 
 /// Checks a sheet and lowers it to IR.
 ///
-/// Reports `C001`–`C006`, `W001` and `W002` at the positions of SPEC §14.
+/// Reports `C001`–`C007`, `W001` and `W002` at the positions of SPEC §14.
 /// The program is `None` exactly when some diagnostic is an error. The sheet
 /// is assumed to have passed syntax; should a structural fault that syntax
 /// reports slip through anyway, lowering reports it again rather than
@@ -85,7 +86,24 @@ pub fn lower(sheet: &Sheet) -> (Option<Program>, Vec<Diagnostic>) {
     if functions.len() < sheet.definitions.len() {
         return (None, cx.diags);
     }
-    (Some(Program { functions, main }), cx.diags)
+    let program = Program { functions, main };
+    // Code generation can't fail, so a frame it couldn't number is caught here.
+    let mut too_large = false;
+    for f in &program.functions {
+        let size = frame_bound(&program, f);
+        if size > MAX_REGISTERS {
+            too_large = true;
+            let message = format!(
+                "·{} is too large to compile: it counts {size} values, more than {MAX_REGISTERS}",
+                f.name
+            );
+            cx.diags.push(Diagnostic::new(f.at, "C007", message));
+        }
+    }
+    if too_large {
+        return (None, cx.diags);
+    }
+    (Some(program), cx.diags)
 }
 
 #[derive(Clone, Copy)]
@@ -200,21 +218,13 @@ impl Checker<'_> {
                 }
             }
         }
-        // Drawings are small, so plain reachability is simpler than Tarjan.
-        let reach: Vec<Vec<bool>> = (0..n).map(|a| reachable(&succ, a)).collect();
-        let mut seen = vec![false; n];
-        for a in 0..n {
-            if seen[a] || !reach[a][a] {
-                continue;
+        for component in components(&succ) {
+            let a = component[0];
+            if component.len() > 1 || succ[a].contains(&a) {
+                let words = component.iter().map(|&b| word(&g.nodes[b]));
+                let first = words.fold(word(&g.nodes[a]), Pos::min);
+                self.diags.push(Diagnostic::new(first, "C003", "cycle in the wires"));
             }
-            let mut first = word(&g.nodes[a]);
-            for b in a..n {
-                if reach[a][b] && reach[b][a] {
-                    seen[b] = true;
-                    first = first.min(word(&g.nodes[b]));
-                }
-            }
-            self.diags.push(Diagnostic::new(first, "C003", "cycle in the wires"));
         }
     }
 
@@ -376,15 +386,68 @@ pub(crate) fn word(node: &Node) -> Pos {
     }
 }
 
-/// Nodes reachable from `start` by one or more edges.
-fn reachable(succ: &[Vec<usize>], start: usize) -> Vec<bool> {
-    let mut seen = vec![false; succ.len()];
-    let mut stack = succ[start].clone();
-    while let Some(a) = stack.pop() {
-        if !seen[a] {
-            seen[a] = true;
-            stack.extend(&succ[a]);
+/// The strongly connected components of a graph, each listing its nodes in
+/// ascending order, in ascending order of their first node.
+///
+/// Tarjan's algorithm with an explicit stack, since a drawing can hold more
+/// nodes than the call stack holds frames. Storing reachability from every
+/// node instead takes memory quadratic in the nodes, even with no cycle.
+fn components(succ: &[Vec<usize>]) -> Vec<Vec<usize>> {
+    const UNSEEN: usize = usize::MAX;
+    let n = succ.len();
+    let mut index = vec![UNSEEN; n];
+    let mut low = vec![0; n];
+    let mut on_stack = vec![false; n];
+    let mut stack = Vec::new();
+    let mut found = Vec::new();
+    let mut next = 0;
+    // Nodes being visited, each with how many of its successors it has tried.
+    let mut path: Vec<(usize, usize)> = Vec::new();
+    for root in 0..n {
+        if index[root] != UNSEEN {
+            continue;
+        }
+        let mut entering = Some(root);
+        loop {
+            if let Some(v) = entering.take() {
+                index[v] = next;
+                low[v] = next;
+                next += 1;
+                on_stack[v] = true;
+                stack.push(v);
+                path.push((v, 0));
+            }
+            let Some((v, tried)) = path.last_mut() else {
+                break;
+            };
+            let v = *v;
+            if let Some(&w) = succ[v].get(*tried) {
+                *tried += 1;
+                if index[w] == UNSEEN {
+                    entering = Some(w);
+                } else if on_stack[w] {
+                    low[v] = low[v].min(index[w]);
+                }
+                continue;
+            }
+            path.pop();
+            if let Some(&(u, _)) = path.last() {
+                low[u] = low[u].min(low[v]);
+            }
+            if low[v] == index[v] {
+                let mut component = Vec::new();
+                while let Some(w) = stack.pop() {
+                    on_stack[w] = false;
+                    component.push(w);
+                    if w == v {
+                        break;
+                    }
+                }
+                component.sort_unstable();
+                found.push(component);
+            }
         }
     }
-    seen
+    found.sort_unstable_by_key(|c| c[0]);
+    found
 }

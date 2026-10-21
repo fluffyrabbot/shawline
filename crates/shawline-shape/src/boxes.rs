@@ -1,7 +1,7 @@
 //! Box recognition: closed rectangles of strokes, and near boxes whose
 //! border has cells slipped one cell off their line (SPEC §3).
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 
 use shawline_grid::{Diagnostic, Dir, Grid, Pos, Rect};
 
@@ -259,41 +259,48 @@ fn finish(
     BoxShape { rect, style, title_gap, ports, dividers, parent: None, slips }
 }
 
-/// Every rectangle with at least three corners in place. Any three corners
-/// include both top corners or both bottom ones, so a pair on one row plus a
-/// corner in either of its columns finds them all.
+/// The rectangles [`near`] might accept: at least three corners in place,
+/// with nothing between them that a border can't hold. Any three corners
+/// include both top corners or both bottom ones. A corner can't sit inside a
+/// border, so the second corner of a pair is the first such stroke past the
+/// first along its row, and the third is the first below or above either.
+///
+/// Each corner starts at most one walk each way, and walks from corners of
+/// one shape going one way stop by the next such corner, so they never
+/// overlap: finding candidates is linear in the grid. Pairing every
+/// combination of corners instead grows with the fourth power of a grid
+/// dense with them.
 fn near_candidates(grid: &Grid, strokes: &StrokeMap) -> BTreeSet<RectKey> {
-    const SHAPES: [u8; 4] = [E | S, W | S, N | W, N | E];
-    // Corner rows by (shape, column), and corner columns by (shape, row).
-    let mut rows: BTreeMap<(u8, usize), Vec<usize>> = BTreeMap::new();
-    let mut cols: BTreeMap<(u8, usize), Vec<usize>> = BTreeMap::new();
-    for row in 0..grid.height() {
-        for col in 0..grid.row(row).len() {
-            let p = Pos::new(row, col);
-            for shape in SHAPES.into_iter().filter(|&c| corner(strokes, p, c).is_some()) {
-                rows.entry((shape, col)).or_default().push(row);
-                cols.entry((shape, row)).or_default().push(col);
+    // The first cell past `p` going `d` that a border along `d` can't hold,
+    // if it is a corner with connections `conn`.
+    let stop = |p: Pos, d: Dir, conn: u8| -> Option<Pos> {
+        let mut q = p.step(d)?;
+        while q.row < grid.height() && q.col < grid.width() {
+            if strokes.get(q).is_some_and(|s| border_cell(Some(s), d).is_none()) {
+                return corner(strokes, q, conn).map(|_| q);
             }
+            q = q.step(d)?;
         }
-    }
-    let at = |map: &BTreeMap<(u8, usize), Vec<usize>>, shape: u8, i: usize| -> Vec<usize> {
-        map.get(&(shape, i)).cloned().unwrap_or_default()
+        None
     };
 
     let mut found = BTreeSet::new();
     for row in 0..grid.height() {
-        // Both top corners on `row`; the bottom from either bottom corner.
-        for left in at(&cols, E | S, row) {
-            for right in at(&cols, W | S, row).into_iter().filter(|&r| r > left) {
-                let below = at(&rows, N | E, left).into_iter().chain(at(&rows, N | W, right));
-                found.extend(below.filter(|&b| b > row).map(|b| (row, left, b, right)));
+        for col in 0..grid.row(row).len() {
+            let p = Pos::new(row, col);
+            // Both top corners in place; the bottom from either.
+            if corner(strokes, p, E | S).is_some()
+                && let Some(tr) = stop(p, Dir::E, W | S)
+            {
+                let below = [stop(p, Dir::S, N | E), stop(tr, Dir::S, N | W)];
+                found.extend(below.into_iter().flatten().map(|b| (row, col, b.row, tr.col)));
             }
-        }
-        // Both bottom corners on `row`; the top from either top corner.
-        for left in at(&cols, N | E, row) {
-            for right in at(&cols, N | W, row).into_iter().filter(|&r| r > left) {
-                let above = at(&rows, E | S, left).into_iter().chain(at(&rows, W | S, right));
-                found.extend(above.filter(|&t| t < row).map(|t| (t, left, row, right)));
+            // Both bottom corners in place; the top from either.
+            if corner(strokes, p, N | E).is_some()
+                && let Some(br) = stop(p, Dir::E, N | W)
+            {
+                let above = [stop(p, Dir::N, E | S), stop(br, Dir::N, W | S)];
+                found.extend(above.into_iter().flatten().map(|t| (t.row, col, row, br.col)));
             }
         }
     }
@@ -462,4 +469,153 @@ fn divider(strokes: &StrokeMap, row: usize, left: usize, right: usize) -> Option
         }
     };
     Some(Divider { row, gap })
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::{BTreeMap, BTreeSet};
+
+    use shawline_grid::{Grid, Pos, Rect};
+
+    use super::{E, N, RectKey, S, StrokeMap, W, corner, key, near, near_candidates, trace};
+
+    /// Every rectangle with three corners in place, by taking every
+    /// combination of them: what `near_candidates` prunes.
+    fn every_combination(grid: &Grid, strokes: &StrokeMap) -> BTreeSet<RectKey> {
+        let mut at: BTreeMap<u8, Vec<Pos>> = BTreeMap::new();
+        for row in 0..grid.height() {
+            for col in 0..grid.row(row).len() {
+                for shape in [E | S, W | S, N | W, N | E] {
+                    if corner(strokes, Pos::new(row, col), shape).is_some() {
+                        at.entry(shape).or_default().push(Pos::new(row, col));
+                    }
+                }
+            }
+        }
+        let all = |shape| at.get(&shape).cloned().unwrap_or_default();
+        let mut found = BTreeSet::new();
+        for tl in all(E | S) {
+            for tr in all(W | S).into_iter().filter(|q| q.row == tl.row && q.col > tl.col) {
+                for b in all(N | E).into_iter().filter(|q| q.col == tl.col && q.row > tl.row) {
+                    found.insert((tl.row, tl.col, b.row, tr.col));
+                }
+                for b in all(N | W).into_iter().filter(|q| q.col == tr.col && q.row > tl.row) {
+                    found.insert((tl.row, tl.col, b.row, tr.col));
+                }
+            }
+        }
+        for bl in all(N | E) {
+            for br in all(N | W).into_iter().filter(|q| q.row == bl.row && q.col > bl.col) {
+                for t in all(E | S).into_iter().filter(|q| q.col == bl.col && q.row < bl.row) {
+                    found.insert((t.row, bl.col, bl.row, br.col));
+                }
+                for t in all(W | S).into_iter().filter(|q| q.col == br.col && q.row < bl.row) {
+                    found.insert((t.row, bl.col, bl.row, br.col));
+                }
+            }
+        }
+        found
+    }
+
+    /// The near boxes `near` accepts among `candidates`.
+    fn accepted(grid: &Grid, strokes: &StrokeMap, candidates: &BTreeSet<RectKey>) -> Vec<RectKey> {
+        let exact: BTreeSet<RectKey> = (0..grid.height())
+            .flat_map(|row| (0..grid.row(row).len()).map(move |col| Pos::new(row, col)))
+            .filter_map(|p| trace(grid, strokes, p))
+            .map(|b| key(b.rect))
+            .collect();
+        candidates
+            .iter()
+            .filter(|k| !exact.contains(k))
+            .filter_map(|&(top, left, bottom, right)| {
+                near(grid, strokes, Rect { top, left, bottom, right }).map(|b| key(b.rect))
+            })
+            .collect()
+    }
+
+    /// SplitMix64, so the grids are the same on every run.
+    struct Rng(u64);
+
+    impl Rng {
+        fn below(&mut self, n: usize) -> usize {
+            self.0 = self.0.wrapping_add(0x9e37_79b9_7f4a_7c15);
+            let mut z = self.0;
+            z = (z ^ (z >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+            z = (z ^ (z >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
+            ((z ^ (z >> 31)) % n as u64) as usize
+        }
+    }
+
+    /// A few overlapping boxes, some border cells slipped one cell out, and
+    /// some stray strokes.
+    fn jumble(rng: &mut Rng) -> String {
+        const ROWS: usize = 9;
+        const COLS: usize = 14;
+        let mut cells = [[' '; COLS]; ROWS];
+        for _ in 0..1 + rng.below(4) {
+            let (top, left) = (rng.below(ROWS - 2), rng.below(COLS - 2));
+            let bottom = top + 2 + rng.below(ROWS - top - 2);
+            let right = left + 2 + rng.below(COLS - left - 2);
+            let round = rng.below(2) == 0;
+            let (tl, tr, br, bl) = if round { ('╭', '╮', '╯', '╰') } else { ('┌', '┐', '┘', '└') };
+            cells[top][left + 1..right].fill('─');
+            cells[bottom][left + 1..right].fill('─');
+            for row in &mut cells[top + 1..bottom] {
+                row[left] = '│';
+                row[right] = '│';
+            }
+            cells[top][left] = tl;
+            cells[top][right] = tr;
+            cells[bottom][right] = br;
+            cells[bottom][left] = bl;
+        }
+        for _ in 0..1 + rng.below(3) {
+            let (row, col) = (1 + rng.below(ROWS - 2), 1 + rng.below(COLS - 2));
+            let ch = cells[row][col];
+            if ch != ' ' {
+                let (r, c) = [(row - 1, col), (row + 1, col), (row, col - 1), (row, col + 1)][rng.below(4)];
+                cells[row][col] = ' ';
+                cells[r][c] = ch;
+            }
+        }
+        for _ in 0..rng.below(3) {
+            let strays = ['┌', '┐', '└', '┘', '─', '│', '┬', '▶', '+'];
+            cells[rng.below(ROWS)][rng.below(COLS)] = strays[rng.below(strays.len())];
+        }
+        cells.iter().map(|row| row.iter().collect::<String>() + "\n").collect()
+    }
+
+    #[test]
+    fn pruned_candidates_lose_no_near_box() {
+        let mut rng = Rng(7);
+        let (mut near_boxes, mut pruned_away) = (0, 0);
+        for _ in 0..4000 {
+            let src = jumble(&mut rng);
+            let grid = Grid::parse(&src).unwrap();
+            let strokes = StrokeMap::new(&grid);
+            let pruned = near_candidates(&grid, &strokes);
+            let all = every_combination(&grid, &strokes);
+            assert!(pruned.is_subset(&all));
+            let want = accepted(&grid, &strokes, &all);
+            assert_eq!(accepted(&grid, &strokes, &pruned), want, "\n{src}");
+            near_boxes += want.len();
+            pruned_away += all.len() - pruned.len();
+        }
+        // So the jumbles exercise both sides of the pruning.
+        assert!(near_boxes > 300 && pruned_away > 3000, "{near_boxes} {pruned_away}");
+    }
+
+    /// Rows of `┌┐┌┐…` over rows of `└┘└┘…` hold a quarter of a million
+    /// three-corner rectangles at this size, and a grid twice as wide and
+    /// tall holds sixteen times as many.
+    #[test]
+    fn corner_dense_grid_has_few_candidates() {
+        let n = 64;
+        let src: String = (0..n)
+            .map(|row| if row % 2 == 0 { "┌┐" } else { "└┘" }.repeat(n / 2) + "\n")
+            .collect();
+        let grid = Grid::parse(&src).unwrap();
+        let strokes = StrokeMap::new(&grid);
+        assert!(near_candidates(&grid, &strokes).len() <= n * n);
+    }
 }
