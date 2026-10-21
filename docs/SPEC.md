@@ -355,6 +355,7 @@ Every diagnostic has a stable code. The corpus checks codes and positions, never
 | C004 | check | Two definitions with one name |
 | C005 | check | No `·𐑥𐑱𐑯` |
 | C006 | check | `·𐑥𐑱𐑯` has inputs |
+| C007 | check | Definition too large for one frame (§15) |
 | W001 | check | Switch without a default arm |
 | W002 | check | Unused definition input |
 | R001 | runtime | Integer overflow, including `𐑠` of a number too large for an Int |
@@ -378,7 +379,7 @@ Every diagnostic has a stable code. The corpus checks codes and positions, never
 | A constant or literal (`Y017`) | The literal's first cell |
 | A switch (`Y010`, `Y011`, `W001`, `R005`) | Its selector `▼`; for `Y010`, its top-left corner |
 | A guard (`Y007`) | The guard's first cell |
-| A definition (`Y001`, `Y013`, `C006`) | Its namer dot |
+| A definition (`Y001`, `Y013`, `C006`, `C007`) | Its namer dot |
 | A duplicate definition (`C004`) | The namer dot of each later duplicate |
 | A box's style or placement (`Y014`, `Y015`, `Y018`) | Its top-left corner |
 | A second default arm (`Y008`) | Its divider's left `├` |
@@ -401,3 +402,5 @@ The corpus `.check` files list every static diagnostic (grid, shape, syntax, che
 ## 15. Bytecode
 
 The VM is a register machine with heap-allocated frames. Instructions, values, primitives and the `.shawasm` text format are specified in `shawline-vm/src/bytecode.rs`. Tail calls compile to `TailCall` (§10). Switch guards compile to `JumpIfNe` against a constant, falling through to the default arm or to `NoMatch`.
+
+A frame has at most 65,535 registers. The checker bounds the registers a definition needs by counting its inputs and outputs plus, for every node, constant and switch inside it at any depth, the larger of its number of inputs and its number of outputs. A constant has one output. A switch's inputs are its selector and every arm's input through-ports; its outputs are one arm's output through-ports. A count over 65,535 is `C007`. The count is generous, since registers are reused, but only a definition of tens of thousands of nodes reaches it. It is checked after every other check passes, so it never appears beside another error.
