@@ -414,11 +414,108 @@ Two read-only Codex audits, one on UX (checked against WAI, MDN, Blender and Unr
 - **Found, not fixed:** box parent and overlap checks are quadratic in the number of boxes (3.9 s at 65,536 boxes), and the CLI's diagnostic printer rescans the source for each diagnostic.
 
 **Next, in order:**
-1. **Document spine.** One parse per revision (today a refresh recognizes the same text six times), with `edit` and `lsp` no longer depending on `shawline-cli`. Then revision IDs on worker messages, compound checked edits with typed `Refusal` kinds, and keeping crossing ownership in `wire.rs`. Oracle upgrades come first. This all precedes Phase 2.
+1. **Document spine.** See P8 below; it precedes Phase 2.
 2. **Keyboard and semantic selection.** A real palette combobox with phonemic search, zoom and pan, and a node inspector.
 3. **Repair in place.** `fix` in the playground and as an LSP quick fix, and richer diagnostics.
 4. **Onboarding.** A tour that tracks undo, README prerequisites, VS Code server status, and CLI `--help`.
 5. **Phase 2 order.** Insert rows and columns, constants by mouse, switch outputs, drawing switches, extracting definitions, then scrubbing.
+
+### P8: Document spine (before Studio Phase 2)
+
+**Goal.** Each text revision is read once, and every consumer shares that one reading: the CLI, the corpus, the language server, the playground and the edits. Edits return the revision they already checked. They refuse with a kind the UI can act on, and stop re-deriving facts that recognition already has. In wave 2, the three "did this edit change only what it meant to" checks become one structural comparison.
+
+**What exists today** (`8d99495`):
+- **One playground refresh reads the same text six times:** `check`, `endpoints`, `wires`, `wire_sources`, `boxes` and `render`.
+- **Every preview cell formats the sheet again.** Every edit parses its input twice, given and canonical, and its result twice.
+- **`shawline-edit` and `shawline-lsp` depend on `shawline-cli`** for its pipeline functions, which brings render, glyph and kurbo into both.
+- **Run output carries no revision.** Edit the text after Run and the output still describes the old sheet, and its error link points into the new text.
+- **Editing re-infers which axis of a crossing a wire owns** (`Model::own_mask`), although the tracer already knew. A wire that crosses itself owns both axes, so removing it leaves one axis behind.
+- **Three fingerprints encode the same structure separately:** `fmt::verify::Fingerprint`, `edit::check::Print` for moves, and `edit::model::Print` for wiring.
+
+**Decisions.**
+
+| Decision | Choice | Rationale |
+|---|---|---|
+| Where the reading lives | A new crate `shawline-doc`, lead-owned like the old pipeline glue in `shawline_cli` | Edit, LSP, wasm and the corpus need the reading without the renderer. `shawline-cli` becomes a binary over `shawline-doc` and `shawline-render`. |
+| How stages are computed | `Doc` is immutable. Each stage is computed on first use and kept (`std::cell::OnceCell`) | `boxes` needs only the diagram and `check` needs everything, so nothing is computed that isn't asked for. Every consumer is single-threaded. |
+| What an edit returns | The `Doc` it checked | Its result is already parsed to verify the edit, so the refresh after an edit reads nothing again. |
+| Compound edits | Composition over immutable `Doc`s. `place_node` returns the new node's port cells | A refused step leaves the caller holding the original, which makes compound edits atomic without a transaction mechanism. The returned ports let the next step name the new node without guessing coordinates. |
+| Refusal kinds | `Refusal { at, kind, reason }`, where `kind` is one of `Unreadable`, `Target`, `Unsupported`, `Blocked`, `GaveUp` or `Changed` | The UI picks a remedy by kind: Phase 2 offers row and column insertion on `Blocked`. The corpus checks kinds and cells, never wording, as it does for diagnostics. |
+| Crossing ownership | `Wire::links`: for each cell, the directions in which it joins this wire. It is not dumped | It falls out of the tracer's existing nodes. `.wires` stays byte-identical, so nothing is re-blessed. |
+| Wasm memory | `Doc` is a wasm-bindgen class. The playground caches at most two (the editor's, and a dragged branch's detached view) and calls `free()` when evicting | It is explicit and bounded, and needs no reliance on the GC's finalization timing. |
+| Preview off the main thread | No. Measure first | With a cached reading, a preview costs one route search under a fixed budget. If p95 on the largest corpus sheet exceeds 16 ms, a worker comes later. |
+| Stale Run output | Dimmed, labelled "from an earlier version", with the error link disabled | The last result stays readable, but nothing points into text it doesn't describe. |
+| The oracle for edit behaviour | A blessed `.studio` dump per valid program, captured from `main` before the refactor | The one-in-five refusal allowance can hide a regression; a dump diff can't. |
+
+**Oracle first** (lead, before any refactor):
+- **Corpus stage `studio`:** one `.studio` dump per valid program. Each line is one fact, in the gates' order:
+  - `rewire SRC -> SINK ok|refused AT`
+  - `rebuild CORNER WORD ok|refused AT`
+  - `move CORNER N|E|S|W ok|refused AT`
+  
+  It is blessed from `8d99495` as the baseline. When wave 1 adds kinds, it is re-blessed after reading a diff in which only the `refused` lines gain a kind.
+- **Gate `studio_sequences`:** a fixed multi-step sequence per valid program, run on the canonical text and on one jittered copy. It removes a wire, reconnects it, removes a node, places it again, connects it and moves it. Every intermediate result must:
+  - be canonical;
+  - have exactly the edge set the step declares;
+  - keep the diagnostic codes the step allows.
+- **Regression test:** a fan-out whose branch crosses another branch of the same wire. `remove_wire` must leave no stroke. It is written first and fails on `8d99495`.
+
+**Wave 1 contracts** (lead):
+- **`shawline-doc`.** Contract and implementation, since it is the old glue moved:
+  - `Doc::new(text)`, `text()`;
+  - `grid() -> Result<&Grid, &[Diagnostic]>`, `diagram()`, `sheet()`;
+  - `diagnostics()` (all static diagnostics, sorted: today's `check`), `has_errors()`;
+  - `program()`, `module()` (compiled once);
+  - `run() -> Option<Result<Vec<Value>, Diagnostic>>`, `trace(steps)`;
+  - `formatted()`, `fixed()`, and `canonical() -> Option<&Doc>`, which is itself when the text is already canonical.
+  
+  The corpus, CLI and LSP move to it, and `shawline-cli`'s library loses its pipeline functions.
+- **`Wire::links`** in `wire.rs`, filled by the tracer.
+- **`shawline-edit` signatures:**
+  - every edit takes `&Doc`;
+  - `move_box`, `connect`, `remove_wire`, `disconnect` and `remove_node` return `Result<Doc, Refusal>`;
+  - `place_node` returns `Result<Placed { doc, inputs, outputs }, Refusal>`;
+  - `palette`, `endpoints`, `preview`, `wire_sources` and `route` read a `&Doc`;
+  - `RefusalKind` is added.
+  
+  The lead lands these with thin adapters over the current internals, so the contracts compile and stay green from the first commit.
+
+**Wave 1 construction.** Two agents with disjoint files:
+- **E** owns `shawline-edit`:
+  - its internals read the `Doc`, and its canonical form is `doc.canonical()`, so nothing parses its input again;
+  - every refusal site sets a kind;
+  - `own_mask` gives way to `Wire::links`;
+  - `Placed` reports the new ports;
+  - the adapters are removed.
+- **W** owns `shawline-wasm` and `playground/`:
+  - the `Doc` class, with the playground's two-entry cache seeded by every edit's returned `Doc`;
+  - `rev` on every worker request and result;
+  - one trace in flight plus one replaceable pending request, with the kill timer belonging to the job in flight;
+  - stale Run output, as decided above;
+  - the palette's place-and-connect composed in Rust through `Placed`.
+  
+  W works against the lead's adapters, so it doesn't wait for E.
+
+**Wave 1 gate:**
+- The workspace tests, the `.studio` dumps re-blessed with kinds, and `studio_sequences` pass.
+- Clippy is clean on host and wasm.
+- The playground build and its Node checks pass, all under `scripts/capped`.
+- No crate except `shawline-cli` depends on `shawline-cli`, and its library exports no pipeline function.
+- The self-crossing regression test passes.
+- **By hand:** time a refresh and a 20-cell preview drag on the largest corpus sheet, before and after, and record it here. Then edit during a long Run and see the output dim.
+
+**Wave 2: one structural comparison.**
+- **Lead contract:** `shawline-shape/src/structure.rs`, a `Structure::of(&Grid, &Diagram)` that ignores where things sit. It records:
+  - boxes: style, titled, slips, parent, ports with what each meets, guarded dividers;
+  - texts: kind, content, owner, title and divider flags;
+  - wires: as sorted term lists;
+  - shape codes;
+  - plus `Mapping`, which relabels box and text indices.
+- **How each check uses it:** a formatting step expects equality. A move or a row/column insertion also expects equality after relabelling, because positions are not part of the structure. A wiring edit expects the old structure plus the graph change it declares.
+- **F** moves `fmt::verify` to it; **E** moves `edit::check` and `edit::model`'s `Print` to it. Both old fingerprint types are deleted.
+- **Gate:** every existing gate stays green, including jitter, `fmt_mutations`, the formatter property test, `studio`, `edit_moves` and `studio_sequences`. `grep` finds no second fingerprint type.
+
+**Then Phase 2**, starting with inserting rows and columns. With wave 2 in place, insertion is a mapping that leaves structure equal, and needs no new check.
 
 ## Risks
 
