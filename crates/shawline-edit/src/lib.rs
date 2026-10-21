@@ -18,6 +18,7 @@
 //! and the same diagnostic codes. If not, the edit is refused and the sheet is
 //! unchanged.
 
+mod canon;
 mod check;
 mod model;
 mod mover;
@@ -84,7 +85,7 @@ pub fn route(src: &str, from: Pos, to: Pos) -> Option<Vec<Pos>> {
         return Some(vec![from]);
     }
     let start = Start { pos: from, heading: None, straight: false };
-    router::search(&sheet, start, BUDGET).map(|found| found.path)
+    router::search(&sheet, start, &mut { BUDGET }).ok().map(|found| found.path)
 }
 
 // ---------------------------------------------------------------------------

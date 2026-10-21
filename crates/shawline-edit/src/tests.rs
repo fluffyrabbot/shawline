@@ -2,7 +2,7 @@
 
 use shawline_grid::{Dir, Pos};
 
-use crate::router::{self, BUDGET, CELL, Cell, Start, Terrain};
+use crate::router::{self, BUDGET, CELL, Cell, Miss, Start, Terrain};
 use crate::{move_box, route};
 
 const DOUBLE: &str = include_str!("../../../corpus/03-double.shaw");
@@ -70,8 +70,8 @@ fn route_gives_up_within_its_budget() {
         }
     }
     let start = Start { pos: Pos::new(0, 0), heading: None, straight: false };
-    assert_eq!(router::search(&Corridor, start, 3), None);
-    assert!(router::search(&Corridor, start, BUDGET).is_some());
+    assert_eq!(router::search(&Corridor, start, &mut 3), Err(Miss::GaveUp));
+    assert!(router::search(&Corridor, start, &mut { BUDGET }).is_ok());
     // A boxed-in cell has no route at all.
     let walled = "┌───┐\n│   │\n└───┘\n      \n";
     assert_eq!(route(walled, Pos::new(1, 2), Pos::new(3, 0)), None);
@@ -309,4 +309,360 @@ fn the_palette_lists_primitives_then_definitions() {
     let dragging = palette(DOUBLE, Some(Pos::new(5, 0)));
     assert!(!dragging.iter().any(|c| c.inputs == 0), "{dragging:?}");
     assert_eq!(dragging.len(), all.len() - 1);
+}
+
+// ---------------------------------------------------------------------------
+// Targets named on text that isn't canonical.
+
+use std::collections::HashMap;
+
+use shawline_grid::Grid;
+use shawline_shape::{EndKind, PortKind, recognize};
+
+use crate::{Refusal, endpoints, preview, wire_sources};
+
+#[test]
+fn a_leading_blank_line_shifts_what_the_corner_names() {
+    // The playground reads box corners off the text as shown.
+    let shown = format!("\n{DOUBLE}");
+    let node = recognize(&Grid::parse(&shown).unwrap()).boxes[1].rect;
+    assert_eq!((node.top, node.left), (5, 10));
+    let gone = remove_node(&shown, Pos::new(5, 10)).unwrap();
+    assert_eq!(gone, remove_node(DOUBLE, Pos::new(4, 10)).unwrap());
+    // The canonical corner names nothing in the text as shown.
+    let stale = remove_node(&shown, Pos::new(4, 10)).unwrap_err();
+    assert_eq!(stale.at, Pos::new(4, 10));
+    assert!(stale.reason.contains("no box"), "{stale:?}");
+}
+
+#[test]
+fn a_doubled_blank_line_shifts_the_second_definition() {
+    // No diagnostic, no lint: only the formatter's blank-line rule.
+    let shown = DOUBLE.replacen("╯\n\n╭", "╯\n\n\n╭", 1);
+    assert!(shawline_cli::check(&shown).unwrap().diagnostics.is_empty());
+    // main's 21 feeds 𐑛𐑳𐑚𐑩𐑤 on row 14 of the canonical text, 15 here.
+    let wire = remove_wire(&shown, Pos::new(15, 6)).unwrap();
+    assert_eq!(wire, remove_wire(DOUBLE, Pos::new(14, 6)).unwrap());
+    let node = remove_node(&shown, Pos::new(14, 8)).unwrap();
+    assert_eq!(node, remove_node(DOUBLE, Pos::new(13, 8)).unwrap());
+}
+
+#[test]
+fn a_cell_of_a_filled_gap_names_its_wire() {
+    // `21──▶`: the cell after 21 is wire here, and blank once formatted.
+    let shown = DOUBLE.replace("│ 21 ───▶", "│ 21────▶");
+    let gone = remove_wire(&shown, Pos::new(14, 4)).unwrap();
+    assert_eq!(gone, remove_wire(DOUBLE, Pos::new(14, 6)).unwrap());
+    assert!(gone.contains("│ 21    ▶"), "{gone}");
+}
+
+#[test]
+fn look_alike_wires_are_told_apart_by_place() {
+    // Two stray strokes join only loose ends, so nothing names them but
+    // where they are.
+    let sheet = "\
+╭─ ·𐑛𐑳𐑚𐑩𐑤 ──────────╮
+│                   │
+▶ 𐑯 ────────────────▶ 𐑬
+│                   │
+│  ───       ───    │
+│                   │
+╰───────────────────╯
+";
+    let shown = format!("\n\n{sheet}");
+    let left = remove_wire(&shown, Pos::new(6, 4)).unwrap();
+    assert_eq!(left, remove_wire(sheet, Pos::new(4, 4)).unwrap());
+    assert!(left.contains("│            ───    │"), "{left}");
+    let right = remove_wire(&shown, Pos::new(6, 13)).unwrap();
+    assert!(right.contains("│  ───              │"), "{right}");
+}
+
+/// A text that formats back to a canonical one, with the row each of the
+/// canonical rows lands on. Columns are the same in both.
+struct Variant {
+    what: &'static str,
+    text: String,
+    rows: Vec<usize>,
+}
+
+impl Variant {
+    fn at(&self, p: Pos) -> Pos {
+        Pos::new(self.rows[p.row], p.col)
+    }
+}
+
+/// The jitter corpus's ASCII swaps: strokes whose connections are fixed.
+fn ascii(line: &str) -> String {
+    line.chars()
+        .map(|ch| match ch {
+            '─' => '-',
+            '│' => '|',
+            '┄' => '~',
+            '┆' => ':',
+            '▶' => '>',
+            '◀' => '<',
+            '▲' => '^',
+            '▼' => 'v',
+            _ => ch,
+        })
+        .collect()
+}
+
+/// Every word or literal's space before its wire filled with wire.
+fn squeeze(line: &str) -> String {
+    let mut row: Vec<char> = line.chars().collect();
+    let word = shawline_grid::repertoire::is_word_char;
+    for c in 1..row.len().saturating_sub(1) {
+        let text = word(row[c - 1]) || row[c - 1] == '»';
+        if text && row[c] == ' ' && row[c + 1] == '─' {
+            row[c] = '─';
+        }
+    }
+    row.into_iter().collect()
+}
+
+fn variants(src: &str) -> Vec<Variant> {
+    let build = |what, lead: usize, double: bool, line: &dyn Fn(&str) -> String| {
+        let mut text = "\n".repeat(lead);
+        let (mut rows, mut row) = (Vec::new(), lead);
+        for l in src.lines() {
+            rows.push(row);
+            text.push_str(&line(l));
+            text.push('\n');
+            row += 1;
+            if double && l.is_empty() {
+                text.push('\n');
+                row += 1;
+            }
+        }
+        let v = Variant { what, text, rows };
+        assert_eq!(shawline_cli::format(&v.text).unwrap(), src, "{} doesn't format back", v.what);
+        assert_ne!(v.text, src, "{} changes nothing", v.what);
+        v
+    };
+    let same = |l: &str| l.to_owned();
+    vec![
+        build("leading blank lines", 2, false, &same),
+        build("doubled blank lines", 0, true, &same),
+        build("trailing spaces", 0, false, &|l| format!("{l}   ")),
+        build("ASCII strokes", 0, false, &ascii),
+        build("filled text gaps", 0, false, &squeeze),
+        build("all at once", 1, true, &|l| format!("{} ", ascii(&squeeze(l)))),
+    ]
+}
+
+/// What a sheet offers to edit, in its own cells.
+struct Targets {
+    /// A middle cell of each editable wire.
+    wires: Vec<Pos>,
+    /// Each wired sink, with the source cell its wire starts at.
+    pairs: Vec<(Pos, Pos)>,
+    /// Each node box: corner, word, inputs, outputs.
+    nodes: Vec<(Pos, String, u16, u16)>,
+}
+
+fn targets(src: &str) -> Targets {
+    let grid = Grid::parse(src).unwrap();
+    let d = recognize(&grid);
+    let starts = wire_sources(src);
+    let mut wires = Vec::new();
+    let mut pairs = Vec::new();
+    for (w, start) in starts.iter().enumerate() {
+        let Some(from) = *start else { continue };
+        let cells = &d.wires[w].cells;
+        wires.push(cells[cells.len() / 2]);
+        for e in &d.wires[w].ends {
+            if let EndKind::Port(p) = e.kind
+                && endpoints(src).1.iter().any(|s| s.at == p)
+            {
+                pairs.push((from, p));
+            }
+        }
+    }
+    let mut nodes = Vec::new();
+    for (i, b) in d.boxes.iter().enumerate() {
+        let node = b.parent.is_some()
+            && b.dividers.is_empty()
+            && !b.ports.iter().any(|p| p.side == Dir::N);
+        let Some(word) = d.texts.iter().find(|t| t.owner == Some(i)) else { continue };
+        if !node {
+            continue;
+        }
+        let count =
+            |kind, side| b.ports.iter().filter(|p| p.kind == kind && p.side == side).count();
+        nodes.push((
+            Pos::new(b.rect.top, b.rect.left),
+            word.content.clone(),
+            count(PortKind::Arrow, Dir::W) as u16,
+            count(PortKind::Tee, Dir::E) as u16,
+        ));
+    }
+    Targets { wires, pairs, nodes }
+}
+
+/// An edit with its targets, for [`Agree::check`].
+type Edit<'a> = &'a dyn Fn(&str, &[Pos]) -> Result<String, Refusal>;
+
+/// Edits tried on canonical text and on its variants, and how many went
+/// through, by kind.
+#[derive(Default)]
+struct Agree {
+    done: HashMap<&'static str, usize>,
+    turn: usize,
+}
+
+impl Agree {
+    /// The variants an edit is tried on: every perturbation at once, and
+    /// one alone, each taking its turn.
+    fn pick<'a>(&mut self, all: &'a [Variant]) -> [&'a Variant; 2] {
+        self.turn += 1;
+        let (last, alone) = all.split_last().expect("variants");
+        [last, &alone[self.turn % alone.len()]]
+    }
+
+    /// Runs `edit` on canonical `src` and on variants of it, with the
+    /// targets carried to each variant's cells, and checks the results
+    /// agree: the same text, or the same refusal at the carried cell.
+    fn check(
+        &mut self,
+        kind: &'static str,
+        (src, all): (&str, &[Variant]),
+        targets: &[Pos],
+        edit: Edit,
+    ) {
+        let want = edit(src, targets);
+        *self.done.entry(kind).or_default() += usize::from(want.is_ok());
+        for v in self.pick(all) {
+            let carried: Vec<Pos> = targets.iter().map(|&p| v.at(p)).collect();
+            let got = edit(&v.text, &carried);
+            let what = format!("{kind} at {targets:?} on {}", v.what);
+            match (&got, &want) {
+                (Ok(a), Ok(b)) => assert_eq!(a, b, "{what}\n{}", v.text),
+                (Err(a), Err(b)) => {
+                    assert_eq!(a.reason, b.reason, "{what}\n{}", v.text);
+                    assert_eq!(a.at, v.at(b.at), "{what}\n{}", v.text);
+                }
+                _ => panic!("{what}: {got:?}, but on canonical text {want:?}\n{}", v.text),
+            }
+        }
+    }
+
+    /// [`preview`], whose cells are carried back to compare.
+    fn preview(&mut self, (src, all): (&str, &[Variant]), from: Pos, to: Pos) {
+        let want = preview(src, from, to);
+        *self.done.entry("preview").or_default() += usize::from(want.is_some());
+        for v in self.pick(all) {
+            let carried = want.as_ref().map(|path| path.iter().map(|&p| v.at(p)).collect());
+            let got = preview(&v.text, v.at(from), v.at(to));
+            assert_eq!(got, carried, "preview {from} to {to} on {}\n{}", v.what, v.text);
+        }
+    }
+}
+
+#[test]
+fn every_edit_names_on_any_variant_what_it_names_on_canonical_text() {
+    let programs = [
+        DOUBLE,
+        ABS,
+        include_str!("../../../corpus/02-arith.shaw"),
+        include_str!("../../../corpus/13-fanout.shaw"),
+    ];
+    let mut agree = Agree::default();
+    for src in programs {
+        let t = targets(src);
+        let sheet = (src, &variants(src)[..]);
+        // A few targets of each kind, spread over the sheet, keep it quick.
+        let spread = |n: usize, most: usize| n.div_ceil(most).max(1);
+        for &at in t.wires.iter().step_by(spread(t.wires.len(), 6)) {
+            agree.check("remove_wire", sheet, &[at], &|s, p| remove_wire(s, p[0]));
+        }
+        if let Some(&(from, _)) = t.pairs.first() {
+            let offered = |s: &str, p: &[Pos]| Ok(format!("{:?}", palette(s, Some(p[0]))));
+            agree.check("palette", sheet, &[from], &offered);
+        }
+        for &(from, to) in t.pairs.iter().step_by(spread(t.pairs.len(), 4)) {
+            agree.check("disconnect", sheet, &[to], &|s, p| disconnect(s, p[0]));
+            let Ok(open) = disconnect(src, to) else { continue };
+            let open = (open.as_str(), &variants(&open)[..]);
+            agree.check("connect", open, &[from, to], &|s, p| connect(s, p[0], p[1]));
+            // To the sink, and to the blank cell before it.
+            agree.preview(open, from, to);
+            agree.preview(open, from, Pos::new(to.row, to.col - 1));
+        }
+        for (corner, word, inputs, outputs) in &t.nodes {
+            agree.check("remove_node", sheet, &[*corner], &|s, p| remove_node(s, p[0]));
+            agree.check("move_box", sheet, &[*corner], &|s, p| move_box(s, p[0], 1, 0));
+            let Ok(bare) = remove_node(src, *corner) else { continue };
+            let place = |s: &str, p: &[Pos]| place_node(s, p[0], word, *inputs, *outputs);
+            agree.check("place_node", (&bare, &variants(&bare)), &[*corner], &place);
+        }
+    }
+    let kinds = [
+        "remove_wire",
+        "disconnect",
+        "connect",
+        "preview",
+        "palette",
+        "remove_node",
+        "move_box",
+        "place_node",
+    ];
+    for kind in kinds {
+        let n = agree.done.get(kind).copied().unwrap_or(0);
+        assert!(n >= 3, "too few {kind} edits went through: {:?}", agree.done);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Bounded work.
+
+#[test]
+fn a_move_far_past_the_sheet_is_refused_before_the_sheet_grows() {
+    // Nothing encloses a definition, so only the sheet bounds its move.
+    // Unbounded, these would grow the text to the box's new place first.
+    for (dr, dc) in [(1 << 40, 0), (0, 1 << 40), (isize::MAX, isize::MAX)] {
+        let far = move_box(DOUBLE, Pos::new(2, 0), dr, dc).unwrap_err();
+        assert_eq!(far.at, Pos::new(2, 0));
+        assert!(far.reason.contains("that far past"), "{far:?}");
+    }
+    let before = move_box(DOUBLE, Pos::new(2, 0), -3, 0).unwrap_err();
+    assert!(before.reason.contains("edge"), "{before:?}");
+}
+
+#[test]
+fn a_move_that_runs_out_of_search_says_it_gave_up() {
+    let starved = crate::mover::move_within(DOUBLE, Pos::new(4, 10), 1, 0, 0).unwrap_err();
+    assert!(starved.reason.contains("gave up"), "{starved:?}");
+    assert!(!starved.reason.contains("no free path"), "{starved:?}");
+    assert!(crate::mover::move_within(DOUBLE, Pos::new(4, 10), 1, 0, BUDGET).is_ok());
+}
+
+/// A definition `width` by `height` inside, where nothing can reach the
+/// input of 𐑖: the 7 sits where a wire from 5 would start.
+fn unreachable(width: usize, height: usize) -> String {
+    let mut inner = vec![vec![' '; width]; height];
+    for (r, c, s) in [(1, 2, "5 7"), (1, 12, "┌───┐"), (2, 12, "▶ 𐑖 ├"), (3, 12, "└───┘")] {
+        for (i, ch) in s.chars().enumerate() {
+            inner[r][c + i] = ch;
+        }
+    }
+    let mut text = format!("╭─ ·𐑥𐑱𐑯 {}╮\n", "─".repeat(width - 7));
+    for row in inner {
+        text.push('│');
+        text.extend(row);
+        text.push_str("│\n");
+    }
+    text.push_str(&format!("╰{}╯\n", "─".repeat(width)));
+    text
+}
+
+#[test]
+fn a_search_that_gives_up_is_not_a_missing_path() {
+    let (five, input) = (Pos::new(2, 3), Pos::new(3, 13));
+    let small = connect(&unreachable(30, 6), five, input).unwrap_err();
+    assert!(small.reason.contains("no free path"), "{small:?}");
+    // Too many cells to try them all within the budget.
+    let large = connect(&unreachable(250, 60), five, input).unwrap_err();
+    assert!(large.reason.contains("gave up"), "{large:?}");
+    assert_eq!(large.at, input);
 }

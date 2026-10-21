@@ -5,6 +5,10 @@
 //! recognizes it again. What it recognizes to must equal the input's
 //! [`Print`] with exactly the intended change applied, or the edit is
 //! refused and the sheet stays as it was.
+//!
+//! The caller's cells name the text as given, which may not be canonical,
+//! so each target is resolved there and carried over ([`Sheets`]).
+//! Refusals point at the caller's cells.
 
 use std::collections::HashSet;
 
@@ -13,8 +17,11 @@ use shawline_shape::stroke::Kind;
 use shawline_shape::{BoxStyle, Diagram, EndKind, PortKind, recognize};
 use shawline_vm::bytecode::Prim;
 
-use crate::model::{BoxKind, BoxPrint, Model, NIL, Print, Sink, Source, Term, TextPrint, key};
-use crate::router::{self, BEND, BUDGET, CLEARANCE, Cell, Found, Start, TEE, Terrain, toward};
+use crate::canon::Sheets;
+use crate::model::{
+    BoxKind, BoxPrint, Model, NIL, Print, Sink, Source, Term, TextPrint, key, no_sink, no_source,
+};
+use crate::router::{self, BEND, BUDGET, CLEARANCE, Cell, Found, Miss, Start, TEE, Terrain, toward};
 use crate::sheet::{glyph, keep_clear};
 use crate::{Candidate, Refusal};
 
@@ -57,21 +64,9 @@ impl Canvas {
     }
 }
 
-/// `src` in canonical form, read: every edit starts from canonical text, so
-/// each stroke has one meaning and the result needs no tidying.
-fn canonical(src: &str, at: Pos) -> Result<(Grid, Diagram), Refusal> {
-    let grid = Grid::parse(src).map_err(|errors| {
-        Refusal::new(errors[0].pos, "the sheet has a character Shawline can't read; fix it first")
-    })?;
-    let diagram = recognize(&grid);
-    let canon = shawline_fmt::format(&grid, &diagram);
-    if canon == src {
-        return Ok((grid, diagram));
-    }
-    let grid = Grid::parse(&canon)
-        .map_err(|_| Refusal::new(at, "the sheet can't be tidied for editing"))?;
-    let diagram = recognize(&grid);
-    Ok((grid, diagram))
+/// A refusal about the canonical sheet, pointed at the caller's cell `at`.
+fn here(at: Pos) -> impl Fn(Refusal) -> Refusal {
+    move |r| Refusal { at, ..r }
 }
 
 /// Formats `text` and checks it recognizes to `expected`.
@@ -181,19 +176,23 @@ fn cut_branch(canvas: &mut Canvas, model: &Model, w: usize, sink: &Sink) {
 }
 
 pub(crate) fn remove_wire(src: &str, at: Pos) -> Result<String, Refusal> {
-    let (grid, diagram) = canonical(src, at)?;
-    let model = Model::new(&grid, &diagram);
+    let sheets = Sheets::read(src, at)?;
+    let (g, d) = sheets.given();
+    let given = Model::new(g, d);
     let through: Vec<usize> =
-        (0..diagram.wires.len()).filter(|&w| diagram.wires[w].cells.contains(&at)).collect();
+        (0..d.wires.len()).filter(|&w| d.wires[w].cells.contains(&at)).collect();
     let Some(&first) = through.first() else {
         return Err(Refusal::new(at, "no wire passes through this cell"));
     };
     let w = through
         .iter()
         .copied()
-        .find(|&w| model.editable(w).is_ok())
-        .ok_or_else(|| Refusal::new(at, model.editable(first).unwrap_err()))?;
-    let mut canvas = Canvas::new(&grid);
+        .find(|&w| given.editable(w).is_ok())
+        .ok_or_else(|| Refusal::new(at, given.editable(first).unwrap_err()))?;
+    let (grid, diagram) = sheets.canon();
+    let model = Model::new(grid, diagram);
+    let w = sheets.wire(&given, &model, w, at).map_err(|why| Refusal::new(at, why))?;
+    let mut canvas = Canvas::new(grid);
     erase_wire(&mut canvas, &model, w);
     let mut expected = Print::of(&model);
     let gone = expected.wires.iter().position(|t| *t == model.terms[w]).expect("printed");
@@ -202,14 +201,16 @@ pub(crate) fn remove_wire(src: &str, at: Pos) -> Result<String, Refusal> {
 }
 
 pub(crate) fn disconnect(src: &str, to: Pos) -> Result<String, Refusal> {
-    let (grid, diagram) = canonical(src, to)?;
-    let model = Model::new(&grid, &diagram);
-    let sink = model.sink(to)?;
+    let sheets = Sheets::read(src, to)?;
+    let sink = sheets.entity(to).ok_or_else(|| no_sink(to))?;
+    let (grid, diagram) = sheets.canon();
+    let model = Model::new(grid, diagram);
+    let sink = model.sink(sink).map_err(here(to))?;
     let w = model
         .wire_of(sink.term())
         .ok_or_else(|| Refusal::new(to, "no wire reaches this arrowhead"))?;
     model.editable(w).map_err(|why| Refusal::new(to, why))?;
-    let mut canvas = Canvas::new(&grid);
+    let mut canvas = Canvas::new(grid);
     cut_branch(&mut canvas, &model, w, &sink);
     let mut expected = Print::of(&model);
     expected.cut(sink.term());
@@ -218,11 +219,13 @@ pub(crate) fn disconnect(src: &str, to: Pos) -> Result<String, Refusal> {
 }
 
 pub(crate) fn remove_node(src: &str, corner: Pos) -> Result<String, Refusal> {
-    let (grid, diagram) = canonical(src, corner)?;
-    let model = Model::new(&grid, &diagram);
-    let b = model
+    let sheets = Sheets::read(src, corner)?;
+    let (g, d) = sheets.given();
+    let b = Model::new(g, d)
         .box_at(corner)
         .ok_or_else(|| Refusal::new(corner, "there is no box with its top-left corner here"))?;
+    let (grid, diagram) = sheets.canon();
+    let model = Model::new(grid, diagram);
     if model.kind(b) != BoxKind::Node {
         return Err(Refusal::new(corner, "only a node can be deleted; a definition or switch stays"));
     }
@@ -243,7 +246,7 @@ pub(crate) fn remove_node(src: &str, corner: Pos) -> Result<String, Refusal> {
 
     // One wire at a time, reading the sheet again after each: two inputs
     // fed by one fan-out leave the tee a corner, then take it with them.
-    let mut text = Canvas::new(&grid).render();
+    let mut text = Canvas::new(grid).render();
     for sink in &inputs {
         let (g, d) = reread(&text);
         let m = Model::new(&g, &d);
@@ -309,9 +312,15 @@ pub(crate) fn place_node(
     if inputs > MAX_PORTS || outputs > MAX_PORTS {
         return Err(refuse("that's more ports than a node box can hold"));
     }
-    let (grid, diagram) = canonical(src, corner)?;
-    let model = Model::new(&grid, &diagram);
-    let rect = node_rect(corner, word, inputs, outputs);
+    let sheets = Sheets::read(src, corner)?;
+    // The corner keeps its place in the box around it, so the node lands
+    // where the caller pointed even when formatting shifts the rows.
+    let Some(at) = sheets.place(corner) else {
+        return Err(refuse("a node must sit wholly inside a definition"));
+    };
+    let (grid, diagram) = sheets.canon();
+    let model = Model::new(grid, diagram);
+    let rect = node_rect(at, word, inputs, outputs);
 
     // The innermost box whose interior holds the whole node.
     let holder = (0..diagram.boxes.len())
@@ -339,15 +348,20 @@ pub(crate) fn place_node(
     {
         return Err(refuse("the node would overlap another box"));
     }
-    for row in rect.top..=rect.bottom {
-        for col in rect.left..=rect.right {
-            if grid.get(Pos::new(row, col)) != ' ' {
-                return Err(refuse("the node would land on something; find a clear spot"));
+    // Clear in the text the caller sees as well as in the canonical one,
+    // where formatting may have moved text or wire out of the way.
+    let shown = node_rect(corner, word, inputs, outputs);
+    for (sheet, r) in [(grid, rect), (sheets.given().0, shown)] {
+        for row in r.top..=r.bottom {
+            for col in r.left..=r.right {
+                if sheet.get(Pos::new(row, col)) != ' ' {
+                    return Err(refuse("the node would land on something; find a clear spot"));
+                }
             }
         }
     }
 
-    let mut canvas = Canvas::new(&grid);
+    let mut canvas = Canvas::new(grid);
     let width = rect.right - rect.left;
     for (i, row) in (rect.top..=rect.bottom).enumerate() {
         let line: String = if row == rect.top {
@@ -534,16 +548,20 @@ fn draw(canvas: &mut Canvas, wiring: &Wiring, path: &[Pos]) {
     }
 }
 
-fn search_from_sink(wiring: &Wiring, sink: &Sink) -> Option<Found> {
+fn search_from_sink(wiring: &Wiring, sink: &Sink) -> Result<Found, Miss> {
     let start = Start { pos: sink.at, heading: Some(sink.dir.opposite()), straight: true };
-    router::search(wiring, start, BUDGET).filter(|f| f.path.len() >= 3)
+    let found = router::search(wiring, start, &mut { BUDGET })?;
+    if found.path.len() < 3 { Err(Miss::NoPath) } else { Ok(found) }
 }
 
 pub(crate) fn connect(src: &str, from: Pos, to: Pos) -> Result<String, Refusal> {
-    let (grid, diagram) = canonical(src, to)?;
-    let model = Model::new(&grid, &diagram);
-    let source = model.source(from)?;
-    let sink = model.sink(to)?;
+    let sheets = Sheets::read(src, to)?;
+    let source = sheets.entity(from).ok_or_else(|| no_source(from))?;
+    let sink = sheets.entity(to).ok_or_else(|| no_sink(to))?;
+    let (grid, diagram) = sheets.canon();
+    let model = Model::new(grid, diagram);
+    let source = model.source(source).map_err(here(from))?;
+    let sink = model.sink(sink).map_err(here(to))?;
     if model.wire_of(sink.term()).is_some() {
         return Err(Refusal::new(to, "this arrowhead already has a wire; disconnect it first"));
     }
@@ -560,10 +578,17 @@ pub(crate) fn connect(src: &str, from: Pos, to: Pos) -> Result<String, Refusal> 
         return Err(Refusal::new(to, "the cell before this arrowhead is taken"));
     }
     let wiring = Wiring::new(&model, &source, Some(&sink));
-    let found = search_from_sink(&wiring, &sink).ok_or_else(|| {
-        Refusal::new(to, format!("no free path for a wire from {}; make room first", source.name))
+    let found = search_from_sink(&wiring, &sink).map_err(|miss| {
+        let name = &source.name;
+        let why = match miss {
+            Miss::NoPath => format!("no free path for a wire from {name}; make room first"),
+            Miss::GaveUp => {
+                format!("the search for a wire from {name} gave up; make room or bring them closer")
+            }
+        };
+        Refusal::new(to, why)
     })?;
-    let mut canvas = Canvas::new(&grid);
+    let mut canvas = Canvas::new(grid);
     draw(&mut canvas, &wiring, &found.path);
 
     let mut expected = Print::of(&model);
@@ -578,32 +603,43 @@ pub(crate) fn connect(src: &str, from: Pos, to: Pos) -> Result<String, Refusal> 
 /// The cells a wire from `from` would take if released at `to`: exactly
 /// what [`connect`] would draw when `to` is a free sink, or a route to the
 /// blank cell `to` otherwise. `None` when nothing fits.
+///
+/// The route is found on the canonical sheet and given back as cells of the
+/// text as given, by their place in the source's box.
 pub(crate) fn preview(src: &str, from: Pos, to: Pos) -> Option<Vec<Pos>> {
-    let (grid, diagram) = canonical(src, from).ok()?;
-    let model = Model::new(&grid, &diagram);
-    let source = model.source(from).ok()?;
+    let sheets = Sheets::read(src, from).ok()?;
+    let (grid, diagram) = sheets.canon();
+    let model = Model::new(grid, diagram);
+    let source = model.source(sheets.entity(from)?).ok()?;
     if let Some(w) = model.wire_of(source.term) {
         model.editable(w).ok()?;
     }
-    if let Ok(sink) = model.sink(to) {
+    let back = |cells: &[Pos]| -> Option<Vec<Pos>> {
+        cells.iter().map(|&p| sheets.back(source.scope.0, p)).collect()
+    };
+    if let Some(sink) = sheets.entity(to).and_then(|p| model.sink(p).ok()) {
         if model.wire_of(sink.term()).is_some() || sink.scope != source.scope {
             return None;
         }
         let wiring = Wiring::new(&model, &source, Some(&sink));
-        let found = search_from_sink(&wiring, &sink)?;
+        let found = search_from_sink(&wiring, &sink).ok()?;
         let n = found.path.len();
         let last = if wiring.wire.is_some() { n } else { n - 1 };
-        return Some(found.path[1..last].to_vec());
+        return back(&found.path[1..last]);
     }
+    if sheets.given().0.get(to) != ' ' {
+        return None;
+    }
+    let to = sheets.place(to)?;
     let wiring = Wiring::new(&model, &source, None);
     if wiring.cell(to) != Cell::Free {
         return None;
     }
     let start = Start { pos: to, heading: None, straight: false };
-    let found = router::search(&wiring, start, BUDGET)?;
+    let found = router::search(&wiring, start, &mut { BUDGET }).ok()?;
     let n = found.path.len();
     let last = if wiring.wire.is_some() { n } else { n - 1 };
-    Some(found.path[..last].to_vec())
+    back(&found.path[..last])
 }
 
 // ---------------------------------------------------------------------------

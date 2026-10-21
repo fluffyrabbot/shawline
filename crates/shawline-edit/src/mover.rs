@@ -17,8 +17,9 @@ use shawline_shape::stroke::{self, Kind};
 use shawline_shape::{Diagram, EndKind, PortKind, recognize};
 
 use crate::Refusal;
+use crate::canon::Sheets;
 use crate::check::{Shift, same};
-use crate::router::{self, BEND, BUDGET, CLEARANCE, Cell, Found, Start, TEE, Terrain, toward};
+use crate::router::{self, BEND, BUDGET, CLEARANCE, Cell, Found, Miss, Start, TEE, Terrain, toward};
 use crate::sheet::{across, borders, glyph, is_corner, keep_clear, perimeter, text_cells};
 
 /// Using a cell of another pending wire's chain: it may want it back.
@@ -29,42 +30,59 @@ const OTHER_CHAIN: u32 = 2;
 const TIGHT: u32 = 4;
 
 pub(crate) fn move_box(src: &str, corner: Pos, dr: isize, dc: isize) -> Result<String, Refusal> {
-    let grid = Grid::parse(src).map_err(|errors| {
-        Refusal::new(errors[0].pos, "the sheet has a character Shawline can't read; fix it first")
-    })?;
-    let diagram = recognize(&grid);
-    let Some(index) =
-        diagram.boxes.iter().position(|b| (b.rect.top, b.rect.left) == (corner.row, corner.col))
+    move_within(src, corner, dr, dc, BUDGET)
+}
+
+/// [`move_box`], with `budget` router expansions for the whole move.
+pub(crate) fn move_within(
+    src: &str,
+    corner: Pos,
+    dr: isize,
+    dc: isize,
+    budget: usize,
+) -> Result<String, Refusal> {
+    // The box is found on the text as given, then carried over to the
+    // canonical text the move draws on (`crate::canon`). Refusals point at
+    // canonical cells, so they're carried back.
+    let sheets = Sheets::read(src, corner)?;
+    let Some(index) = sheets
+        .given()
+        .1
+        .boxes
+        .iter()
+        .position(|b| (b.rect.top, b.rect.left) == (corner.row, corner.col))
     else {
         return Err(Refusal::new(corner, "there is no box with its top-left corner here"));
     };
+    moved(&sheets, index, dr, dc, budget)
+        .map_err(|r| Refusal { at: sheets.back(index, r.at).unwrap_or(corner), ..r })
+}
 
-    // Edits work on canonical text, so every stroke has a fixed meaning and
-    // the result needs no tidying. Formatting keeps boxes in order.
-    let canon = shawline_fmt::format(&grid, &diagram);
-    let (grid, diagram) = if canon == src {
-        (grid, diagram)
-    } else {
-        let grid = Grid::parse(&canon).expect("the formatter writes only repertoire characters");
-        let diagram = recognize(&grid);
-        (grid, diagram)
-    };
+fn moved(
+    sheets: &Sheets,
+    index: usize,
+    dr: isize,
+    dc: isize,
+    budget: usize,
+) -> Result<String, Refusal> {
+    let canon = sheets.text();
     if dr == 0 && dc == 0 {
-        return Ok(canon);
+        return Ok(canon.to_owned());
     }
+    let (grid, diagram) = sheets.canon();
     let rect = diagram.boxes[index].rect;
     let at = Pos::new(rect.top, rect.left);
 
-    let text = Mover::new(&grid, &diagram, index, dr, dc)?.run()?;
+    let text = Mover::new(grid, diagram, index, dr, dc)?.run(budget)?;
 
     // The check (contract module docs): same structure, same diagnostics.
     let new_grid = Grid::parse(&text).expect("edits write only repertoire characters");
     let new_diagram = recognize(&new_grid);
-    let shift = shift_of(&grid, &diagram, index, dr, dc);
-    if let Err(what) = same((&grid, &diagram), (&new_grid, &new_diagram), &shift) {
+    let shift = shift_of(grid, diagram, index, dr, dc);
+    if let Err(what) = same((grid, diagram), (&new_grid, &new_diagram), &shift) {
         return Err(Refusal::new(at, format!("the box can't go there: {what}")));
     }
-    if codes(&canon) != codes(&text) {
+    if codes(canon) != codes(&text) {
         return Err(Refusal::new(
             at,
             "the box can't go there: it would change the sheet's diagnostics",
@@ -274,12 +292,20 @@ impl<'a> Mover<'a> {
         let new_rect = Rect { top: tl.row, left: tl.col, bottom: br.row, right: br.col };
 
         let region = match b.parent {
-            None => Rect {
-                top: 0,
-                left: 0,
-                bottom: grid.height() + rect.bottom + 2,
-                right: grid.width() + rect.right + 2,
-            },
+            None => {
+                // Room for the definition past everything drawn, and no
+                // more: the sheet grows to hold it before any route is tried.
+                let region = Rect {
+                    top: 0,
+                    left: 0,
+                    bottom: grid.height() + rect.bottom + 2,
+                    right: grid.width() + rect.right + 2,
+                };
+                if new_rect.bottom > region.bottom || new_rect.right > region.right {
+                    return Err(refuse("the box can't move that far past the end of the sheet"));
+                }
+                region
+            }
             Some(p) => {
                 let parent = &diagram.boxes[p];
                 let what = if parent.parent.is_none() { "definition" } else { "switch" };
@@ -451,49 +477,61 @@ impl<'a> Mover<'a> {
     }
 
     /// Routes every end, trying the ports in order and in reverse, and keeps
-    /// the cheaper drawing.
-    fn run(self) -> Result<String, Refusal> {
+    /// the cheaper drawing. Both tries draw on one `budget` of router
+    /// expansions.
+    fn run(self, mut budget: usize) -> Result<String, Refusal> {
         let order: Vec<usize> = (0..self.ends.len()).collect();
         let mut orders = vec![order.clone()];
         if order.len() > 1 {
             orders.push(order.iter().rev().copied().collect());
         }
         let mut best: Option<(u32, Work)> = None;
-        let mut failure = None;
+        let mut failure: Option<(usize, Miss)> = None;
         for order in orders {
-            match self.attempt(&order) {
+            match self.attempt(&order, &mut budget) {
                 Ok((cost, work)) => {
                     if best.as_ref().is_none_or(|(c, _)| cost < *c) {
                         best = Some((cost, work));
                     }
                 }
-                Err(end) => failure = failure.or(Some(end)),
+                // A search that gave up proves nothing, so it outranks one
+                // that found no path.
+                Err((end, miss)) => {
+                    if failure.is_none_or(|(_, m)| m == Miss::NoPath && miss == Miss::GaveUp) {
+                        failure = Some((end, miss));
+                    }
+                }
             }
         }
         let Some((_, work)) = best else {
             let corner = Pos::new(self.rect.top, self.rect.left);
-            let Some(end) = failure.map(|i| &self.ends[i]) else {
+            let Some((end, miss)) = failure.map(|(i, miss)| (&self.ends[i], miss)) else {
                 return Err(Refusal::new(
                     corner,
                     "no free path for a wire; make room around the box first",
                 ));
             };
-            let reason = match &end.chain.open {
-                Some(open) => format!(
+            let reason = match (miss, &end.chain.open) {
+                (Miss::GaveUp, _) => "the search for a path for the wire at this port gave up; \
+                     try a shorter move or make room around the box first"
+                    .to_owned(),
+                (Miss::NoPath, Some(open)) => format!(
                     "no room for the wire from {}; move {} or make room around the box first",
                     open.text, open.text
                 ),
-                None => "no free path for the wire at this port; make room around the box first"
-                    .to_owned(),
+                (Miss::NoPath, None) => {
+                    "no free path for the wire at this port; make room around the box first"
+                        .to_owned()
+                }
             };
             return Err(Refusal::new(end.port, reason));
         };
         Ok(work.render())
     }
 
-    /// Routes the ends in `order` on a copy of the sheet. `Err` names the
-    /// end that couldn't be routed.
-    fn attempt(&self, order: &[usize]) -> Result<(u32, Work), usize> {
+    /// Routes the ends in `order` on a copy of the sheet, drawing on
+    /// `budget`. `Err` names the end that couldn't be routed, and why.
+    fn attempt(&self, order: &[usize], budget: &mut usize) -> Result<(u32, Work), (usize, Miss)> {
         let mut work = self.work.clone();
         let mut wires = self.wires.clone();
         let mut pending: HashSet<usize> = order.iter().copied().collect();
@@ -520,7 +558,7 @@ impl<'a> Mover<'a> {
                 usable_from: usable_from(end, &work, &self.footprint, &targets),
             };
             let start = Start { pos: end.new_port, heading: Some(end.side), straight: true };
-            let found = router::search(&terrain, start, BUDGET).ok_or(i)?;
+            let found = router::search(&terrain, start, budget).map_err(|miss| (i, miss))?;
             total += found.cost;
             let drawn = apply(&mut work, end, &found);
             wires.get_mut(&end.wire).expect("every end's wire is tracked").extend(drawn);
