@@ -40,6 +40,6 @@ for f in "$root"/corpus/[0-7][0-9]-*.shaw; do
 done
 (IFS=,; echo "[${names[*]}]") > "$dist/examples/index.json"
 
-cp "$here"/index.html "$here"/style.css "$here"/app.js "$here"/tour.js "$here"/worker.js "$dist/"
+cp "$here"/index.html "$here"/style.css "$here"/app.js "$here"/tour.js "$here"/drafts.js "$here"/worker.js "$dist/"
 
 echo "built $dist ($(wc -c < "$dist/pkg/shawline_wasm_bg.wasm" | tr -d ' ') byte wasm)"

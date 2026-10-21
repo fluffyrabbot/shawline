@@ -70,9 +70,10 @@ function mainOf(view) {
   const outWire = sink && view.wires.find((w) => w.cells.some((c) => c.row === sink.row && c.col === sink.col - 1));
   const node = view.boxes.find((b) => b.kind === "node" && inside(box, { row: b.top, col: b.left }));
   const tee = node && view.sources.find((s) => s.col === node.right && s.row > node.top && s.row < node.bottom);
-  const constant = view.sources.find(
-    (s) => inside(box, s) && !view.boxes.some((b) => b.kind === "node" && s.col >= b.left && s.col <= b.right),
-  );
+  // Not a node's tee: a source on no node's cells, in any definition.
+  const onNode = (s) =>
+    view.boxes.some((b) => b.kind === "node" && s.row >= b.top && s.row <= b.bottom && s.col >= b.left && s.col <= b.right);
+  const constant = view.sources.find((s) => inside(box, s) && !onNode(s));
   return { box, sink, outWire, node, tee, constant };
 }
 

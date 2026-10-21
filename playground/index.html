@@ -8,9 +8,14 @@
   <link rel="preload" href="ShawlineMono.ttf" as="font" type="font/ttf" crossorigin>
   <link rel="stylesheet" href="style.css">
   <script>
-    // Set the theme before first paint so the page never flashes.
-    document.documentElement.dataset.theme = localStorage.getItem("shawline.theme")
-      ?? (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+    // Set the theme before first paint so the page never flashes. Reading
+    // storage throws where it is disabled.
+    {
+      let theme = null;
+      try { theme = localStorage.getItem("shawline.theme"); } catch {}
+      document.documentElement.dataset.theme =
+        theme ?? (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+    }
   </script>
   <script type="module" src="app.js"></script>
 </head>
@@ -22,10 +27,14 @@
       <p>A dataflow language you draw.</p>
     </div>
     <nav class="controls" aria-label="Playground settings">
-      <label class="picker">
-        <span class="label">Example</span>
-        <select id="examples"></select>
-      </label>
+      <div class="example">
+        <label class="picker">
+          <span class="label">Example</span>
+          <select id="examples"></select>
+        </label>
+        <button type="button" id="reset" class="quiet" hidden
+          title="Your edits to each example are kept as a draft. Reset loads this one’s original; undo brings your edits back.">Reset</button>
+      </div>
       <label class="switch" title="Type phonemic ASCII and get Shavian: t h → 𐑔">
         <input type="checkbox" id="translit" checked>
         <span class="track" aria-hidden="true"></span>
@@ -67,14 +76,16 @@
         <h2 id="drawing-label">Drawing</h2>
         <span class="meta hint-line">Drag from a tee to wire it · Delete removes</span>
         <span class="spacer"></span>
-        <label class="switch" title="Show the value each wire carries">
+        <span id="trace-status" class="meta trace-status" role="status"></span>
+        <label class="switch" title="Show the value each wire carried during the first call of its definition">
           <input type="checkbox" id="values" checked>
           <span class="track" aria-hidden="true"></span>
           <span class="label">Values</span>
         </label>
       </div>
-      <div id="drawing" tabindex="0"
-        title="Drag from a source to wire it, drag a box to move it, double-click space for a node"></div>
+      <div id="drawing" tabindex="0" aria-describedby="drawing-status"
+        title="Drag from a source to wire it, drag an arrowhead off to unwire it, drag a box to move it, double-click space for a node"></div>
+      <p id="drawing-status" class="drawing-status" role="status"></p>
     </section>
 
     <section class="pane problems" aria-labelledby="problems-label">

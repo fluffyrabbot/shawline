@@ -165,19 +165,136 @@ test("trace returns values per wire, or no badges with the reason", () => {
   const broken = shawline.trace("╭─ ·𐑥𐑱𐑯 ─╮\n│ 𐑐 │\n╰───────╯\n");
   assert.deepEqual(broken.wires, []);
   assert.equal(typeof broken.error.code, "string");
-  let found;
-  try {
-    found = shawline.trace(double);
-  } catch (e) {
-    // Agent T's tracer may not have landed: the call panics, the page must
-    // only lose its badges. Reported, not hidden.
-    console.log(`      (tracing unavailable here: ${e.message})`);
-    return;
-  }
+  const found = shawline.trace(double);
   assert.equal(found.error, null);
   assert.equal(found.stopped, false);
   const output = shawline.wires(double).find((w) => w.cells.some((c) => c.row === 14 && c.col === 19));
   assert.equal(found.wires.find((v) => v.wire === output.wire)?.value, "42");
+});
+
+test("trace reports a runtime error where it happened, and a run cut off at its budget", () => {
+  const failed = shawline.trace(corpus("80-div-zero.shaw"));
+  const [, row, col, code] = corpus("80-div-zero.out").trim().match(/^error (\d+):(\d+) (\w+)/);
+  assert.deepEqual([failed.error.row, failed.error.col, failed.error.code], [Number(row), Number(col), code]);
+  assert.equal(failed.stopped, false);
+  assert.ok(failed.wires.length > 0, "wires before the error keep their values");
+  const runaway = shawline.trace(corpus("83-runaway.shaw"));
+  assert.deepEqual([runaway.error, runaway.stopped], [null, true]);
+});
+
+test("run's error position is the at object's, so the page can count from one", () => {
+  const { error, at } = shawline.run(corpus("80-div-zero.shaw"));
+  assert.equal(error, `error ${at.row}:${at.col} ${at.code}: ${at.message}`);
+});
+
+// Dragging a wired arrowhead off is `disconnect`, then `connect` from
+// wherever it was dropped; the page applies the pair as one edit.
+
+const wiredSinks = (src) =>
+  shawline.endpoints(src).sinks.filter((s) => s.wired).map((s) => `${s.row}:${s.col}`);
+
+test("disconnect takes off one branch and keeps the others", () => {
+  assert.deepEqual(wiredSinks(double), ["5:10", "5:22", "6:10", "14:8", "14:22"]);
+  const cut = shawline.disconnect(double, 6, 10);
+  assert.equal(cut.ok, true, cut.reason);
+  assert.deepEqual(wiredSinks(cut.text), ["5:10", "5:22", "14:8", "14:22"]);
+  assert.equal(shawline.format(cut.text), cut.text);
+  const input = shawline.wires(cut.text).find((w) => w.cells.some((c) => c.row === 5 && c.col === 4));
+  assert.ok(input.cells.some((c) => c.row === 5 && c.col === 9), "the other branch still reaches 5:10");
+  const back = shawline.connect(cut.text, 5, 0, 6, 10);
+  assert.equal(back.ok, true, back.reason);
+  assert.deepEqual(outputsOf(back.text), outputsOf(double));
+});
+
+test("a branch can come off and go on again at another source", () => {
+  const cut = shawline.disconnect(double, 6, 10);
+  const moved = shawline.connect(cut.text, 5, 14, 6, 10);
+  assert.equal(moved.ok, true, moved.reason);
+  assert.deepEqual(wiredSinks(moved.text), wiredSinks(double));
+  assert.equal(shawline.format(moved.text), moved.text);
+});
+
+test("the last branch's disconnect removes the whole wire", () => {
+  const cut = shawline.disconnect(double, 14, 22);
+  assert.equal(cut.ok, true, cut.reason);
+  assert.deepEqual(wiredSinks(cut.text), ["5:10", "5:22", "6:10", "14:8"]);
+  assert.equal(shawline.wires(cut.text).length, shawline.wires(double).length - 1);
+});
+
+test("wires the mouse can't edit refuse disconnect with the reason", () => {
+  const fanout = corpus("13-fanout.shaw");
+  const locked = shawline.wires(fanout).find((w) => w.source === null);
+  assert.ok(locked, "13-fanout has an inline node's wire");
+  const refused = shawline.disconnect(fanout, 5, 10);
+  assert.deepEqual([refused.ok, refused.row, refused.col], [false, 5, 10]);
+  assert.match(refused.reason, /can't be edited by mouse/);
+});
+
+test("preview from a wired source ends on its wire, not at the source", () => {
+  const cut = shawline.disconnect(double, 6, 10).text;
+  const path = shawline.preview(cut, 5, 0, 6, 10);
+  const wire = shawline.wires(cut).find((w) => w.cells.some((c) => c.row === 5 && c.col === 4));
+  const end = path[path.length - 1];
+  assert.ok(wire.cells.some((c) => c.row === end.row && c.col === end.col), `path ends at ${end.row}:${end.col}`);
+});
+
+// Drafts: each example and the tour keep their own text, and storage
+// that refuses never throws.
+
+const { Store, TOUR_SLOT } = await import("./drafts.js");
+
+function memory({ full = false } = {}) {
+  const map = new Map();
+  return {
+    map,
+    getItem: (k) => map.get(k) ?? null,
+    setItem: (k, v) => {
+      if (full) throw new DOMException("quota", "QuotaExceededError");
+      map.set(k, v);
+    },
+    removeItem: (k) => map.delete(k),
+  };
+}
+
+test("drafts are per slot, and the tour's is its own", () => {
+  const store = new Store(memory());
+  assert.equal(store.saveDraft("03-double", "mine", "original"), true);
+  assert.equal(store.saveDraft(TOUR_SLOT, "tour edits", "original"), true);
+  assert.equal(store.draft("03-double"), "mine");
+  assert.equal(store.draft(TOUR_SLOT), "tour edits");
+  assert.equal(store.draft("08-factorial"), null);
+  store.saveDraft("03-double", "original", "original");
+  assert.equal(store.draft("03-double"), null, "back to the original drops the draft");
+  store.saveDraft("08-factorial", "offline", undefined);
+  assert.equal(store.draft("08-factorial"), "offline", "without an original the text is kept");
+});
+
+test("full or missing storage refuses without throwing", () => {
+  const full = new Store(memory({ full: true }));
+  assert.equal(full.saveDraft("03-double", "mine", "original"), false);
+  assert.equal(full.set("theme", "dark"), false);
+  const none = new Store(null);
+  assert.equal(none.get("theme"), null);
+  assert.equal(none.saveDraft("03-double", "mine", "original"), false);
+});
+
+test("the single pre-draft sheet moves into its example's draft", () => {
+  const storage = memory();
+  storage.setItem("shawline.source", "old edits");
+  storage.setItem("shawline.example", "03-double");
+  const store = new Store(storage);
+  store.migrate(["03-double"]);
+  assert.equal(store.draft("03-double"), "old edits");
+  assert.equal(store.get("source"), null);
+  storage.setItem("shawline.source", "older");
+  store.migrate(["03-double"]);
+  assert.equal(store.draft("03-double"), "old edits", "an existing draft wins");
+  const stuck = memory();
+  stuck.setItem("shawline.source", "kept");
+  stuck.setItem("shawline.example", "03-double");
+  const fullAfter = new Store({ ...stuck, setItem: () => { throw new Error("full"); } });
+  fullAfter.migrate(["03-double"]);
+  assert.equal(stuck.getItem("shawline.source"), "kept", "the old key stays until the move succeeds");
 });
 
 // The guided tour reads the sheet, not the clicks: drive 03-double through
@@ -218,6 +335,17 @@ test("the tour walks 03-double to the end", () => {
   tour.ran(view(src));
   assert.equal(tour.finished, true);
   assert.deepEqual(tour.rings(), []);
+});
+
+test("the tour finds main's constant wherever main is moved", () => {
+  const main = shawline.boxes(double).find((b) => b.kind === "definition" && b.top === 11);
+  // Moved right, the constant shares columns with ·𐑛𐑳𐑚𐑩𐑤's node.
+  const moved = shawline.move_box(double, main.top, main.left, 0, 8);
+  assert.equal(moved.ok, true, moved.reason);
+  const view = (src) => ({ src, boxes: shawline.boxes(src), wires: shawline.wires(src), ...shawline.endpoints(src) });
+  const tour = new Tour(fakeHost(), () => {});
+  tour.start(view(moved.text));
+  assert.deepEqual([tour.parts.constant?.row, tour.parts.constant?.col], [14, 10]);
 });
 
 process.exit(failed ? 1 : 0);
