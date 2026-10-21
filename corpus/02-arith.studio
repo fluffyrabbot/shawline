@@ -1,0 +1,65 @@
+rewire
+  remove_wire 5:5 ok 350b159e1ace
+  remove_wire 5:13 ok bb8e8004f1c0
+  remove_wire 6:5 ok d6097ee748b7
+  remove_wire 10:5 ok 3739a54f0811
+  remove_wire 10:13 ok ffc25be312b8
+  remove_wire 11:5 ok 89a9b315e2d9
+  remove_wire 15:5 ok a12055066a95
+  remove_wire 15:13 ok 1b7130b642a3
+  remove_wire 16:5 ok b209c93a3c76
+  remove_wire 20:5 ok 9ea46425f189
+  remove_wire 20:13 ok 1cac6560fca5
+  remove_wire 21:5 ok efd891b80c31
+  connect 5:3 5:8 ok c329f93fb458
+  connect 5:12 5:18 ok b6f241ec55fd
+  connect 6:3 6:8 ok d598e3a66ad5
+  connect 10:3 10:8 ok 02da563f9ec4
+  connect 10:12 10:18 ok 9a041d434596
+  connect 11:2 11:8 ok 17ba1d66ba62
+  connect 15:2 15:8 ok 70f252cd945c
+  connect 15:12 15:18 ok 1d7270f90363
+  connect 16:3 16:8 ok 3ebd4a351ab8
+  connect 20:2 20:8 ok bb2c78b40e4e
+  connect 20:12 20:18 ok 44fddf9d3345
+  connect 21:3 21:8 ok 316e4940cb35
+rebuild 𐑑 4:8
+  remove_node 4:8 ok 3b9b568ef91f
+  place_node 4:8 𐑑 2 1 ok d6097ee748b7
+  connect 5:3 5:8 ok 586e71fe449a
+  connect 6:3 6:8 ok 2415cdc7cbd2
+  connect 5:12 5:18 ok 316e4940cb35
+rebuild 𐑚 9:8
+  remove_node 9:8 ok 79526e302817
+  place_node 9:8 𐑚 2 1 ok 97c41b09135c
+  connect 10:3 10:8 ok 1c3aa21662f3
+  connect 11:2 11:8 ok a806f5e450a6
+  connect 10:12 10:18 ok 316e4940cb35
+rebuild 𐑛 14:8
+  remove_node 14:8 ok a0f2d8ff4961
+  place_node 14:8 𐑛 2 1 ok 21d86aef860a
+  connect 15:2 15:8 ok 1783c040aba4
+  connect 16:3 16:8 ok 1e0ae085200d
+  connect 15:12 15:18 ok 316e4940cb35
+rebuild 𐑥 19:8
+  remove_node 19:8 ok c4ec151e09ec
+  place_node 19:8 𐑥 2 1 ok 3ebd4a351ab8
+  connect 20:2 20:8 ok bb2c78b40e4e
+  connect 21:3 21:8 ok 42323fc74b6a
+  connect 20:12 20:18 ok 316e4940cb35
+move 4:8 -1 0 ok d9591f53d02f
+move 4:8 1 0 ok 8ce94622f2df
+move 4:8 0 -1 ok 86b1355dc095
+move 4:8 0 1 ok e1816da2416d
+move 9:8 -1 0 ok 8c447d0c3999
+move 9:8 1 0 ok 9f06eae1ebb8
+move 9:8 0 -1 ok 1de3940b46c5
+move 9:8 0 1 ok df5835397e54
+move 14:8 -1 0 ok d5f0240f9c0c
+move 14:8 1 0 ok 51ef5d746744
+move 14:8 0 -1 ok e5ea8ab9629d
+move 14:8 0 1 ok be087c71e299
+move 19:8 -1 0 ok c6912c0a1e34
+move 19:8 1 0 ok 90c5c21e88b4
+move 19:8 0 -1 ok eb0587d43109
+move 19:8 0 1 ok 69a43f4ec2d9

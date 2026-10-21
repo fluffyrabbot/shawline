@@ -10,6 +10,7 @@
 //! Only the lead blesses; see `CLAUDE.md`.
 
 pub mod jitter;
+pub mod studio;
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -68,6 +69,8 @@ pub const STAGES: &[Stage] = &[
         fallback: None,
         selective: true,
     },
+    // Kept for every valid program (01–79): how each Studio edit ends.
+    Stage { name: "studio", run: studio::dump, fallback: None, selective: true },
 ];
 
 /// Program stdout, or `error ROW:COL CODE` (SPEC §9).

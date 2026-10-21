@@ -1,0 +1,61 @@
+rewire
+  remove_wire 5:6 ok 7d93c4fe40e2
+  remove_wire 5:13 ok 6d8d6744fc65
+  remove_wire 5:18 ok 159a02fee11f
+  remove_wire 5:25 ok 086bd290dea7
+  remove_wire 5:30 ok ab206cfd62cc
+  remove_wire 5:37 ok 1b9fa56fe370
+  remove_wire 6:6 ok 41ff299afa81
+  remove_wire 9:45 ok 91a4c2248b69
+  remove_wire 10:45 ok 240f8dca80ef
+  connect 5:4 5:8 ok 36846508479f
+  connect 5:16 5:20 ok 553a351efbf4
+  connect 5:28 5:32 ok 0992149d88cd
+  connect 5:36 5:50 ok 0a6da822c274
+  connect 6:2 6:8 ok 2156f97b4e3f
+  connect 5:12 6:20 ok c6fdda63bda2
+  connect 5:24 6:32 ok 8416fcd9292a
+  connect 5:36 9:40 ok 5f2ed6fcd53c
+  connect 9:44 9:50 ok eb1e9655c9b1
+  connect 10:44 10:50 ok b47ff9a18ce8
+rebuild 𐑟 4:8
+  remove_node 4:8 ok 61392eaf66b0
+  place_node 4:8 𐑟 2 1 ok 2a373c0786cb
+  connect 5:4 5:8 ok 6cff089c484b
+  connect 6:2 6:8 ok 7e8fa6d2bdfd
+  connect 5:12 6:20 ok b47ff9a18ce8
+rebuild 𐑟 4:20
+  remove_node 4:20 ok adc0746cd037
+  place_node 4:20 𐑟 2 1 ok 525313f99035
+  connect 5:12 6:20 ok 6f0007aaec02
+  connect 5:16 5:20 ok 5ab4cfcb4186
+  connect 5:24 6:32 ok b47ff9a18ce8
+rebuild 𐑟 4:32
+  remove_node 4:32 ok b2f3f71964c6
+  place_node 4:32 𐑟 2 1 ok 22a0fdee51b1
+  connect 5:24 6:32 ok 860e648a77d3
+  connect 5:28 5:32 ok 16dda8172a67
+  connect 5:36 5:50 ok 1809d4422b63
+  connect 5:36 9:40 ok b47ff9a18ce8
+rebuild 𐑕 8:40
+  remove_node 8:40 ok 968da0028602
+  place_node 8:40 𐑕 1 2 ok 8416fcd9292a
+  connect 5:36 9:40 ok 5f2ed6fcd53c
+  connect 9:44 9:50 ok eb1e9655c9b1
+  connect 10:44 10:50 ok b47ff9a18ce8
+move 4:8 -1 0 ok 9fcd784bd3cf
+move 4:8 1 0 ok d55d9b5543f2
+move 4:8 0 -1 ok 9db3648a32ec
+move 4:8 0 1 ok 07444d424141
+move 4:20 -1 0 ok 812765955e30
+move 4:20 1 0 ok 0e4ce717d8f2
+move 4:20 0 -1 ok f9d3247193a2
+move 4:20 0 1 ok cf7dbef289bc
+move 4:32 -1 0 ok 546fd84e96a3
+move 4:32 1 0 ok ef7e6de93b32
+move 4:32 0 -1 ok aa6eb20907d6
+move 4:32 0 1 ok 4b1a11219bfb
+move 8:40 -1 0 ok eaf11d126ebc
+move 8:40 1 0 ok 0416ea271521
+move 8:40 0 -1 ok d27b5d0dca5a
+move 8:40 0 1 ok 073612cc7da5

@@ -1,0 +1,16 @@
+rewire
+  remove_wire 11:4 ok 1d1bc6e4db55
+  remove_wire 11:15 ok 010a8a2d78f1
+  connect 11:0 11:10 ok fcc62ec918b0
+  connect 11:14 11:22 ok 086e01232da9
+  connect 11:0 12:10 ok ecceb1874049
+rebuild 𐑐 10:10
+  remove_node 10:10 ok fab8fcffdebf
+  place_node 10:10 𐑐 2 1 ok 010a8a2d78f1
+  connect 11:0 11:10 ok fcc62ec918b0
+  connect 11:0 12:10 ok 348cd4d63a76
+  connect 11:14 11:22 ok ecceb1874049
+move 10:10 -1 0 ok b9da645e96db
+move 10:10 1 0 ok bacbec0c215f
+move 10:10 0 -1 ok 232d16c260c3
+move 10:10 0 1 ok 2a2d99b8a59e

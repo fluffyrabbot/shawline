@@ -1,0 +1,2 @@
+rewire
+  remove_wire 2:4 refused 2:4

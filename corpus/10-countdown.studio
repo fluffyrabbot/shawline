@@ -1,0 +1,61 @@
+rewire
+  remove_wire 10:13 ok 288b48216de5
+  remove_wire 13:13 ok 528a0cfce5f7
+  remove_wire 13:22 ok 05f0bb785304
+  remove_wire 13:34 ok 3c40e6e38d76
+  remove_wire 14:16 ok 5ab8bb4aec74
+  remove_wire 5:4 ok 97ca82797e9a
+  remove_wire 5:19 ok cb85b371a764
+  remove_wire 6:13 ok 0e6124983e56
+  remove_wire 23:9 ok 91b679d90386
+  remove_wire 23:19 ok 32c429b3805f
+  connect 5:0 5:14 ok 639587320078
+  connect 6:11 6:14 ok b7ae28648bd2
+  connect 5:18 9:20 ok 22faffdbe561
+  connect 5:0 10:12 ok eabdccb8963a
+  connect 10:12 10:38 ok e5cc84982b50
+  connect 5:0 13:12 ok 2b5b275448a1
+  connect 13:12 13:17 ok a31143dd090e
+  connect 13:21 13:26 ok 87fa65aac33f
+  connect 13:33 13:38 ok a1058e37fee4
+  connect 14:14 14:17 ok 65e6ab5e4dab
+  connect 23:2 23:11 ok ec079accda0d
+  connect 23:18 23:24 ok 433fdacc552c
+rebuild 𐑦 4:14
+  remove_node 4:14 ok dbffc12d1ceb
+  place_node 4:14 𐑦 2 1 ok 6ca00d95c97a
+  connect 5:0 5:14 ok d530c9d62a01
+  connect 6:11 6:14 ok cf1c7754018b
+  connect 5:18 9:20 ok a96f65cf1db3
+rebuild 𐑚 12:17
+  remove_node 12:17 ok de90066e0f94
+  place_node 12:17 𐑚 2 1 ok ff5197544b9b
+  connect 13:12 13:17 ok caae89124caf
+  connect 14:14 14:17 ok 7bfeb5dd400e
+  connect 13:21 13:26 ok a96f65cf1db3
+rebuild 𐑒𐑬𐑯𐑑 12:26
+  remove_node 12:26 ok dda206e82226
+  place_node 12:26 𐑒𐑬𐑯𐑑 1 1 ok e431a58f6dd2
+  connect 13:21 13:26 ok 32d3a37abf64
+  connect 13:33 13:38 ok a96f65cf1db3
+rebuild 𐑒𐑬𐑯𐑑 22:11
+  remove_node 22:11 ok f1ca112b3b82
+  place_node 22:11 𐑒𐑬𐑯𐑑 1 1 ok 03050a66ad35
+  connect 23:2 23:11 ok e496ed4e69dd
+  connect 23:18 23:24 ok a96f65cf1db3
+move 4:14 -1 0 ok ce0248994175
+move 4:14 1 0 refused 6:14
+move 4:14 0 -1 refused 6:14
+move 4:14 0 1 ok e506a776a5f4
+move 12:17 -1 0 refused 12:17
+move 12:17 1 0 refused 12:17
+move 12:17 0 -1 refused 14:17
+move 12:17 0 1 ok 60107e73df0c
+move 12:26 -1 0 refused 12:26
+move 12:26 1 0 ok 20a62adfbf75
+move 12:26 0 -1 ok f821256bcb9c
+move 12:26 0 1 ok fed9374dffbd
+move 22:11 -1 0 ok b9fa4322336d
+move 22:11 1 0 ok 13f78a9d1989
+move 22:11 0 -1 ok c97adefa5298
+move 22:11 0 1 ok 154588526c07

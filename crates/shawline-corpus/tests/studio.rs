@@ -28,9 +28,10 @@ use std::fs;
 use std::time::{Duration, Instant};
 
 use shawline_corpus::jitter::{Fired, Jittered, Rng, jitter};
+use shawline_corpus::studio::{Link, calls, links};
 use shawline_corpus::{STAGES, programs, root};
 use shawline_grid::{Grid, Pos};
-use shawline_syntax::ast::{Endpoint, Graph, NodeKind, Sheet};
+use shawline_syntax::ast::{Endpoint, Sheet};
 
 fn stage(name: &str) -> fn(&str) -> String {
     STAGES.iter().find(|s| s.name == name).expect("registered stage").run
@@ -78,66 +79,6 @@ fn starts(src: &str) -> Vec<(String, Jittered)> {
 
 fn sheet(src: &str) -> Sheet {
     shawline_cli::check(src).expect("on the grid").sheet
-}
-
-/// One wire, named by cells as the edit contract names endpoints.
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
-struct Link {
-    from: Pos,
-    to: Vec<Pos>,
-    /// Editable in Phase 1: no switch output and no inline node involved.
-    editable: bool,
-    /// An index into `Diagram::wires`.
-    wire: usize,
-}
-
-/// Every wire of `sheet`, in every definition and every switch arm.
-fn links(sheet: &Sheet) -> Vec<Link> {
-    let mut out = Vec::new();
-    for def in &sheet.definitions {
-        let params: Vec<Pos> = def.inputs.iter().map(|p| p.arrow).collect();
-        let results: Vec<Pos> = def.outputs.iter().map(|p| p.arrow).collect();
-        scope(&def.body, &params, &results, &mut out);
-    }
-    out
-}
-
-fn scope(graph: &Graph, params: &[Pos], results: &[Pos], out: &mut Vec<Link>) {
-    for node in &graph.nodes {
-        if let NodeKind::Switch(switch) = &node.kind {
-            for arm in &switch.arms {
-                scope(&arm.body, &arm.params, &arm.results, out);
-            }
-        }
-    }
-    for edge in &graph.edges {
-        let (from, mut editable) = match edge.from {
-            Endpoint::Param(i) => (params[i as usize], true),
-            Endpoint::Output(n, k) => {
-                let node = &graph.nodes[n];
-                match &node.kind {
-                    NodeKind::Const(_) => (Pos::new(node.rect.top, node.rect.left), true),
-                    NodeKind::Call(_) => (node.outputs[k as usize], true),
-                    _ => (node.outputs[k as usize], false),
-                }
-            }
-            other => panic!("a wire can't start at {other:?}"),
-        };
-        let mut to = Vec::new();
-        for sink in &edge.to {
-            match *sink {
-                Endpoint::Result(i) => to.push(results[i as usize]),
-                Endpoint::Input(n, k) => {
-                    let node = &graph.nodes[n];
-                    editable &= !matches!(node.kind, NodeKind::Inline(_));
-                    to.push(node.inputs[k as usize]);
-                }
-                other => panic!("a wire can't end at {other:?}"),
-            }
-        }
-        to.sort();
-        out.push(Link { from, to, editable, wire: edge.wire });
-    }
 }
 
 /// What must survive an edit: each wire as its source and sink cells.
@@ -249,11 +190,8 @@ fn studio_rebuild() {
         let original = sheet(&src);
         let all = links(&original);
         let starts = starts(&src);
-        let mut boxes = Vec::new();
-        for def in &original.definitions {
-            collect_calls(&def.body, &mut boxes);
-        }
-        for (word, corner, inputs, outputs) in boxes {
+        for call in calls(&original) {
+            let (word, corner, inputs, outputs) = (call.word, call.corner, call.inputs, call.outputs);
             let touching: Vec<&Link> = all
                 .iter()
                 .filter(|l| outputs.contains(&l.from) || l.to.iter().any(|t| inputs.contains(t)))
@@ -316,27 +254,6 @@ fn studio_rebuild() {
     assert!(refused * 5 <= tried, "{refused} of {tried} nodes refused: more than a fifth");
 }
 
-/// Every boxed call in `graph` and its arms: word, corner, input cells,
-/// output cells.
-fn collect_calls(graph: &Graph, out: &mut Vec<(String, Pos, Vec<Pos>, Vec<Pos>)>) {
-    for node in &graph.nodes {
-        match &node.kind {
-            NodeKind::Call(name) => out.push((
-                name.text.clone(),
-                Pos::new(node.rect.top, node.rect.left),
-                node.inputs.clone(),
-                node.outputs.clone(),
-            )),
-            NodeKind::Switch(switch) => {
-                for arm in &switch.arms {
-                    collect_calls(&arm.body, out);
-                }
-            }
-            _ => {}
-        }
-    }
-}
-
 #[test]
 fn studio_trace() {
     let mut failures = Vec::new();
@@ -384,4 +301,16 @@ fn studio_trace() {
         }
     }
     assert!(failures.is_empty(), "{} trace failures; first:\n{}", failures.len(), failures[0]);
+}
+
+/// A fan-out whose branches cross each other owns both axes of the
+/// crossing, so removing the wire must take both (PLAN P8). Editing reads
+/// one axis per crossing today and leaves the other behind.
+#[test]
+#[ignore = "P8 wave 1: edits read crossing ownership from Wire::links"]
+fn removing_a_wire_that_crosses_itself_leaves_no_stroke() {
+    let src = fs::read_to_string(root().join("15-fanout-cross.shaw")).unwrap();
+    let text = shawline_edit::remove_wire(&src, Pos::new(2, 4)).unwrap_or_else(|r| panic!("{r:?}"));
+    let diagram = shawline_shape::recognize(&Grid::parse(&text).unwrap());
+    assert!(diagram.wires.is_empty(), "a stroke is left:\n{text}");
 }

@@ -1,0 +1,6 @@
+wire 0 cells 59
+  tee 2:6
+  cross 4:6
+  end 2:4 W open
+  end 6:21 E port 6:22
+  end 7:21 E port 7:22

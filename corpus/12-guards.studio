@@ -1,0 +1,48 @@
+rewire
+  remove_wire 7:10 ok c9e49635e264
+  remove_wire 9:9 ok e0dbcdf28f47
+  remove_wire 11:11 ok 6e1525858a17
+  remove_wire 4:4 ok 79e944e3c36f
+  remove_wire 19:6 ok 5d9d42cbbe30
+  remove_wire 19:16 ok 868e4c778b66
+  remove_wire 23:6 ok a920d3ddef35
+  remove_wire 23:16 ok 69c82bb14b23
+  remove_wire 27:6 ok 557bbc7abb11
+  remove_wire 27:16 ok f29bb1c82391
+  connect 4:0 6:9 ok 26282c88be5d
+  connect 7:4 7:18 ok 940aeb813917
+  connect 9:4 9:18 ok 47f2804a9e37
+  connect 11:4 11:18 ok 793c6051cd73
+  connect 19:4 19:9 ok 4979bd1f7aaf
+  connect 19:15 19:22 ok c814248dd511
+  connect 23:4 23:9 ok 90044286cac0
+  connect 23:15 23:22 ok 0eab0237fc9f
+  connect 27:4 27:9 ok c40c46b99ad6
+  connect 27:15 27:22 ok fe3a6daa5bbd
+rebuild 𐑯𐑱𐑥 18:9
+  remove_node 18:9 ok a3815d8cd1cb
+  place_node 18:9 𐑯𐑱𐑥 1 1 ok 51928d1bfc1c
+  connect 19:4 19:9 ok b93736b03fd8
+  connect 19:15 19:22 ok fe3a6daa5bbd
+rebuild 𐑯𐑱𐑥 22:9
+  remove_node 22:9 ok 89b79295f4d9
+  place_node 22:9 𐑯𐑱𐑥 1 1 ok 9c57635b4551
+  connect 23:4 23:9 ok 42c54158ab31
+  connect 23:15 23:22 ok fe3a6daa5bbd
+rebuild 𐑯𐑱𐑥 26:9
+  remove_node 26:9 ok 294ddd60532c
+  place_node 26:9 𐑯𐑱𐑥 1 1 ok 0eab0237fc9f
+  connect 27:4 27:9 ok c40c46b99ad6
+  connect 27:15 27:22 ok fe3a6daa5bbd
+move 18:9 -1 0 ok 1f5e40c0f699
+move 18:9 1 0 ok dead69edbef5
+move 18:9 0 -1 ok 23dbde6cc910
+move 18:9 0 1 ok db551759efd8
+move 22:9 -1 0 ok b97b44cef64a
+move 22:9 1 0 ok 2d5a1b2f4f72
+move 22:9 0 -1 ok ef088545b7a8
+move 22:9 0 1 ok e07d801893b2
+move 26:9 -1 0 ok 1fd29ee0d749
+move 26:9 1 0 ok 98728a6a804c
+move 26:9 0 -1 ok b289e6ed5483
+move 26:9 0 1 ok 1c9f723b602d

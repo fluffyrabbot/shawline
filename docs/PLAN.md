@@ -460,6 +460,18 @@ Two read-only Codex audits, one on UX (checked against WAI, MDN, Blender and Unr
   - keep the diagnostic codes the step allows.
 - **Regression test:** a fan-out whose branch crosses another branch of the same wire. `remove_wire` must leave no stroke. It is written first and fails on `8d99495`.
 
+Oracle baseline (done):
+- **Shared sequences.** `shawline_corpus::studio` holds the rewire, rebuild and move sequences. The `studio` stage and the Studio gates now walk the same steps.
+- **The `.studio` baseline.** It covers all 17 valid programs, 863 lines, blessed from `8d99495`'s edit code.
+  - On 03-double, both the rewire and the 𐑐 rebuild end on the original text's hash.
+  - It records 37 refusals: 36 moves, the same count P6's spike recorded, and the case below.
+- **New corpus program `15-fanout-cross`.** One wire fans out and its branches cross, so the wire owns both axes of `4:6`.
+  - Its `.wires` lists the crossing once, in one wire.
+  - Its baseline records `remove_wire 2:4 refused 2:4`.
+  - The regression test `removing_a_wire_that_crosses_itself_leaves_no_stroke` fails today with "it would change what another wire connects". It is `#[ignore]`d until wave 1.
+- **`studio_sequences`.** It checks 117 intermediate states over 17 programs, and 16 sequences run to the end; `15-fanout-cross` stops at its first step. The only codes gained mid-sequence are `Y019` and `Y012`, so those two are the whole allowance. A jittered start must produce the same texts and be refused at the same step.
+- **Gate:** 260 tests (one ignored), clippy clean on host and wasm, and the playground build with 28 Node checks green. The playground's example list gains `15-fanout-cross`.
+
 **Wave 1 contracts** (lead):
 - **`shawline-doc`.** Contract and implementation, since it is the old glue moved:
   - `Doc::new(text)`, `text()`;

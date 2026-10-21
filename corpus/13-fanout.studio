@@ -1,0 +1,13 @@
+rewire
+  remove_wire 5:15 ok c9ce3d765cd7
+  remove_wire 10:15 ok 3f6e7efd9206
+  connect 5:14 5:26 ok 693226c42316
+  connect 10:14 10:26 ok 239c4ed68943
+move 4:10 -1 0 ok da76e2f253c6
+move 4:10 1 0 ok b57bbdec05c7
+move 4:10 0 -1 ok 87f6aa40f0a3
+move 4:10 0 1 ok 0ffbb233f9f0
+move 9:10 -1 0 ok 7a434232266d
+move 9:10 1 0 ok e5cfb8352d5d
+move 9:10 0 -1 ok 2934144fd1e5
+move 9:10 0 1 ok 56c69ade1e14
