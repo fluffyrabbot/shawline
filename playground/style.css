@@ -99,7 +99,7 @@ h1 {
   color: var(--comment);
 }
 
-.picker { display: flex; align-items: center; gap: 10px; }
+.picker, .example { display: flex; align-items: center; gap: 10px; }
 
 select {
   appearance: none;
@@ -217,6 +217,7 @@ main {
   min-width: 100%;
   min-height: 12em;
   border: 0;
+  /* The ring goes on .editor instead, which doesn't clip it. */
   outline: 0;
   resize: none;
   overflow: hidden;
@@ -226,6 +227,8 @@ main {
   tab-size: 1;
   white-space: pre;
 }
+
+.editor:has(textarea:focus-visible) { outline: 2px solid var(--wire); outline-offset: 4px; border-radius: 2px; }
 
 .editor textarea::selection { background: color-mix(in srgb, var(--wire) 22%, transparent); }
 
@@ -281,6 +284,25 @@ main {
   pointer-events: none;
   animation: refusal 2.8s ease forwards;
 }
+/* The latest refusal, or what the selection is, until the next action:
+   under the drawing, and kept in view while the pane is. */
+.drawing-status {
+  min-height: calc(1.4em + 12px);
+  margin: 10px 0 0;
+  padding: 6px 10px;
+  font: 13px/1.4 var(--sans);
+  color: var(--comment);
+  border-left: 3px solid transparent;
+  border-radius: 6px;
+}
+.drawing-status:not(:empty) {
+  position: sticky;
+  bottom: 8px;
+  z-index: 1;
+  background: color-mix(in srgb, var(--border) 6%, var(--background));
+}
+.drawing-status.refused { color: var(--text); border-left-color: var(--error); }
+.drawing-status.hint { border-left-color: var(--wire); }
 @keyframes refusal {
   0% { opacity: 0; transform: translateY(-4px); }
   8%, 80% { opacity: 1; transform: none; }
@@ -290,8 +312,10 @@ main {
 /* Wiring by dragging: a crosshair over sources, glowing cells where the
    drag can end, the router's path as a dashed preview, the selection, and a
    pill on each wire with the value it carried. */
-#drawing:focus-visible { outline: none; }
+#drawing:focus-visible { outline: 2px solid var(--wire); outline-offset: 4px; border-radius: 2px; }
 #drawing svg.over-source { cursor: crosshair; }
+#drawing svg.over-sink { cursor: grab; }
+#drawing svg.over-locked { cursor: not-allowed; }
 #drawing.wiring svg { cursor: crosshair; user-select: none; }
 #drawing .glow {
   fill: var(--wire);
@@ -323,7 +347,20 @@ main {
   stroke-width: 70;
   stroke-dasharray: 220 120;
 }
+/* A whole wire is a filled band; one branch is an outline ending in its
+   arrowhead, so the two Deletes look as different as they are. */
 #drawing .selected-wire rect { fill: var(--wire); opacity: 0.22; }
+#drawing .selected-branch rect {
+  fill: color-mix(in srgb, var(--wire) 10%, transparent);
+  stroke: var(--wire);
+  stroke-width: 100;
+  stroke-dasharray: 200 130;
+}
+#drawing .selected-branch rect.head {
+  fill: color-mix(in srgb, var(--wire) 30%, transparent);
+  stroke-width: 130;
+  stroke-dasharray: none;
+}
 #drawing .badge { pointer-events: auto; }
 #drawing .badge rect {
   fill: var(--background);
@@ -337,6 +374,16 @@ main {
 }
 #drawing svg:not(:hover) .badge { opacity: 0.92; }
 .hint-line { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.trace-status { white-space: nowrap; }
+.trace-status .link {
+  border: 0;
+  padding: 0;
+  font-size: inherit;
+  color: var(--error);
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
+}
+.trace-status .link:hover { background: none; color: var(--text); }
 
 /* The context palette: a short list by the drop point. */
 .palette {
@@ -441,6 +488,14 @@ kbd {
 #keys .keys { font: 13px var(--sans); }
 
 .colophon { font: italic 15px/1.6 var(--serif); margin-top: 8px; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation: none !important;
+    transition: none !important;
+    scroll-behavior: auto !important;
+  }
+}
 
 @media (max-width: 900px) {
   body { padding-top: 32px; }

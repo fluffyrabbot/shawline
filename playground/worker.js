@@ -18,6 +18,10 @@ onmessage = async ({ data }) => {
   }
   const src = data;
   const started = performance.now();
-  const result = run(src);
-  postMessage({ ...result, ms: performance.now() - started });
+  // A panic traps the module; the page restarts the worker on `crashed`.
+  try {
+    postMessage({ ...run(src), ms: performance.now() - started });
+  } catch (e) {
+    postMessage({ crashed: String(e), ms: performance.now() - started });
+  }
 };

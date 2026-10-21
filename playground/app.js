@@ -2,10 +2,11 @@
 // Run button. All language work happens in the wasm package; this file only
 // wires it to the page.
 import init, {
-  check, render, format, table, boxes, move_box, connect, remove_wire, remove_node, place_node,
-  palette, endpoints, preview, wires, Transliterator,
+  check, render, format, table, boxes, move_box, connect, remove_wire, disconnect, remove_node,
+  place_node, palette, endpoints, preview, wires, Transliterator,
 } from "./pkg/shawline_wasm.js";
 import { Tour, TOUR_EXAMPLE } from "./tour.js";
+import { Store, TOUR_SLOT } from "./drafts.js";
 
 const $ = (id) => document.getElementById(id);
 const editor = $("editor");
@@ -17,6 +18,9 @@ const runButton = $("run");
 const translit = $("translit");
 const examples = $("examples");
 const values = $("values");
+const traceState = $("trace-status");
+const statusLine = $("drawing-status");
+const resetButton = $("reset");
 const tour = new Tour($("tour"), () => showOverlays());
 
 // One cell in the renderer's SVG units (shawline-glyph CELL_WIDTH/HEIGHT).
@@ -24,14 +28,20 @@ const CELL_W = 600;
 const CELL_H = 1200;
 const RUN_LIMIT_MS = 10_000;
 
-const store = {
-  get: (key) => localStorage.getItem(`shawline.${key}`),
-  set: (key, value) => localStorage.setItem(`shawline.${key}`, value),
-};
+const store = new Store((() => {
+  // Reading `localStorage` itself throws where storage is disabled.
+  try {
+    return localStorage;
+  } catch {
+    return null;
+  }
+})());
+const reducedMotion = matchMedia("(prefers-reduced-motion: reduce)");
 
 // Positions are code points, as in every Shawline dump, but the textarea
 // counts UTF-16 units and Shavian letters take two.
 
+const isHigh = (unit) => unit >= 0xd800 && unit <= 0xdbff;
 const isLow = (unit) => unit >= 0xdc00 && unit <= 0xdfff;
 const width = (text, i) => (text.codePointAt(i) > 0xffff ? 2 : 1);
 
@@ -63,7 +73,9 @@ function jumpTo({ row, col }, select = true) {
   const box = editor.parentElement;
   box.scrollLeft = Math.max(0, (col * cell) / 2 - box.clientWidth / 2);
   const top = editor.getBoundingClientRect().top + row * cell;
-  if (top < 0 || top > innerHeight - cell) scrollBy({ top: top - innerHeight / 3, behavior: "smooth" });
+  if (top < 0 || top > innerHeight - cell) {
+    scrollBy({ top: top - innerHeight / 3, behavior: reducedMotion.matches ? "auto" : "smooth" });
+  }
 }
 
 /** Replaces the selection, keeping the browser's undo history where it can. */
@@ -74,6 +86,34 @@ function insertText(text) {
   if (!done) {
     editor.setRangeText(text, editor.selectionStart, editor.selectionEnd, "end");
     changed();
+  }
+}
+
+/**
+ * Replaces the whole text as edits the browser can undo, touching only the
+ * span that differs. Chrome's redo of an insert over a span ending at the
+ * text's final newline drops the first inserted line, so such a span is
+ * replaced short of that newline, which goes in a second step.
+ */
+function replaceAll(text) {
+  const old = editor.value;
+  const n = Math.min(old.length, text.length);
+  let from = 0;
+  while (from < n && old[from] === text[from]) from++;
+  // Never split a Shavian letter's surrogate pair.
+  if (from > 0 && isHigh(old.charCodeAt(from - 1))) from--;
+  let kept = 0;
+  while (kept < n - from && old[old.length - 1 - kept] === text[text.length - 1 - kept]) kept++;
+  if (kept > 0 && isLow(old.charCodeAt(old.length - kept))) kept--;
+  const to = old.length - kept;
+  const insert = text.slice(from, text.length - kept);
+  const trailing = insert && to > from && to === old.length && old.endsWith("\n");
+  editor.focus({ preventScroll: true });
+  editor.setSelectionRange(from, trailing ? to - 1 : to);
+  if (insert || from !== to) insertText(insert);
+  if (trailing) {
+    editor.setSelectionRange(editor.value.length - 1, editor.value.length);
+    insertText("");
   }
 }
 
@@ -127,13 +167,16 @@ translit.addEventListener("change", () => {
 
 let refreshTimer;
 let shown = [];
+let storageWarned = false;
 
 function changed() {
   const lines = editor.value.split("\n");
   const cols = Math.max(0, ...lines.map((l) => [...l].length));
   editor.style.width = `${cols + 2}ch`;
   editor.style.height = `calc(${lines.length + 1}em + var(--pad))`;
-  store.set("source", editor.value);
+  saveDraft();
+  // An edit is the next action, so a refusal shown before it is stale.
+  showStatus();
   clearTimeout(refreshTimer);
   refreshTimer = setTimeout(refresh, 120);
 }
@@ -190,17 +233,23 @@ function highlight(i, on) {
   document.querySelectorAll(`[data-i="${i}"]`).forEach((node) => node.classList.toggle("hot", on));
 }
 
-function showDrawing() {
-  const svg = render(editor.value, document.documentElement.dataset.theme === "dark");
-  if (svg === undefined) {
-    // Unreadable text (a tab, a stray character): keep the last drawing, faded.
-    drawing.querySelector("svg")?.classList.add("stale");
-    return;
-  }
+/** Draws `src` at the editor's scale; false when the text can't be read. */
+function drawSheet(src) {
+  const svg = render(src, document.documentElement.dataset.theme === "dark");
+  if (svg === undefined) return false;
   drawing.innerHTML = svg;
   const view = drawing.querySelector("svg").viewBox.baseVal;
   const cell = parseFloat(getComputedStyle(editor).fontSize);
   drawing.firstElementChild.style.width = `${(view.width / CELL_H) * cell}px`;
+  return true;
+}
+
+function showDrawing() {
+  if (!drawSheet(editor.value)) {
+    // Unreadable text (a tab, a stray character): keep the last drawing, faded.
+    drawing.querySelector("svg")?.classList.add("stale");
+    return;
+  }
   const background = drawing.querySelector("svg > rect");
   const ns = "http://www.w3.org/2000/svg";
   background?.after(
@@ -221,6 +270,7 @@ function cellAt(e) {
   const svg = drawing.querySelector("svg");
   if (!svg) return null;
   const box = svg.getBoundingClientRect();
+  if (e.clientX < box.left || e.clientX >= box.right || e.clientY < box.top || e.clientY >= box.bottom) return null;
   const view = svg.viewBox.baseVal;
   const x = view.x + ((e.clientX - box.left) * view.width) / box.width;
   const y = view.y + ((e.clientY - box.top) * view.height) / box.height;
@@ -230,61 +280,82 @@ function cellAt(e) {
 // The drawing as an editor (Studio Phase 1). Every gesture is one checked
 // edit to the text (shawline-edit), applied through the textarea so undo
 // works as it does for typing; a refused edit changes nothing and says why
-// beside the cell it is about.
+// beside the cell it is about, and in the status line under the drawing.
 //
 // - Drag from a source (an output tee, an input, a constant, an arm's
 //   input) or from a wire: release on a free arrowhead to connect, or on
 //   empty space to pick a node from the palette, placed there and wired in.
 // - Drag from a free arrowhead back to a source or a wire: connect, joining
 //   that wire as a fan-out.
+// - Drag a wired arrowhead away: its branch comes off. Release on a source
+//   or a wire to reconnect it there, anywhere else to leave it off.
 // - Drag anything else on a box to move the box.
-// - Click a node or a wire to select it; Delete removes it.
+// - Click a node, a wire or a wired arrowhead to select it; Delete removes
+//   the node, the whole wire, or just that arrowhead's branch.
+// - Escape, or letting go off the sheet, cancels a drag.
 
 const SVG = "http://www.w3.org/2000/svg";
 const keyOf = ({ row, col }) => `${row}:${col}`;
 const same = (a, b) => a && b && a.row === b.row && a.col === b.col;
+const LOCKED = "This wire can't be edited by mouse yet; edit the text.";
 
 let dragged = false;
+let pressed = null;
 let drag = null;
 let selected = null;
 let menu = null;
 
-// What the sheet offers to the pointer, read once per text.
-let sheet = { src: null };
+// What a sheet offers to the pointer, read once per text: the editor's, and
+// the sheet under a branch being dragged, with that branch taken off.
+const views = new Map();
 
-function current() {
-  const src = editor.value;
-  if (sheet.src === src) return sheet;
-  const ends = endpoints(src);
-  const list = wires(src);
-  const byCell = new Map();
-  for (const w of list) {
-    for (const c of w.cells) {
-      const k = keyOf(c);
-      byCell.set(k, [...(byCell.get(k) ?? []), w]);
+function viewOf(src) {
+  let view = views.get(src);
+  if (view) {
+    views.delete(src);
+  } else {
+    const ends = endpoints(src);
+    const list = wires(src);
+    const byCell = new Map();
+    for (const w of list) {
+      for (const c of w.cells) {
+        const k = keyOf(c);
+        byCell.set(k, [...(byCell.get(k) ?? []), w]);
+      }
     }
+    view = { src, boxes: boxes(src), sources: ends.sources, sinks: ends.sinks, wires: list, byCell };
   }
-  sheet = { src, boxes: boxes(src), sources: ends.sources, sinks: ends.sinks, wires: list, byCell };
-  return sheet;
+  views.set(src, view);
+  if (views.size > 2) views.delete(views.keys().next().value);
+  return view;
 }
 
-const sourceAt = (at) =>
-  current().sources.find((s) => s.row === at.row && at.col >= s.col && at.col < s.col + s.span);
-const sinkAt = (at) => current().sinks.find((s) => same(s, at));
+const current = () => viewOf(editor.value);
+
+const sourceAt = (at, view = current()) =>
+  view.sources.find((s) => s.row === at.row && at.col >= s.col && at.col < s.col + s.span);
+const sinkAt = (at, view = current()) => view.sinks.find((s) => same(s, at));
 /** The editable wire through a cell, if any. */
-const wireAt = (at) => (current().byCell.get(keyOf(at)) ?? []).find((w) => w.source) ?? null;
+const wireAt = (at, view = current()) => (view.byCell.get(keyOf(at)) ?? []).find((w) => w.source) ?? null;
+/** A wire runs through the cell, but none the mouse can edit. */
+const lockedAt = (at) => (current().byCell.get(keyOf(at))?.length ?? 0) > 0 && !wireAt(at);
 const charAt = ({ row, col }) => [...(editor.value.split("\n")[row] ?? "")][col] ?? " ";
 
 drawing.addEventListener("click", (e) => {
   // The click that ends a drag isn't a request for the caret.
   if (dragged) return void (dragged = false);
   const at = cellAt(e);
-  if (!at) return;
+  // Pressed on one cell and let go on another isn't a click on either.
+  if (!at || !same(at, pressed)) return;
+  const sink = sinkAt(at);
   const wire = wireAt(at);
   const box = boxAt(at);
-  if (wire) select({ kind: "wire", at, wire });
-  else if (box?.kind === "node") select({ kind: "node", box });
+  if (sink?.wired) selectBranch(sink);
+  else if (wire) select({ kind: "wire", at, wire });
+  else if (box?.kind === "node" && !lockedAt(at)) select({ kind: "node", box });
   else {
+    // The press already said why a locked wire can't be selected; the caret
+    // goes to it, since the text is where it can be edited.
     select(null);
     jumpTo(at, false);
   }
@@ -321,11 +392,29 @@ const cellRect = (className, { row, col }, span = 1) =>
   svgRect(className, { top: row, left: col, bottom: row, right: col + span - 1 });
 const centre = ({ row, col }) => `${col * CELL_W + CELL_W / 2},${row * CELL_H + CELL_H / 2}`;
 
+/** Cells as rectangles, one per straight run, so an outline reads as one. */
+function runs(cells) {
+  const across = [];
+  for (const { row, col } of cells) {
+    const last = across[across.length - 1];
+    if (last && last.top === row && last.right + 1 === col) last.right = col;
+    else across.push({ top: row, left: col, bottom: row, right: col });
+  }
+  const out = [];
+  for (const r of across) {
+    const above = r.left === r.right && out.find((o) => o.left === r.left && o.right === r.left && o.bottom + 1 === r.top);
+    if (above) above.bottom = r.top;
+    else out.push(r);
+  }
+  return out;
+}
+
 /** The tour's rings, selection and value badges, drawn again over every
  * fresh drawing. */
 function showOverlays() {
   const svg = drawing.querySelector("svg");
-  if (!svg) return;
+  // A detached branch is being dragged over a sheet that isn't the text yet.
+  if (!svg || drag?.view) return;
   svg.querySelectorAll(".overlay").forEach((n) => n.remove());
   svg.append(...tour.rings().map((r) => svgRect("overlay beacon", r)));
   if (selected && selected.src !== editor.value) selected = null;
@@ -335,13 +424,63 @@ function showOverlays() {
     selected.wire.cells.forEach((c) => group.append(cellRect("", c)));
     svg.append(group);
   }
+  if (selected?.kind === "branch") {
+    const group = svgEl("g", "overlay selected-branch");
+    group.append(...runs(selected.cells).map((r) => svgRect("", r)), cellRect("head", selected.sink));
+    svg.append(group);
+  }
   showBadges(svg);
 }
 
+const HINTS = {
+  node: "Node selected. Delete removes it and its wires; drag it to move it.",
+  wire: "Wire selected. Delete removes the whole wire, every branch.",
+  branch: "Arrowhead selected. Delete disconnects just this branch; drag it onto a source to rewire it.",
+};
+
 function select(target) {
   selected = target && { ...target, src: editor.value };
+  // A refusal outlives a deselection; only the next action clears it.
+  if (target) showStatus(HINTS[target.kind], "hint");
+  else if (statusLine.classList.contains("hint")) showStatus();
   showOverlays();
-  if (target) drawing.focus({ preventScroll: true });
+  if (target) focusDrawing(false);
+}
+
+/**
+ * Focuses the drawing with its ring only when `ring` says so. Focus moved
+ * by script would otherwise inherit the editor's ring, and a mouse user
+ * would see one after every click.
+ */
+function focusDrawing(ring) {
+  drawing.focus({ preventScroll: true, focusVisible: ring });
+}
+
+/**
+ * Selects the branch into a wired arrowhead: the cells `disconnect` would
+ * clear, which are its stroke back to the tee.
+ */
+function selectBranch(sink) {
+  const src = editor.value;
+  const cut = disconnect(src, sink.row, sink.col);
+  if (!cut.ok) return select(null);
+  const before = src.split("\n").map((l) => [...l]);
+  const after = cut.text.split("\n").map((l) => [...l]);
+  const cells = [];
+  before.forEach((line, row) =>
+    line.forEach((ch, col) => {
+      const at = { row, col };
+      if (ch !== (after[row]?.[col] ?? " ") && current().byCell.has(keyOf(at))) cells.push(at);
+    }),
+  );
+  select({ kind: "branch", sink, cells });
+}
+
+/** Says something about the drawing until the next action: a refusal, or
+ * what the selection is. Empty clears it. */
+function showStatus(text = "", kind = "") {
+  statusLine.textContent = text;
+  statusLine.className = kind ? `drawing-status ${kind}` : "drawing-status";
 }
 
 function showGhost() {
@@ -352,22 +491,34 @@ function showGhost() {
   if (drag.ghost) drawing.querySelector("svg")?.append(drag.ghost);
 }
 
-function endDrag() {
-  drag?.ghost?.remove();
-  drag?.marks?.forEach((n) => n.remove());
-  drag?.path?.remove();
-  drag = null;
-  drawing.classList.remove("dragging", "wiring");
+/** Takes the drag's preview away, as when the pointer leaves the sheet. */
+function hidePreview() {
+  drag.ghost?.remove();
+  drag.path?.remove();
+  drag.ghost = drag.path = null;
 }
 
-/** Shows a refusal's reason by the cell it is about, for a moment. */
+/** Ends the drag without committing it, and puts back a detached branch. */
+function endDrag() {
+  if (!drag) return;
+  const { view, pointerId } = drag;
+  hidePreview();
+  drag.marks?.forEach((n) => n.remove());
+  drag = null;
+  drawing.classList.remove("dragging", "wiring");
+  if (drawing.hasPointerCapture(pointerId)) drawing.releasePointerCapture(pointerId);
+  if (view) showDrawing();
+}
+
+/** Shows a refusal's reason by the cell it is about, for a moment, and in
+ * the status line until the next action. */
 function refuse({ row, col, reason }) {
+  showStatus(reason, "refused");
   const svg = drawing.querySelector("svg");
   if (!svg) return;
   const cell = cellRect("refused", { row, col });
   svg.append(cell);
   const tip = el("div", "refusal", reason);
-  tip.setAttribute("role", "status");
   place(tip, { row: row + 1, col });
   drawing.append(tip);
   setTimeout(() => (tip.remove(), cell.remove()), 2800);
@@ -392,18 +543,26 @@ function place(node, at) {
   node.style.top = `${y - host.top + drawing.scrollTop}px`;
 }
 
-/** Replaces the whole text through the editor, so the edit can be undone. */
-function applyText(text) {
-  const caret = posOf(editor.value, editor.selectionStart);
-  editor.focus({ preventScroll: true });
-  editor.select();
-  insertText(text);
+/**
+ * Replaces the whole text through the editor, so it can be undone like
+ * typing, and puts the caret at `caret`.
+ */
+function replaceText(text, caret) {
+  const scroll = { x: scrollX, y: scrollY };
+  replaceAll(text);
   settle();
   const at = offsetOf(editor.value, caret.row, caret.col);
   editor.setSelectionRange(at, at);
+  scrollTo(scroll.x, scroll.y);
   clearTimeout(refreshTimer);
   refresh();
-  drawing.focus({ preventScroll: true });
+}
+
+/** Applies a drawing edit's text, keeping the caret's cell. */
+function applyText(text) {
+  const ring = drawing.matches(":focus-visible");
+  replaceText(text, posOf(editor.value, editor.selectionStart));
+  focusDrawing(ring);
 }
 
 function apply(result) {
@@ -414,12 +573,15 @@ function apply(result) {
 // Dragging.
 
 drawing.addEventListener("pointerdown", (e) => {
-  if (e.button !== 0) return;
+  // One drag at a time: a second finger is ignored.
+  if (e.button !== 0 || drag) return;
   // A drag isn't always followed by a click, so its flag mustn't outlive
   // it and swallow the next real click.
   dragged = false;
   closeMenu();
+  showStatus();
   const at = cellAt(e);
+  pressed = at;
   if (!at) return;
   const source = sourceAt(at);
   const sink = sinkAt(at);
@@ -427,25 +589,35 @@ drawing.addEventListener("pointerdown", (e) => {
   let start = null;
   if (source) start = { kind: "wire", from: { row: source.row, col: source.col }, scope: source.scope };
   else if (sink && !sink.wired) start = { kind: "sink", sink, scope: sink.scope };
-  else if (wire) {
+  else if (sink) {
+    // The branch comes off once the pointer leaves the arrowhead; a refusal
+    // (its wire isn't editable) is better said on the press.
+    const cut = disconnect(editor.value, sink.row, sink.col);
+    if (!cut.ok) return void refuse(cut);
+    start = { kind: "branch", sink, scope: sink.scope, cut: cut.text };
+  } else if (wire) {
     const from = sourceAt(wire.source) ?? wire.source;
     start = { kind: "wire", from: { row: from.row, col: from.col }, scope: from.scope };
+  } else if (lockedAt(at)) {
+    return void refuse({ ...at, reason: LOCKED });
   } else {
     const box = boxAt(at);
     if (box) start = { kind: "box", box, dr: 0, dc: 0, ghost: null };
   }
   if (!start) return;
   e.preventDefault();
+  // preventDefault keeps focus where it was; Escape must reach the drawing.
+  focusDrawing(false);
   drawing.setPointerCapture(e.pointerId);
-  drag = { ...start, start: at, at };
+  drag = { ...start, start: at, at, pointerId: e.pointerId, moved: false };
   drawing.classList.add(drag.kind === "box" ? "dragging" : "wiring");
-  if (drag.kind !== "box") glow();
+  if (drag.kind === "wire" || drag.kind === "sink") glow();
 });
 
 /** Lights up where the drag can end: free sinks for a source, sources for a sink. */
 function glow() {
   const svg = drawing.querySelector("svg");
-  const { sources, sinks } = current();
+  const { sources, sinks } = drag.view ?? current();
   const marks =
     drag.kind === "wire"
       ? sinks.filter((s) => !s.wired && s.scope === drag.scope).map((s) => cellRect("glow", s))
@@ -454,36 +626,50 @@ function glow() {
   drag.marks = marks;
 }
 
+/** Takes the dragged branch off: the drawing shows the sheet without it
+ * until the drag ends. */
+function detach() {
+  drag.marks?.forEach((n) => n.remove());
+  drag.view = viewOf(drag.cut);
+  drawSheet(drag.cut);
+  glow();
+}
+
 /** The source a sink-first drag would connect to, under the pointer. */
-function sourceUnder(at) {
-  const source = sourceAt(at);
+function sourceUnder(at, view = current()) {
+  const source = sourceAt(at, view);
   if (source) return source;
-  const wire = wireAt(at);
-  return wire && (sourceAt(wire.source) ?? wire.source);
+  const wire = wireAt(at, view);
+  return wire && (sourceAt(wire.source, view) ?? wire.source);
 }
 
 function showPath() {
   const svg = drawing.querySelector("svg");
   if (!svg) return;
-  const src = editor.value;
+  const view = drag.view ?? current();
   const { at } = drag;
+  // `preview` runs from the sink end back to the source, or, when the
+  // source already has a wire, back to the tee joining it: then the path
+  // ends on that wire and mustn't be drawn on to the source.
+  const tail = (source) => (source?.wired ? [] : [source]);
   let cells;
+  let found;
   if (drag.kind === "wire") {
-    const sink = sinkAt(at);
+    const sink = sinkAt(at, view);
     const free = sink && !sink.wired && sink.scope === drag.scope;
     const to = free ? sink : at;
-    const found = !same(to, drag.from) && preview(src, drag.from.row, drag.from.col, to.row, to.col);
-    if (found && free) cells = [sink, ...found, drag.from];
-    else if (found) cells = [...found, drag.from];
+    found = !same(to, drag.from) && preview(view.src, drag.from.row, drag.from.col, to.row, to.col);
+    const from = tail(sourceAt(drag.from, view) ?? { ...drag.from, wired: false });
+    if (found) cells = [...(free ? [sink] : []), ...found, ...from];
     else cells = [at, drag.from];
   } else {
-    const source = sourceUnder(at);
-    const found = source && source.scope === drag.scope &&
-      preview(src, source.row, source.col, drag.sink.row, drag.sink.col);
-    cells = found ? [drag.sink, ...found, source] : [drag.sink, at];
+    const source = sourceUnder(at, view);
+    found = source && source.scope === drag.scope &&
+      preview(view.src, source.row, source.col, drag.sink.row, drag.sink.col);
+    cells = found ? [drag.sink, ...found, ...tail(source)] : [drag.sink, at];
   }
   drag.path?.remove();
-  drag.path = svgEl("polyline", cells.length > 2 ? "wire-preview" : "wire-preview loose", {
+  drag.path = svgEl("polyline", found ? "wire-preview" : "wire-preview loose", {
     points: cells.map(centre).join(" "),
   });
   svg.append(drag.path);
@@ -492,14 +678,27 @@ function showPath() {
 drawing.addEventListener("pointermove", (e) => {
   const at = cellAt(e);
   if (!drag) {
-    const over = at && (sourceAt(at) || sinkAt(at)?.wired === false || wireAt(at));
     const svg = drawing.querySelector("svg");
+    const sink = at && sinkAt(at);
+    const over = at && (sourceAt(at) || sink?.wired === false || wireAt(at));
+    const locked = at && !over && !sink && lockedAt(at);
     svg?.classList.toggle("over-source", Boolean(over));
-    svg?.classList.toggle("over-box", Boolean(!over && at && boxAt(at)));
+    svg?.classList.toggle("over-sink", Boolean(sink?.wired));
+    svg?.classList.toggle("over-locked", Boolean(locked));
+    svg?.classList.toggle("over-box", Boolean(at && !over && !sink && !locked && boxAt(at)));
     return;
   }
-  if (!at || same(at, drag.at)) return;
+  if (e.pointerId !== drag.pointerId) return;
+  if (!at) {
+    // Letting go off the sheet cancels, so the preview goes.
+    if (drag.at) hidePreview();
+    drag.at = null;
+    return;
+  }
+  if (same(at, drag.at)) return;
   drag.at = at;
+  drag.moved ||= !same(at, drag.start);
+  if (drag.kind === "branch" && drag.moved && !drag.view) detach();
   if (drag.kind === "box") {
     Object.assign(drag, { dr: at.row - drag.start.row, dc: at.col - drag.start.col });
     showGhost();
@@ -508,16 +707,24 @@ drawing.addEventListener("pointermove", (e) => {
   }
 });
 
-drawing.addEventListener("pointerup", () => {
-  if (!drag) return;
+drawing.addEventListener("pointerup", (e) => {
+  if (!drag || e.pointerId !== drag.pointerId) return;
   const finished = drag;
+  const at = cellAt(e);
   endDrag();
-  if (same(finished.at, finished.start)) return;
+  // Off the sheet, or back where it started: nothing. A press that never
+  // moved is a click, which selects.
+  if (!at || same(at, finished.start)) return void (dragged ||= finished.moved || !at);
   dragged = true;
   const src = editor.value;
-  const { at } = finished;
   if (finished.kind === "box") {
     apply(move_box(src, finished.box.top, finished.box.left, finished.dr, finished.dc));
+  } else if (finished.kind === "branch") {
+    // One edit either way: off, or off and on again at the new source.
+    const { cut, sink } = finished;
+    const source = sourceUnder(at, viewOf(cut));
+    if (!source) return applyText(cut);
+    apply(connect(cut, source.row, source.col, sink.row, sink.col));
   } else if (finished.kind === "sink") {
     const source = sourceUnder(at);
     if (!source) return refuse({ ...at, reason: "Drop on a source or a wire to connect this arrowhead." });
@@ -538,26 +745,33 @@ drawing.addEventListener("pointerup", () => {
 });
 
 drawing.addEventListener("pointercancel", endDrag);
+drawing.addEventListener("lostpointercapture", (e) => drag?.pointerId === e.pointerId && endDrag());
 
 drawing.addEventListener("keydown", (e) => {
   const mod = e.metaKey || e.ctrlKey;
   if (mod && e.key.toLowerCase() === "z") {
     // The drawing has no history of its own: undo is the editor's.
     e.preventDefault();
+    endDrag();
+    const ring = drawing.matches(":focus-visible");
     editor.focus({ preventScroll: true });
     document.execCommand(e.shiftKey ? "redo" : "undo");
-    drawing.focus({ preventScroll: true });
-  } else if ((e.key === "Delete" || e.key === "Backspace") && selected) {
+    focusDrawing(ring);
+  } else if ((e.key === "Delete" || e.key === "Backspace") && selected && !drag) {
     e.preventDefault();
     const src = editor.value;
     const target = selected;
-    selected = null;
+    select(null);
     if (target.kind === "node") apply(remove_node(src, target.box.top, target.box.left));
+    else if (target.kind === "branch") apply(disconnect(src, target.sink.row, target.sink.col));
     else apply(remove_wire(src, target.at.row, target.at.col));
   } else if (e.key === "Escape") {
+    // The release that follows a cancelled drag isn't a click.
+    if (drag) dragged = true;
     endDrag();
     closeMenu();
     select(null);
+    showStatus();
   }
 });
 
@@ -565,6 +779,8 @@ drawing.addEventListener("keydown", (e) => {
 // dragged source into the new node's first input.
 
 function closeMenu() {
+  // Focus in a removed palette would fall to the page, out of Escape's reach.
+  if (menu?.contains(document.activeElement)) focusDrawing(false);
   menu?.remove();
   menu = null;
 }
@@ -586,9 +802,11 @@ function openMenu(at, from) {
   // above it. A drop a row or two off the source's row snaps level with
   // it first, so the new wire runs straight instead of jogging.
   const rows = from && from.row !== at.row && Math.abs(from.row - at.row) <= 2 ? [from.row, at.row] : [at.row];
+  // Placing and wiring are one edit: an unwired node isn't what the drag
+  // asked for, so a refused connect places nothing.
   const pick = (c) => {
     closeMenu();
-    let first = null;
+    let unwired = null;
     for (const row of rows) {
       const corner = { row: Math.max(0, row - 1), col: at.col };
       const placed = place_node(editor.value, corner.row, corner.col, c.word, c.inputs, c.outputs);
@@ -596,11 +814,10 @@ function openMenu(at, from) {
       if (!from || !c.inputs) return applyText(placed.text);
       const wired = connect(placed.text, from.row, from.col, corner.row + 1, corner.col);
       if (wired.ok) return applyText(wired.text);
-      first ??= { placed, wired };
+      unwired ??= wired;
     }
-    if (!first) return refuse(place_node(editor.value, Math.max(0, at.row - 1), at.col, c.word, c.inputs, c.outputs));
-    applyText(first.placed.text);
-    refuse(first.wired);
+    if (!unwired) return refuse(place_node(editor.value, Math.max(0, at.row - 1), at.col, c.word, c.inputs, c.outputs));
+    refuse({ ...at, reason: `Nothing placed: the new node couldn't be wired in (${unwired.reason}).` });
   };
 
   const show = () => {
@@ -655,7 +872,11 @@ addEventListener("scroll", (e) => menu && !menu.contains(e.target) && closeMenu(
 // Live value badges: after each edit, a beat later, the sheet is traced off
 // the main thread and each wire shows the value it carried during the first
 // call of its definition. Tracing is optional: if it fails or isn't
-// available, the drawing simply has no badges.
+// available, the drawing has no badges, and the status beside the Values
+// switch says why.
+
+const TRACE_LIMIT_MS = 4000;
+const FIRST_CALL = "Badges show the value each wire carried during the first call of its definition.";
 
 let tracer = null;
 let traceGen = 0;
@@ -670,11 +891,15 @@ function startTracer() {
     clearTimeout(traceKill);
     if (data.failed) stopTracer();
     traced = { src: data.src, values: data.failed ? [] : data.wires };
+    // A newer edit's trace is still to come; keep saying so.
+    if (data.src === editor.value) showTraced(data);
     showOverlays();
   };
-  tracer.onerror = () => {
+  tracer.onerror = (e) => {
+    e.preventDefault();
     stopTracer();
     traced = { src: null, values: [] };
+    showTrace("unavailable", `Tracing failed to start${e.message ? `: ${e.message}` : ""}.`);
     showOverlays();
   };
 }
@@ -684,22 +909,58 @@ function stopTracer() {
   tracer = null;
 }
 
+/** Says how the last trace went, with a jump to a runtime error. */
+function showTraced({ failed, error, stopped }) {
+  if (failed) return showTrace("unavailable", `Tracing failed: ${failed}`);
+  // A static error means the sheet couldn't run at all; runtime codes are R.
+  if (error && !error.code.startsWith("R")) return showTrace("unavailable", "The sheet has errors, so it can’t run.");
+  if (error) return showTrace("runtime error", `${error.code}: ${error.message}. Wires after it have no value.`, error);
+  if (stopped) return showTrace("stopped at step budget", "The run hit its step budget, so wires it hadn’t reached have no value.");
+  showTrace("complete");
+}
+
+function showTrace(state, detail = "", at = null) {
+  traceState.title = [FIRST_CALL, detail].filter(Boolean).join(" ");
+  if (!at) return void traceState.replaceChildren(state);
+  // One-based, like the diagnostics.
+  const jump = el("button", "link", `runtime error ${at.row + 1}:${at.col + 1}`);
+  jump.type = "button";
+  jump.title = `${traceState.title} Click to show where it failed.`;
+  jump.addEventListener("click", () => jumpTo(at));
+  traceState.replaceChildren(jump);
+}
+
+const untraceable = () => !values.checked || shown.some((d) => d.severity === "error");
+
 function scheduleTrace() {
   clearTimeout(traceTimer);
+  if (untraceable()) return requestTrace();
+  showTrace("computing…");
   traceTimer = setTimeout(requestTrace, 250);
 }
 
 function requestTrace() {
   const src = editor.value;
-  if (!values.checked || shown.some((d) => d.severity === "error")) {
+  if (untraceable()) {
     traced = { src, values: [] };
+    ++traceGen;
+    clearTimeout(traceKill);
+    if (values.checked) showTrace("unavailable", "The sheet has errors, so it can’t run.");
+    else showTrace("");
     return showOverlays();
   }
   if (!tracer) startTracer();
   const gen = ++traceGen;
+  showTrace("computing…");
   tracer.postMessage({ kind: "trace", src, gen });
   clearTimeout(traceKill);
-  traceKill = setTimeout(() => gen === traceGen && stopTracer(), 4000);
+  traceKill = setTimeout(() => {
+    if (gen !== traceGen) return;
+    stopTracer();
+    traced = { src, values: [] };
+    showTrace("unavailable", `Tracing took longer than ${TRACE_LIMIT_MS / 1000} s, so it was stopped.`);
+    showOverlays();
+  }, TRACE_LIMIT_MS);
 }
 
 /** The cell a wire's badge sits on: the middle of its longest straight row. */
@@ -756,8 +1017,6 @@ values.addEventListener("change", () => {
   requestTrace();
 });
 
-editor.addEventListener("input", changed);
-
 document.addEventListener("selectionchange", () => {
   if (document.activeElement !== editor) return;
   const { row, col } = posOf(editor.value, editor.selectionStart);
@@ -766,12 +1025,22 @@ document.addEventListener("selectionchange", () => {
 
 // Running happens in a worker, so a program that never stops can be cut off.
 
-let worker;
+let worker = null;
 let running = null;
 
 function startWorker() {
   worker = new Worker("worker.js", { type: "module" });
   worker.onmessage = ({ data }) => finish(data);
+  // A worker that fails to load or throws is dropped, and the next Run
+  // starts a fresh one; restarting here could loop on a module that never
+  // loads.
+  worker.onerror = (e) => {
+    e.preventDefault();
+    worker.terminate();
+    worker = null;
+    setRunning(false);
+    say(`The runner failed${e.message ? ` (${e.message})` : ""}. Run starts a fresh one.`, "failure");
+  };
 }
 
 function setRunning(on) {
@@ -788,17 +1057,28 @@ function say(text, className = "hint") {
 
 function runProgram() {
   if (running) return stop("Stopped.");
+  if (!worker) startWorker();
   setRunning(true);
   worker.postMessage(editor.value);
 }
 
 function finish(result) {
   setRunning(false);
+  if (result.crashed) {
+    // A panic traps the module, so the worker can't be trusted again.
+    worker.terminate();
+    startWorker();
+    return say(`The runner crashed (${result.crashed}). It has been restarted.`, "failure");
+  }
   $("output-meta").textContent = `${result.ms < 1 ? "under 1" : Math.round(result.ms)} ms`;
   if (result.error) {
-    const failure = el("span", "failure", result.error);
+    // The wasm text is zero-based, as in every dump; the page counts from
+    // one, like the diagnostics and the CLI's report.
+    const { at } = result;
+    const text = at ? `error ${at.row + 1}:${at.col + 1} ${at.code}: ${at.message}` : result.error;
+    const failure = el("span", "failure", text);
     failure.title = "Show where it failed";
-    failure.addEventListener("click", () => jumpTo(result.at));
+    if (at) failure.addEventListener("click", () => jumpTo(at));
     output.replaceChildren(failure);
   } else if (result.diagnostics.some((d) => d.severity === "error")) {
     say("The sheet has errors, so it can’t run yet. See Diagnostics.");
@@ -811,7 +1091,7 @@ function finish(result) {
 }
 
 function stop(message) {
-  worker.terminate();
+  worker?.terminate();
   startWorker();
   setRunning(false);
   say(message);
@@ -839,9 +1119,7 @@ $("format").addEventListener("click", () => {
   if (formatted === undefined) return note("Fix the character errors first.");
   if (formatted === editor.value) return note("Already canonical.");
   const caret = posOf(editor.value, editor.selectionStart);
-  editor.focus();
-  editor.select();
-  insertText(formatted);
+  replaceAll(formatted);
   settle();
   jumpTo(caret, false);
   note("Formatted.");
@@ -854,33 +1132,142 @@ $("theme").addEventListener("click", () => {
   showDrawing();
 });
 
+/** `03-double` as the picker shows it: `03 · double`. */
 function label(name) {
-  const [, number, rest] = name.match(/^(\d+)-(.*)$/);
-  return `${number} · ${rest.replace(/-ascii$/, " (ASCII)").replaceAll("-", " ")}`;
+  const [, number, rest] = name.match(/^(\d+)-(.*)$/) ?? [, "", name];
+  return `${number ? `${number} · ` : ""}${rest.replace(/-ascii$/, " (ASCII)").replaceAll("-", " ")}`;
 }
 
-/** Loads an example; any other than the tour's ends the tour. */
-async function loadExample(name) {
-  if (name !== TOUR_EXAMPLE) tour.stop();
-  const text = await fetch(`examples/${name}.shaw`).then((r) => r.text());
-  editor.value = text;
-  examples.value = name;
-  store.set("example", name);
-  history.replaceState(null, "", `#${name}`);
-  settle();
+// The editor holds one slot at a time: an example's draft, or the tour's
+// (drafts.js). Every keystroke saves into it, and opening a slot replaces
+// the text as one undoable edit, so nothing typed is ever lost: it is in
+// its slot's draft, and an undo brings it back.
+
+let slot = null;
+const originals = new Map();
+/** Each slot opening, so an undo past one returns to the slot it left. */
+const opened = [];
+let opening = 0;
+
+const baseOf = (name) => (name === TOUR_SLOT ? TOUR_EXAMPLE : name);
+const optionLabel = (name, edited) =>
+  `${name === TOUR_SLOT ? `Tour · ${label(TOUR_EXAMPLE)}` : label(name)}${edited ? " · edited" : ""}`;
+
+async function fetchOk(url, as = "text") {
+  const r = await fetch(url);
+  if (!r.ok) throw new Error(`${url}: ${r.status} ${r.statusText}`);
+  return r[as]();
+}
+
+async function originalOf(name) {
+  if (!originals.has(name)) originals.set(name, await fetchOk(`examples/${name}.shaw`));
+  return originals.get(name);
+}
+
+function saveDraft() {
+  if (!slot) return;
+  if (store.saveDraft(slot, editor.value, originals.get(baseOf(slot)))) {
+    storageWarned = false;
+  } else if (!storageWarned) {
+    storageWarned = true;
+    note("Couldn’t save a draft: browser storage is full or off. Edits last until you leave.");
+  }
+  showEdited();
+}
+
+/** Shows whether the slot differs from its original, by the picker. */
+function showEdited() {
+  const base = slot && baseOf(slot);
+  const edited = Boolean(slot) &&
+    (originals.has(base) ? editor.value !== originals.get(base) : store.draft(slot) !== null);
+  resetButton.hidden = !edited;
+  const option = [...examples.options].find((o) => o.value === slot);
+  if (option) option.textContent = optionLabel(slot, edited);
+}
+
+/** Makes `next` the slot the editor saves into, without touching the text. */
+function enter(next) {
+  if (next !== TOUR_SLOT) tour.stop();
+  slot = next;
+  store.set("example", next);
+  examples.value = next;
+  // The tour has no link of its own: a reload returns to it by `example`.
+  history.replaceState(null, "", next === TOUR_SLOT ? location.pathname + location.search : `#${next}`);
+  showEdited();
+}
+
+/**
+ * Opens a slot: its draft, or with `fresh` (or no draft) its example's
+ * original. `initial` is the page's first text, which has nothing to undo
+ * to. False when the text couldn't be loaded; then nothing changes.
+ */
+async function openSlot(next, { fresh = false, initial = false } = {}) {
+  const gen = ++opening;
+  const original = await originalOf(baseOf(next)).catch(() => undefined);
+  if (gen !== opening) return false;
+  const draft = fresh ? null : store.draft(next);
+  const text = draft ?? original;
+  if (text === undefined) {
+    note(`Couldn’t load ${label(baseOf(next))}.`);
+    examples.value = slot ?? "";
+    return false;
+  }
+  const from = { slot, text: editor.value };
+  enter(next);
   say("Run the program to see what ·𐑥𐑱𐑯 returns.");
   $("output-meta").textContent = "";
+  if (initial) {
+    editor.value = text;
+    settle();
+    changed();
+  } else {
+    const back = document.activeElement;
+    const ring = back?.matches(":focus-visible");
+    replaceText(text, { row: 0, col: 0 });
+    // Only a real edit leaves an undo step to follow back.
+    if (from.text !== text) opened.push({ from, to: { slot: next, text } });
+    if (opened.length > 50) opened.shift();
+    // Arrowing through the picker must keep working.
+    if (back && back !== document.body) back.focus({ preventScroll: true, focusVisible: ring });
+  }
+  if (draft !== null) note("Your draft is back. Reset loads the original.");
+  return true;
+}
+
+/**
+ * Follows an undo or redo across a slot opening: the text is then the
+ * other slot's, so the editor must save into that slot again.
+ */
+function followHistory(inputType) {
+  const undo = inputType === "historyUndo";
+  if (!undo && inputType !== "historyRedo") return;
+  for (let i = opened.length - 1; i >= 0; i--) {
+    const [here, there] = undo ? [opened[i].to, opened[i].from] : [opened[i].from, opened[i].to];
+    if (here.slot === slot && there.text === editor.value) {
+      if (there.slot !== slot) enter(there.slot);
+      return;
+    }
+  }
+}
+
+editor.addEventListener("input", (e) => {
+  followHistory(e.inputType);
   changed();
+});
+
+examples.addEventListener("change", () => openSlot(examples.value));
+
+resetButton.addEventListener("click", async () => {
+  if (!(await openSlot(slot, { fresh: true }))) return;
+  editor.focus({ preventScroll: true });
+  note("Original loaded. Undo brings your edits back.");
+});
+
+async function startTour(initial = false) {
+  if (await openSlot(TOUR_SLOT, { fresh: true, initial })) tour.start(current());
 }
 
-examples.addEventListener("change", () => loadExample(examples.value));
-
-async function startTour() {
-  await loadExample(TOUR_EXAMPLE);
-  tour.start(current());
-}
-
-$("tour-start").addEventListener("click", startTour);
+$("tour-start").addEventListener("click", () => startTour());
 
 async function main() {
   try {
@@ -903,26 +1290,42 @@ async function main() {
   values.checked = store.get("values") !== "false";
   startWorker();
 
-  const names = await fetch("examples/index.json").then((r) => r.json());
-  examples.replaceChildren(...names.map((name) => new Option(label(name), name)));
+  let names = [];
+  let listed = true;
+  try {
+    names = await fetchOk("examples/index.json", "json");
+  } catch {
+    listed = false;
+  }
+  store.migrate(names);
+  const last = store.get("example");
+  const options = names.map((name) => new Option(optionLabel(name, store.draft(name) !== null), name));
+  if (!listed) {
+    // The picker still names what is open, and says why it holds nothing else.
+    const failed = new Option("Examples didn’t load", "");
+    failed.disabled = true;
+    options.push(failed);
+    if (last && last !== TOUR_SLOT) options.push(new Option(optionLabel(last, store.draft(last) !== null), last));
+  }
+  // The tour's slot is in the picker only to name it while it's open.
+  const tourOption = new Option(optionLabel(TOUR_SLOT, false), TOUR_SLOT);
+  tourOption.hidden = true;
+  examples.replaceChildren(...options, tourOption);
   addEventListener("hashchange", () => {
     const name = location.hash.slice(1);
-    if (names.includes(name) && name !== examples.value) loadExample(name);
+    if (names.includes(name) && name !== slot) openSlot(name);
   });
 
-  // A saved sheet wins unless the link names a different example. A first
-  // visit with no link starts the tour.
+  // A link opens its example, with the draft if there is one; otherwise
+  // the slot open last time. A first visit starts the tour.
   const linked = names.find((n) => `#${n}` === location.hash);
-  const saved = store.get("source");
-  if (saved !== null && (!linked || linked === store.get("example"))) {
-    editor.value = saved;
-    examples.value = store.get("example") ?? "";
-    changed();
-  } else if (linked) {
-    await loadExample(linked);
+  if (linked) await openSlot(linked, { initial: true });
+  else if (last === TOUR_SLOT || names.includes(last) || (last && store.draft(last) !== null)) {
+    await openSlot(last, { initial: true });
   } else {
-    await startTour();
+    await startTour(true);
   }
+  if (!listed) note("Couldn’t load the list of examples.");
 }
 
 main();
