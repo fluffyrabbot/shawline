@@ -1,7 +1,9 @@
 //! Lowering cases the corpus doesn't pin down.
 
 use shawline_grid::{Grid, Pos, Rect};
-use shawline_syntax::ast::{Definition, Edge, Endpoint, Graph, Name, Node, NodeKind, Sheet};
+use shawline_syntax::ast::{
+    Definition, Edge, Endpoint, Graph, Literal, Name, Node, NodeKind, PortDecl, Sheet,
+};
 use shawline_vm::bytecode::{Instr, Value};
 
 use crate::{compile, lower};
@@ -120,6 +122,163 @@ fn unfed_slot_is_reported_by_lowering_too() {
     assert!(program.is_none());
     let got: Vec<_> = diags.iter().map(|d| (d.at, d.code)).collect();
     assert_eq!(got, [(Pos::new(2, 2), "Y019")]);
+}
+
+/// A self-loop is a cycle of one node.
+#[test]
+fn self_loop_is_a_cycle() {
+    let a = node(Pos::new(1, 2), Pos::new(2, 4));
+    let edges = vec![Edge { wire: 0, from: Endpoint::Output(0, 0), to: vec![Endpoint::Input(0, 0)] }];
+    assert_eq!(codes(&main_with(vec![a], edges)), ["2:4 C003"]);
+}
+
+/// A small deterministic generator (SplitMix64).
+struct Rng(u64);
+
+impl Rng {
+    fn below(&mut self, n: usize) -> usize {
+        self.0 = self.0.wrapping_add(0x9e37_79b9_7f4a_7c15);
+        let mut z = self.0;
+        z = (z ^ (z >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+        z = (z ^ (z >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
+        ((z ^ (z >> 31)) % n as u64) as usize
+    }
+}
+
+/// `C003`, one per cyclic component in order of its first node, at its
+/// first word, against reachability from every node on small random graphs.
+#[test]
+fn cycles_match_reachability() {
+    let mut rng = Rng(3);
+    let mut cycles = 0;
+    for _ in 0..2000 {
+        let n = 1 + rng.below(9);
+        // Words in a shuffled order, so the first word is rarely the first node's.
+        let mut rows: Vec<usize> = (0..n).collect();
+        for i in (1..n).rev() {
+            rows.swap(i, rng.below(i + 1));
+        }
+        let words: Vec<Pos> = rows.iter().map(|&r| Pos::new(1 + 2 * r, 4)).collect();
+        let mut succ = vec![Vec::new(); n];
+        let mut edges = Vec::new();
+        for _ in 0..rng.below(2 * n) {
+            let (a, b) = (rng.below(n), rng.below(n));
+            succ[a].push(b);
+            let to = vec![Endpoint::Input(b, 0)];
+            edges.push(Edge { wire: edges.len(), from: Endpoint::Output(a, 0), to });
+        }
+        let reach: Vec<Vec<bool>> = (0..n)
+            .map(|a| {
+                let mut seen = vec![false; n];
+                let mut stack = succ[a].clone();
+                while let Some(b) = stack.pop() {
+                    if !std::mem::replace(&mut seen[b], true) {
+                        stack.extend(&succ[b]);
+                    }
+                }
+                seen
+            })
+            .collect();
+        let mut want = Vec::new();
+        let mut done = vec![false; n];
+        for a in (0..n).filter(|&a| reach[a][a]) {
+            if !done[a] {
+                let scc: Vec<usize> = (a..n).filter(|&b| reach[a][b] && reach[b][a]).collect();
+                scc.iter().for_each(|&b| done[b] = true);
+                want.push(format!("{} C003", scc.iter().map(|&b| words[b]).min().unwrap()));
+            }
+        }
+        cycles += want.len();
+        let nodes = words.iter().map(|&w| node(Pos::new(w.row, 2), w)).collect();
+        let (_, diags) = lower(&main_with(nodes, edges));
+        let got: Vec<String> =
+            diags.iter().filter(|d| d.code == "C003").map(|d| format!("{} {}", d.at, d.code)).collect();
+        assert_eq!(got, want);
+    }
+    assert!(cycles > 1000, "only {cycles} cycles");
+}
+
+/// A cycle through more nodes than the call stack could recurse through.
+#[test]
+fn long_cycle_is_one_cycle() {
+    let n = 200_000;
+    let nodes = (0..n).map(|i| node(Pos::new(i + 1, 2), Pos::new(i + 1, 4))).collect();
+    let edges = (0..n)
+        .map(|i| Edge { wire: i, from: Endpoint::Output(i, 0), to: vec![Endpoint::Input((i + 1) % n, 0)] })
+        .collect();
+    assert_eq!(codes(&main_with(nodes, edges)), ["1:4 C003"]);
+}
+
+fn ports(n: usize) -> Vec<PortDecl> {
+    let name = |row| Name { text: "𐑯".into(), at: Pos::new(row, 2) };
+    (0..n).map(|row| PortDecl { arrow: Pos::new(row, 0), name: name(row) }).collect()
+}
+
+/// Main's frame size, or the positions and codes of the errors.
+fn frame(sheet: &Sheet) -> Result<u16, Vec<String>> {
+    let (program, diags) = lower(sheet);
+    let errors = diags.iter().filter(|d| !d.is_warning());
+    let errors: Vec<String> = errors.map(|d| format!("{} {}", d.at, d.code)).collect();
+    let program = program.ok_or(errors)?;
+    let module = compile(&program);
+    Ok(module.functions.iter().map(|f| f.registers).max().unwrap())
+}
+
+/// A frame of 65,535 registers compiles; one more value is `C007` at the
+/// definition's namer dot, never a panic in code generation.
+#[test]
+fn frame_limit_counts_inputs() {
+    let sheet = |inputs| {
+        let mut sheet = main_with(Vec::new(), Vec::new());
+        sheet.definitions.push(Definition {
+            name: Name { text: "𐑓".into(), at: Pos::new(20, 3) },
+            rect: Rect { top: 20, left: 0, bottom: 30, right: 30 },
+            inputs: ports(inputs),
+            outputs: Vec::new(),
+            body: Graph { nodes: Vec::new(), edges: Vec::new() },
+        });
+        sheet
+    };
+    assert_eq!(frame(&sheet(65_535)), Ok(65_535));
+    assert_eq!(frame(&sheet(65_536)), Err(vec!["20:3 C007".to_owned()]));
+}
+
+/// Results that aren't in a run are moved into one, so one constant
+/// feeding 65,534 outputs fills a frame exactly.
+#[test]
+fn frame_limit_counts_outputs() {
+    let sheet = |outputs: usize| {
+        let constant = Node {
+            kind: NodeKind::Const(Literal::Int(1)),
+            rect: Rect { top: 1, left: 2, bottom: 2, right: 3 },
+            inputs: Vec::new(),
+            outputs: vec![Pos::new(1, 3)],
+        };
+        let to = (0..outputs as u32).map(Endpoint::Result).collect();
+        let edges = vec![Edge { wire: 0, from: Endpoint::Output(0, 0), to }];
+        let mut sheet = main_with(vec![constant], edges);
+        sheet.definitions[0].outputs = ports(outputs);
+        sheet
+    };
+    assert_eq!(frame(&sheet(65_534)), Ok(65_535));
+    assert_eq!(frame(&sheet(65_535)), Err(vec!["0:3 C007".to_owned()]));
+}
+
+/// The count is generous: values nothing reads share one register, but
+/// they count all the same.
+#[test]
+fn frame_limit_counts_nodes() {
+    let sheet = |count: usize| {
+        let constant = |row| Node {
+            kind: NodeKind::Const(Literal::Int(1)),
+            rect: Rect { top: row, left: 2, bottom: row + 1, right: 3 },
+            inputs: Vec::new(),
+            outputs: vec![Pos::new(row, 3)],
+        };
+        main_with((1..=count).map(constant).collect(), Vec::new())
+    };
+    assert_eq!(frame(&sheet(65_535)), Ok(1));
+    assert_eq!(frame(&sheet(65_536)), Err(vec!["0:3 C007".to_owned()]));
 }
 
 mod order {
