@@ -2,11 +2,13 @@
 // Run button. All language work happens in the wasm package; this file only
 // wires it to the page.
 import init, {
-  check, render, format, table, boxes, move_box, connect, remove_wire, disconnect, remove_node,
-  place_node, palette, endpoints, preview, wires, Transliterator,
+  Doc, table, move_box, connect, remove_wire, disconnect, remove_node, place_node, place_and_connect,
+  Transliterator,
 } from "./pkg/shawline_wasm.js";
 import { Tour, TOUR_EXAMPLE } from "./tour.js";
 import { Store, TOUR_SLOT } from "./drafts.js";
+import { Docs } from "./docs.js";
+import { Flight } from "./flight.js";
 
 const $ = (id) => document.getElementById(id);
 const editor = $("editor");
@@ -168,8 +170,18 @@ translit.addEventListener("change", () => {
 let refreshTimer;
 let shown = [];
 let storageWarned = false;
+/**
+ * The editor's revision, counted up on every change to its text. Worker
+ * jobs and their results carry it, and Run's output keeps the one it ran.
+ */
+let rev = 0;
+
+const docs = new Docs((text) => new Doc(text));
+/** The editor's revision, read once and shared by everything that asks. */
+const doc = () => docs.get(editor.value);
 
 function changed() {
+  rev++;
   const lines = editor.value.split("\n");
   const cols = Math.max(0, ...lines.map((l) => [...l].length));
   editor.style.width = `${cols + 2}ch`;
@@ -177,12 +189,13 @@ function changed() {
   saveDraft();
   // An edit is the next action, so a refusal shown before it is stale.
   showStatus();
+  showOutputAge();
   clearTimeout(refreshTimer);
   refreshTimer = setTimeout(refresh, 120);
 }
 
 function refresh() {
-  shown = check(editor.value);
+  shown = doc().diagnostics();
   tour.update(current());
   showProblems();
   showDrawing();
@@ -235,7 +248,7 @@ function highlight(i, on) {
 
 /** Draws `src` at the editor's scale; false when the text can't be read. */
 function drawSheet(src) {
-  const svg = render(src, document.documentElement.dataset.theme === "dark");
+  const svg = docs.get(src).render(document.documentElement.dataset.theme === "dark");
   if (svg === undefined) return false;
   drawing.innerHTML = svg;
   const view = drawing.querySelector("svg").viewBox.baseVal;
@@ -305,17 +318,13 @@ let drag = null;
 let selected = null;
 let menu = null;
 
-// What a sheet offers to the pointer, read once per text: the editor's, and
-// the sheet under a branch being dragged, with that branch taken off.
-const views = new Map();
-
+// What a sheet offers to the pointer, read once per text and kept with its
+// Doc: the editor's, and the sheet under a branch being dragged, with that
+// branch taken off.
 function viewOf(src) {
-  let view = views.get(src);
-  if (view) {
-    views.delete(src);
-  } else {
-    const ends = endpoints(src);
-    const list = wires(src);
+  return docs.view(src, (sheet) => {
+    const ends = sheet.endpoints();
+    const list = sheet.wires();
     const byCell = new Map();
     for (const w of list) {
       for (const c of w.cells) {
@@ -323,11 +332,8 @@ function viewOf(src) {
         byCell.set(k, [...(byCell.get(k) ?? []), w]);
       }
     }
-    view = { src, boxes: boxes(src), sources: ends.sources, sinks: ends.sinks, wires: list, byCell };
-  }
-  views.set(src, view);
-  if (views.size > 2) views.delete(views.keys().next().value);
-  return view;
+    return { src, boxes: sheet.boxes(), sources: ends.sources, sinks: ends.sinks, wires: list, byCell };
+  });
 }
 
 const current = () => viewOf(editor.value);
@@ -462,10 +468,13 @@ function focusDrawing(ring) {
  */
 function selectBranch(sink) {
   const src = editor.value;
-  const cut = disconnect(src, sink.row, sink.col);
+  const cut = disconnect(doc(), sink.row, sink.col);
   if (!cut.ok) return select(null);
+  const text = cut.doc.text;
+  // Only its text is wanted; the drag that may follow cuts it again.
+  cut.doc.free();
   const before = src.split("\n").map((l) => [...l]);
-  const after = cut.text.split("\n").map((l) => [...l]);
+  const after = text.split("\n").map((l) => [...l]);
   const cells = [];
   before.forEach((line, row) =>
     line.forEach((ch, col) => {
@@ -565,9 +574,10 @@ function applyText(text) {
   focusDrawing(ring);
 }
 
+/** Applies an edit's result: its revision becomes the editor's, already read. */
 function apply(result) {
   if (!result.ok) return void refuse(result);
-  applyText(result.text);
+  applyText(docs.seed(result.doc));
 }
 
 // Dragging.
@@ -592,9 +602,10 @@ drawing.addEventListener("pointerdown", (e) => {
   else if (sink) {
     // The branch comes off once the pointer leaves the arrowhead; a refusal
     // (its wire isn't editable) is better said on the press.
-    const cut = disconnect(editor.value, sink.row, sink.col);
+    const cut = disconnect(doc(), sink.row, sink.col);
     if (!cut.ok) return void refuse(cut);
-    start = { kind: "branch", sink, scope: sink.scope, cut: cut.text };
+    // Kept as the second revision: the drawing shows it once the branch is off.
+    start = { kind: "branch", sink, scope: sink.scope, cut: docs.seed(cut.doc) };
   } else if (wire) {
     const from = sourceAt(wire.source) ?? wire.source;
     start = { kind: "wire", from: { row: from.row, col: from.col }, scope: from.scope };
@@ -658,14 +669,14 @@ function showPath() {
     const sink = sinkAt(at, view);
     const free = sink && !sink.wired && sink.scope === drag.scope;
     const to = free ? sink : at;
-    found = !same(to, drag.from) && preview(view.src, drag.from.row, drag.from.col, to.row, to.col);
+    found = !same(to, drag.from) && docs.get(view.src).preview(drag.from.row, drag.from.col, to.row, to.col);
     const from = tail(sourceAt(drag.from, view) ?? { ...drag.from, wired: false });
     if (found) cells = [...(free ? [sink] : []), ...found, ...from];
     else cells = [at, drag.from];
   } else {
     const source = sourceUnder(at, view);
     found = source && source.scope === drag.scope &&
-      preview(view.src, source.row, source.col, drag.sink.row, drag.sink.col);
+      docs.get(view.src).preview(source.row, source.col, drag.sink.row, drag.sink.col);
     cells = found ? [drag.sink, ...found, ...tail(source)] : [drag.sink, at];
   }
   drag.path?.remove();
@@ -716,24 +727,23 @@ drawing.addEventListener("pointerup", (e) => {
   // moved is a click, which selects.
   if (!at || same(at, finished.start)) return void (dragged ||= finished.moved || !at);
   dragged = true;
-  const src = editor.value;
   if (finished.kind === "box") {
-    apply(move_box(src, finished.box.top, finished.box.left, finished.dr, finished.dc));
+    apply(move_box(doc(), finished.box.top, finished.box.left, finished.dr, finished.dc));
   } else if (finished.kind === "branch") {
     // One edit either way: off, or off and on again at the new source.
     const { cut, sink } = finished;
     const source = sourceUnder(at, viewOf(cut));
     if (!source) return applyText(cut);
-    apply(connect(cut, source.row, source.col, sink.row, sink.col));
+    apply(connect(docs.get(cut), source.row, source.col, sink.row, sink.col));
   } else if (finished.kind === "sink") {
     const source = sourceUnder(at);
     if (!source) return refuse({ ...at, reason: "Drop on a source or a wire to connect this arrowhead." });
-    apply(connect(src, source.row, source.col, finished.sink.row, finished.sink.col));
+    apply(connect(doc(), source.row, source.col, finished.sink.row, finished.sink.col));
   } else {
     const { from } = finished;
     const sink = sinkAt(at);
     const wire = wireAt(at);
-    if (sink) apply(connect(src, from.row, from.col, sink.row, sink.col));
+    if (sink) apply(connect(doc(), from.row, from.col, sink.row, sink.col));
     else if (wire) {
       const reason = same(wire.source, from) || same(sourceAt(wire.source), sourceAt(from))
         ? "This wire already carries that value. Drop on an arrowhead to add a branch."
@@ -759,12 +769,11 @@ drawing.addEventListener("keydown", (e) => {
     focusDrawing(ring);
   } else if ((e.key === "Delete" || e.key === "Backspace") && selected && !drag) {
     e.preventDefault();
-    const src = editor.value;
     const target = selected;
     select(null);
-    if (target.kind === "node") apply(remove_node(src, target.box.top, target.box.left));
-    else if (target.kind === "branch") apply(disconnect(src, target.sink.row, target.sink.col));
-    else apply(remove_wire(src, target.at.row, target.at.col));
+    if (target.kind === "node") apply(remove_node(doc(), target.box.top, target.box.left));
+    else if (target.kind === "branch") apply(disconnect(doc(), target.sink.row, target.sink.col));
+    else apply(remove_wire(doc(), target.at.row, target.at.col));
   } else if (e.key === "Escape") {
     // The release that follows a cancelled drag isn't a click.
     if (drag) dragged = true;
@@ -787,7 +796,7 @@ function closeMenu() {
 
 function openMenu(at, from) {
   closeMenu();
-  const offered = palette(editor.value, from?.row, from?.col);
+  const offered = doc().palette(from?.row, from?.col);
   menu = el("div", "palette");
   menu.setAttribute("role", "dialog");
   menu.setAttribute("aria-label", "Place a node");
@@ -802,21 +811,26 @@ function openMenu(at, from) {
   // above it. A drop a row or two off the source's row snaps level with
   // it first, so the new wire runs straight instead of jogging.
   const rows = from && from.row !== at.row && Math.abs(from.row - at.row) <= 2 ? [from.row, at.row] : [at.row];
-  // Placing and wiring are one edit: an unwired node isn't what the drag
-  // asked for, so a refused connect places nothing.
+  // Placing and wiring are one edit, composed in wasm: an unwired node
+  // isn't what the drag asked for, so a refused connect places nothing.
   const pick = (c) => {
     closeMenu();
-    let unwired = null;
-    for (const row of rows) {
+    const place = (row) => {
       const corner = { row: Math.max(0, row - 1), col: at.col };
-      const placed = place_node(editor.value, corner.row, corner.col, c.word, c.inputs, c.outputs);
-      if (!placed.ok) continue;
-      if (!from || !c.inputs) return applyText(placed.text);
-      const wired = connect(placed.text, from.row, from.col, corner.row + 1, corner.col);
-      if (wired.ok) return applyText(wired.text);
-      unwired ??= wired;
+      return from
+        ? place_and_connect(doc(), corner.row, corner.col, c.word, c.inputs, c.outputs, from.row, from.col)
+        : place_node(doc(), corner.row, corner.col, c.word, c.inputs, c.outputs);
+    };
+    let unwired = null;
+    let unplaced = null;
+    for (const row of rows) {
+      const placed = place(row);
+      if (placed.ok) return apply(placed);
+      if (placed.step === "connect") unwired ??= placed;
+      // The drop row is tried last; its refusal is the one to show.
+      else unplaced = placed;
     }
-    if (!unwired) return refuse(place_node(editor.value, Math.max(0, at.row - 1), at.col, c.word, c.inputs, c.outputs));
+    if (!unwired) return refuse(unplaced);
     refuse({ ...at, reason: `Nothing placed: the new node couldn't be wired in (${unwired.reason}).` });
   };
 
@@ -878,36 +892,30 @@ addEventListener("scroll", (e) => menu && !menu.contains(e.target) && closeMenu(
 const TRACE_LIMIT_MS = 4000;
 const FIRST_CALL = "Badges show the value each wire carried during the first call of its definition.";
 
-let tracer = null;
-let traceGen = 0;
 let traceTimer;
-let traceKill;
-let traced = { src: null, values: [] };
+/** The last trace of the editor's text: the revision it traced, and its values. */
+let traced = { rev: -1, values: [] };
 
-function startTracer() {
-  tracer = new Worker("worker.js", { type: "module" });
-  tracer.onmessage = ({ data }) => {
-    if (data.gen !== traceGen) return;
-    clearTimeout(traceKill);
-    if (data.failed) stopTracer();
-    traced = { src: data.src, values: data.failed ? [] : data.wires };
-    // A newer edit's trace is still to come; keep saying so.
-    if (data.src === editor.value) showTraced(data);
+// One trace at a time. A result for a text since edited is dropped: the
+// newer text's trace is waiting, or is about to be asked for.
+const tracer = new Flight({
+  spawn: () => new Worker("worker.js", { type: "module" }),
+  limit: TRACE_LIMIT_MS,
+  current: () => rev,
+  settle: (job, outcome) => {
+    if (outcome.broken !== undefined) {
+      traced = { rev: -1, values: [] };
+      showTrace("unavailable", `Tracing failed to start${outcome.broken ? `: ${outcome.broken}` : ""}.`);
+    } else if (outcome.timedOut) {
+      traced = { rev: job.rev, values: [] };
+      showTrace("unavailable", `Tracing took longer than ${TRACE_LIMIT_MS / 1000} s, so it was stopped.`);
+    } else {
+      traced = { rev: job.rev, values: outcome.failed ? [] : outcome.wires };
+      showTraced(outcome);
+    }
     showOverlays();
-  };
-  tracer.onerror = (e) => {
-    e.preventDefault();
-    stopTracer();
-    traced = { src: null, values: [] };
-    showTrace("unavailable", `Tracing failed to start${e.message ? `: ${e.message}` : ""}.`);
-    showOverlays();
-  };
-}
-
-function stopTracer() {
-  tracer?.terminate();
-  tracer = null;
-}
+  },
+});
 
 /** Says how the last trace went, with a jump to a runtime error. */
 function showTraced({ failed, error, stopped }) {
@@ -940,27 +948,16 @@ function scheduleTrace() {
 }
 
 function requestTrace() {
-  const src = editor.value;
   if (untraceable()) {
-    traced = { src, values: [] };
-    ++traceGen;
-    clearTimeout(traceKill);
+    traced = { rev, values: [] };
+    // Nothing asked for before is wanted now, not even the trace in flight.
+    tracer.cancel();
     if (values.checked) showTrace("unavailable", "The sheet has errors, so it can’t run.");
     else showTrace("");
     return showOverlays();
   }
-  if (!tracer) startTracer();
-  const gen = ++traceGen;
   showTrace("computing…");
-  tracer.postMessage({ kind: "trace", src, gen });
-  clearTimeout(traceKill);
-  traceKill = setTimeout(() => {
-    if (gen !== traceGen) return;
-    stopTracer();
-    traced = { src, values: [] };
-    showTrace("unavailable", `Tracing took longer than ${TRACE_LIMIT_MS / 1000} s, so it was stopped.`);
-    showOverlays();
-  }, TRACE_LIMIT_MS);
+  tracer.request({ kind: "trace", src: editor.value, rev });
 }
 
 /** The cell a wire's badge sits on: the middle of its longest straight row. */
@@ -982,7 +979,7 @@ function anchor(cells) {
 }
 
 function showBadges(svg) {
-  if (!values.checked || traced.src !== editor.value) return;
+  if (!values.checked || traced.rev !== rev) return;
   const { wires: list } = current();
   const group = svgEl("g", "overlay badges");
   svg.append(group);
@@ -1024,75 +1021,96 @@ document.addEventListener("selectionchange", () => {
 });
 
 // Running happens in a worker, so a program that never stops can be cut off.
+// Its output keeps the revision it ran; once the text moves on, the output
+// is dimmed and says so, and its error no longer links into the text.
 
-let worker = null;
-let running = null;
-
-function startWorker() {
-  worker = new Worker("worker.js", { type: "module" });
-  worker.onmessage = ({ data }) => finish(data);
-  // A worker that fails to load or throws is dropped, and the next Run
-  // starts a fresh one; restarting here could loop on a module that never
-  // loads.
-  worker.onerror = (e) => {
-    e.preventDefault();
-    worker.terminate();
-    worker = null;
-    setRunning(false);
-    say(`The runner failed${e.message ? ` (${e.message})` : ""}. Run starts a fresh one.`, "failure");
-  };
-}
+const runner = new Flight({
+  spawn: () => new Worker("worker.js", { type: "module" }),
+  limit: RUN_LIMIT_MS,
+  settle: finish,
+});
+/** The revision the output shows the run of, or null when it shows none. */
+let outputRev = null;
+let outputMs = "";
 
 function setRunning(on) {
-  clearTimeout(running);
-  running = on ? setTimeout(() => stop(`Stopped after ${RUN_LIMIT_MS / 1000} seconds.`), RUN_LIMIT_MS) : null;
   runButton.textContent = on ? "Stop" : "Run";
   runButton.classList.toggle("running", on);
-  $("output-meta").textContent = on ? "running…" : "";
+  showOutputAge();
 }
 
+/** Says, beside the output, whether it is running, took how long, or describes an earlier text. */
+function showOutputAge() {
+  const stale = outputRev !== null && outputRev !== rev;
+  output.classList.toggle("stale", stale);
+  const link = output.querySelector("button.failure");
+  if (link) {
+    link.disabled = stale;
+    link.title = stale ? "From an earlier version of the text, so it no longer points into it" : "Show where it failed";
+  }
+  $("output-meta").textContent = runner.busy
+    ? "running…"
+    : [outputMs, stale && "from an earlier version"].filter(Boolean).join(" · ");
+}
+
+/** Shows a message in place of output. */
 function say(text, className = "hint") {
+  outputRev = null;
+  outputMs = "";
   output.replaceChildren(el("span", className, text));
+  showOutputAge();
 }
 
 function runProgram() {
-  if (running) return stop("Stopped.");
-  if (!worker) startWorker();
+  if (runner.busy) return stop("Stopped.");
+  runner.request({ kind: "run", src: editor.value, rev });
   setRunning(true);
-  worker.postMessage(editor.value);
 }
 
-function finish(result) {
+function finish(job, result) {
   setRunning(false);
-  if (result.crashed) {
-    // A panic traps the module, so the worker can't be trusted again.
-    worker.terminate();
-    startWorker();
-    return say(`The runner crashed (${result.crashed}). It has been restarted.`, "failure");
+  if (result.timedOut) {
+    runner.warm();
+    return say(`Stopped after ${RUN_LIMIT_MS / 1000} seconds.`);
   }
-  $("output-meta").textContent = `${result.ms < 1 ? "under 1" : Math.round(result.ms)} ms`;
+  if (result.broken !== undefined) {
+    // The next Run starts a fresh worker; starting one here could loop on
+    // a module that never loads.
+    return say(`The runner failed${result.broken ? ` (${result.broken})` : ""}. Run starts a fresh one.`, "failure");
+  }
+  if (result.failed) {
+    runner.warm();
+    return say(`The runner crashed (${result.failed}). It has been restarted.`, "failure");
+  }
   if (result.error) {
     // The wasm text is zero-based, as in every dump; the page counts from
     // one, like the diagnostics and the CLI's report.
     const { at } = result;
     const text = at ? `error ${at.row + 1}:${at.col + 1} ${at.code}: ${at.message}` : result.error;
-    const failure = el("span", "failure", text);
-    failure.title = "Show where it failed";
-    if (at) failure.addEventListener("click", () => jumpTo(at));
-    output.replaceChildren(failure);
+    if (at) {
+      const failure = el("button", "failure", text);
+      failure.type = "button";
+      failure.addEventListener("click", () => jumpTo(at));
+      output.replaceChildren(failure);
+    } else {
+      output.replaceChildren(el("span", "failure", text));
+    }
   } else if (result.diagnostics.some((d) => d.severity === "error")) {
     say("The sheet has errors, so it can’t run yet. See Diagnostics.");
   } else if (!result.outputs.length) {
     say("·𐑥𐑱𐑯 has no outputs.");
   } else {
     output.textContent = result.outputs.join("\n");
-    tour.ran(current());
+    if (job.rev === rev) tour.ran(current());
   }
+  outputRev = job.rev;
+  outputMs = `${result.ms < 1 ? "under 1" : Math.round(result.ms)} ms`;
+  showOutputAge();
 }
 
 function stop(message) {
-  worker?.terminate();
-  startWorker();
+  runner.stop();
+  runner.warm();
   setRunning(false);
   say(message);
 }
@@ -1115,7 +1133,7 @@ function note(text) {
 }
 
 $("format").addEventListener("click", () => {
-  const formatted = format(editor.value);
+  const formatted = doc().formatted();
   if (formatted === undefined) return note("Fix the character errors first.");
   if (formatted === editor.value) return note("Already canonical.");
   const caret = posOf(editor.value, editor.selectionStart);
@@ -1215,7 +1233,6 @@ async function openSlot(next, { fresh = false, initial = false } = {}) {
   const from = { slot, text: editor.value };
   enter(next);
   say("Run the program to see what ·𐑥𐑱𐑯 returns.");
-  $("output-meta").textContent = "";
   if (initial) {
     editor.value = text;
     settle();
@@ -1288,7 +1305,7 @@ async function main() {
   );
   translit.checked = store.get("translit") !== "false";
   values.checked = store.get("values") !== "false";
-  startWorker();
+  runner.warm();
 
   let names = [];
   let listed = true;
