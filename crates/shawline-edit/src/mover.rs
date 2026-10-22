@@ -18,7 +18,7 @@ use shawline_shape::stroke::{self, Kind};
 use shawline_shape::{Diagram, EndKind, PortKind};
 
 use crate::canon::{Sheets, tidy};
-use crate::check::{Shift, same};
+use crate::check::{DIAGNOSTICS, Shift, same};
 use crate::router::{self, BEND, BUDGET, CLEARANCE, Cell, Found, Miss, Start, TEE, Terrain, toward};
 use crate::sheet::{across, borders, glyph, is_corner, keep_clear, perimeter, text_cells};
 use crate::{Refusal, RefusalKind};
@@ -80,13 +80,14 @@ fn moved(
 
     let drawn = Doc::new(Mover::new(grid, diagram, index, dr, dc)?.run(budget)?);
 
-    // The check (contract module docs): same structure, same diagnostics.
+    // The check (contract module docs): same structure, and the same
+    // diagnostics, syntax codes included, which aren't structure.
     let new_grid = drawn.grid().expect("edits write only repertoire characters");
     let new_diagram = drawn.diagram().expect("a sheet on the grid is recognized");
     let shift = shift_of(grid, diagram, index, dr, dc);
     same((grid, diagram), (new_grid, new_diagram), &shift).map_err(changed)?;
     if codes(canon) != codes(&drawn) {
-        return Err(changed("it would change the sheet's diagnostics"));
+        return Err(changed(DIAGNOSTICS));
     }
     // The formatter tidies what the edit left loose (a constant pulled up to
     // its shortened wire). It keeps the structure, but not necessarily the box.

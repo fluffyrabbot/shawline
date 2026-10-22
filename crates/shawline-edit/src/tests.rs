@@ -809,3 +809,52 @@ fn refusals_say_what_kind_of_obstacle_they_are() {
     let starved = crate::mover::move_within(&double, Pos::new(4, 10), 1, 0, 0);
     assert_eq!(kind(starved), RefusalKind::GaveUp);
 }
+
+// P8 wave 2: the checks are one structural comparison.
+
+use std::collections::HashSet;
+
+use shawline_shape::structure::{Across, End, Structure};
+
+#[test]
+fn a_wire_names_itself_as_the_structure_does() {
+    // `remove_wire` names a stray wire by `Model::part`: every kind of end,
+    // ports, free arrowheads, text, strokes, nothing and blocked, must read
+    // as `Structure::of` reads it.
+    let strays = "\
+╭─ ·𐑛𐑳𐑚𐑩𐑤 ──────────╮
+│                   │
+▶ 𐑯 ────────────────▶ 𐑬
+│                   │
+│  ───   ───│       │
+│                   │
+╰───────────────────╯
+  ───
+";
+    let fanout = include_str!("../../../corpus/13-fanout.shaw");
+    let cross = include_str!("../../../corpus/15-fanout-cross.shaw");
+    let mut seen = HashSet::new();
+    for src in [DOUBLE, ABS, fanout, cross, strays] {
+        let doc = Doc::new(src);
+        let (grid, diagram) = (doc.grid().unwrap(), doc.diagram().unwrap());
+        let model = crate::model::Model::new(grid, diagram);
+        let mut parts: Vec<_> = (0..diagram.wires.len()).map(|w| model.part(w)).collect();
+        parts.sort();
+        assert_eq!(parts, Structure::of(grid, diagram).wires, "{src}");
+        seen.extend(parts.iter().flat_map(|p| &p.terms).map(|t| match t.end {
+            End::Port(..) => End::Port(0, 0),
+            End::Arrow(_) => End::Arrow(Across::Nothing),
+            End::Open(Across::Text(_)) => End::Open(Across::Text(0)),
+            other => other,
+        }));
+    }
+    let kinds = [
+        End::Port(0, 0),
+        End::Arrow(Across::Nothing),
+        End::Open(Across::Text(0)),
+        End::Open(Across::Stroke),
+        End::Open(Across::Nothing),
+        End::Blocked,
+    ];
+    assert!(kinds.iter().all(|k| seen.contains(k)), "{seen:?}");
+}
