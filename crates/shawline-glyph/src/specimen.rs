@@ -6,7 +6,10 @@ use std::fmt::Write;
 use crate::letters::{Derivation, derivation, letter_name};
 use crate::metrics::{ASCENDER, BASELINE, DESCENDER, X_HEIGHT};
 use crate::strokes::edge_midpoint;
-use crate::{CELL_HEIGHT, CELL_WIDTH, STROKE_WEIGHT, Skeleton, arrowhead, skeleton};
+use crate::{
+    CELL_HEIGHT, CELL_WIDTH, GLOSS_CHARS, GLOSS_HEIGHT, GLOSS_WIDTH, STROKE_WEIGHT, Skeleton, arrowhead, gloss_skeleton,
+    skeleton,
+};
 use kurbo::PathEl;
 use shawline_grid::Dir;
 
@@ -37,9 +40,17 @@ const SAMPLE: &[&str] = &[
     "    └─────────────┘",
 ];
 
+/// Words over their glosses, as the gloss layer sets them: readings under
+/// words, and each mirror pair of primitives over its pair of names.
+const GLOSSED: &[&[(&str, &str)]] = &[
+    &[("·𐑥𐑱𐑯", "=mayn"), ("𐑣𐑧𐑤𐑴", "heloh"), ("𐑑𐑣", "t/h"), ("𐑝𐑬", "/vow"), ("𐑾𐑮", "i@r"), ("𐑩𐑚𐑬𐑑", "@bowt")],
+    &[("𐑟", "cons"), ("𐑕", "uncons"), ("𐑦", "same"), ("𐑰", "differ"), ("𐑥", "min"), ("𐑯", "max")],
+];
+
 /// An SVG sheet showing every glyph: Shavian pairs side by side, then
-/// digits and marks, then strokes, then a sample drawing assembled from the
-/// strokes to prove the joins are seamless.
+/// digits and marks, then strokes, then the gloss glyphs alone and set under
+/// words, then a sample drawing assembled from the strokes to prove the
+/// joins are seamless.
 pub fn specimen() -> String {
     let mut body = String::new();
     let mut y = MARGIN;
@@ -64,6 +75,8 @@ pub fn specimen() -> String {
     y = glyph_row(&mut body, y, "Digits and marks", marks.into_iter(), true, 0.8);
     y = glyph_row(&mut body, y, "Strokes", "─│┌┐└┘├┤┬┴┼╭╮╯╰┄┆▶◀▲▼".chars(), false, 0.2);
     y = glyph_row(&mut body, y, "ASCII fallbacks", "-|+.'~:><^v".chars(), true, 1.0);
+    y = gloss_row(&mut body, y);
+    y = glossed(&mut body, y);
 
     heading(&mut body, y, "Joins");
     y += 16.0;
@@ -95,7 +108,7 @@ fn pair_row(out: &mut String, y: f64, name: &str, pairs: impl Iterator<Item = [c
     let pitch = (SHEET_WIDTH - 2.0 * MARGIN) / 10.0;
     for (i, [a, b]) in pairs.enumerate() {
         let x = MARGIN + i as f64 * pitch;
-        guides(out, x, top, 2.0 * CELL_W);
+        guides(out, x, top, 2.0 * CELL_W, 1.0);
         cell(out, x, top, a);
         cell(out, x + CELL_W, top, b);
         caption(out, x, top + CELL_H + 16.0, &format!("{} · {}", name_of(a), name_of(b)));
@@ -115,7 +128,7 @@ fn glyph_row(out: &mut String, y: f64, name: &str, chars: impl Iterator<Item = c
     for (i, ch) in chars.enumerate() {
         let x = MARGIN + i as f64 * CELL_W * (1.0 + gap);
         if with_guides {
-            guides(out, x, top, CELL_W);
+            guides(out, x, top, CELL_W, 1.0);
         } else {
             let _ = write!(out, r#"<rect x="{x}" y="{top}" width="{CELL_W}" height="{CELL_H}" fill="none" stroke="{GUIDE}"/>"#);
         }
@@ -127,6 +140,57 @@ fn glyph_row(out: &mut String, y: f64, name: &str, chars: impl Iterator<Item = c
         }
     }
     top + CELL_H + if labelled { 60.0 } else { 30.0 }
+}
+
+/// The gloss alphabet over its guides, each glyph with its character set in
+/// a system font beneath for comparison.
+fn gloss_row(out: &mut String, y: f64) -> f64 {
+    heading(
+        out,
+        y,
+        &format!("Gloss glyphs · box {GLOSS_WIDTH}×{GLOSS_HEIGHT}, half a cell, at the full stroke {STROKE_WEIGHT}"),
+    );
+    let top = y + 16.0;
+    let (w, h) = (GLOSS_WIDTH * SCALE, GLOSS_HEIGHT * SCALE);
+    let pitch = (SHEET_WIDTH - 2.0 * MARGIN) / GLOSS_CHARS.chars().count() as f64;
+    for (i, ch) in GLOSS_CHARS.chars().enumerate() {
+        let x = MARGIN + i as f64 * pitch;
+        guides(out, x, top, w, 0.5);
+        place(out, x, top, &gloss_skeleton(ch).expect("a gloss character"));
+        let cx = x + w / 2.0;
+        let _ = writeln!(out, r#"<text x="{cx}" y="{}" font-size="11" fill="{LABEL}" text-anchor="middle">{ch}</text>"#, top + h + 16.0);
+    }
+    top + h + 46.0
+}
+
+/// [`GLOSSED`] set in rows of cells, each with its half-cell strip beneath
+/// and every gloss centred under its word in the comment ink.
+fn glossed(out: &mut String, y: f64) -> f64 {
+    heading(out, y, "Gloss strip · readings under words, names under primitives");
+    let mut top = y + 16.0;
+    for line in GLOSSED {
+        let mut col = 0.0;
+        for (word, gloss) in *line {
+            // In cells: the word starts on a whole column, far enough in
+            // that its centred gloss doesn't reach back past `col`.
+            let n = word.chars().count() as f64;
+            let g = gloss.chars().count() as f64 * GLOSS_WIDTH / CELL_WIDTH;
+            let at = col + ((g - n) / 2.0).max(0.0).ceil();
+            for (i, ch) in word.chars().enumerate() {
+                cell(out, MARGIN + (at + i as f64) * CELL_W, top, ch);
+            }
+            let left = MARGIN + (at + n / 2.0 - g / 2.0) * CELL_W;
+            let _ = write!(out, r#"<g color="{LABEL}">"#);
+            for (i, ch) in gloss.chars().enumerate() {
+                let s = gloss_skeleton(ch).expect("a gloss character");
+                place(out, left + i as f64 * GLOSS_WIDTH * SCALE, top + CELL_H, &s);
+            }
+            out.push_str("</g>\n");
+            col = (at + n).max(at + n / 2.0 + g / 2.0).ceil() + 1.0;
+        }
+        top += CELL_H + GLOSS_HEIGHT * SCALE + 16.0;
+    }
+    top + 30.0
 }
 
 fn name_of(ch: char) -> &'static str {
@@ -200,10 +264,11 @@ fn reaches(ch: char, d: Dir) -> bool {
         })
 }
 
-/// Faint ascender, x-height, baseline and descender lines behind letters.
-fn guides(out: &mut String, x: f64, y: f64, width: f64) {
+/// Faint ascender, x-height, baseline and descender lines behind letters
+/// drawn `size` cells high.
+fn guides(out: &mut String, x: f64, y: f64, width: f64, size: f64) {
     for g in [ASCENDER, X_HEIGHT, BASELINE, DESCENDER] {
-        let gy = y + g * SCALE;
+        let gy = y + g * size * SCALE;
         let _ = write!(out, r#"<line x1="{x}" y1="{gy}" x2="{}" y2="{gy}" stroke="{GUIDE}"/>"#, x + width);
     }
 }
