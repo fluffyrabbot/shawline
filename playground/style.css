@@ -450,7 +450,12 @@ main {
   min-height: 3em;
 }
 #output .hint, #drawing .hint { font: italic 15px/1.55 var(--serif); color: var(--comment); }
-#output .failure { color: var(--error); cursor: pointer; font: 15px/1.55 var(--sans); }
+#output .failure { color: var(--error); font: 15px/1.55 var(--sans); }
+#output button.failure { border: 0; border-radius: 0; padding: 0; background: none; text-align: left; cursor: pointer; }
+#output button.failure:hover { text-decoration: underline; }
+#output button.failure:disabled { cursor: default; text-decoration: none; }
+/* Output from an earlier text: still readable, but plainly not this one's. */
+#output.stale { opacity: 0.45; transition: opacity 0.2s; }
 
 /* Footer */
 
