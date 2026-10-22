@@ -33,8 +33,9 @@ pub struct Structure {
     pub texts: Vec<TextPart>,
     /// Sorted, since `Diagram::wires` is in order of position.
     pub wires: Vec<WirePart>,
-    /// Shape diagnostics by code, sorted. `S012` is left out: each box
-    /// counts its own slipped cells.
+    /// Shape diagnostics by code, sorted. `S012` and `S010` are left out:
+    /// each box counts its own slipped cells, and each wire names its own
+    /// blocked ends ([`End::Blocked`]).
     pub codes: Vec<Code>,
 }
 
@@ -172,10 +173,7 @@ impl Mapping {
 impl Structure {
     /// The structure of `diagram`, which must be `recognize(grid)`.
     pub fn of(grid: &Grid, diagram: &Diagram) -> Self {
-        let mut text_at = HashMap::new();
-        for (i, t) in diagram.texts.iter().enumerate() {
-            text_at.extend(t.cells().map(|p| (p, i)));
-        }
+        let text_at = text_cells(diagram);
         let across = |p: Pos, d: Dir| across(grid, diagram, &text_at, p, d);
 
         let boxes = diagram
@@ -213,32 +211,12 @@ impl Structure {
             })
             .collect();
 
-        let mut wires: Vec<WirePart> = diagram
-            .wires
-            .iter()
-            .map(|w| {
-                let mut terms: Vec<Term> = w
-                    .ends
-                    .iter()
-                    .map(|e| {
-                        let end = match e.kind {
-                            EndKind::Port(p) => {
-                                port_index(&diagram.boxes, p).map_or(End::Blocked, |(b, k)| End::Port(b, k))
-                            }
-                            EndKind::Arrow => End::Arrow(across(e.pos, e.facing)),
-                            EndKind::Open => End::Open(across(e.pos, e.facing)),
-                            EndKind::Blocked => End::Blocked,
-                        };
-                        Term { facing: e.facing, end }
-                    })
-                    .collect();
-                terms.sort();
-                WirePart { terms, tees: w.tees.len(), crossings: w.crossings.len() }
-            })
-            .collect();
+        let mut wires: Vec<WirePart> =
+            (0..diagram.wires.len()).map(|w| wire_part(grid, diagram, &text_at, w)).collect();
         wires.sort();
 
-        let mut codes: Vec<Code> = diagram.diagnostics.iter().map(|d| d.code).filter(|&c| c != "S012").collect();
+        let mut codes: Vec<Code> =
+            diagram.diagnostics.iter().map(|d| d.code).filter(|&c| c != "S012" && c != "S010").collect();
         codes.sort_unstable();
         Structure { boxes, texts, wires, codes }
     }
@@ -354,6 +332,20 @@ impl Structure {
         self.wires.retain(|w| !w.terms.contains(&at));
     }
 
+    /// Declares that one wire equal to `part` is removed: for a wire that
+    /// no single term names, such as a stray stroke with a look-alike,
+    /// whose terms are all loose ends. `part` is from [`Structure::wire`].
+    pub fn remove_part(&mut self, part: &WirePart) {
+        if let Some(i) = self.wires.iter().position(|w| w == part) {
+            self.wires.remove(i);
+        }
+    }
+
+    /// Wire `w` of `diagram` as [`Structure::of`] records it.
+    pub fn wire(grid: &Grid, diagram: &Diagram, w: usize) -> WirePart {
+        wire_part(grid, diagram, &text_cells(diagram), w)
+    }
+
     /// Declares that the branch ending at term `at` is removed. A wire left
     /// with fewer than two terms goes entirely.
     pub fn disconnect(&mut self, at: Term) {
@@ -380,6 +372,33 @@ impl Structure {
 /// The box and port index of the port at cell `p`.
 pub fn port_index(boxes: &[BoxShape], p: Pos) -> Option<(usize, usize)> {
     boxes.iter().enumerate().find_map(|(b, shape)| shape.ports.iter().position(|q| q.pos == p).map(|k| (b, k)))
+}
+
+fn text_cells(diagram: &Diagram) -> HashMap<Pos, usize> {
+    let mut text_at = HashMap::new();
+    for (i, t) in diagram.texts.iter().enumerate() {
+        text_at.extend(t.cells().map(|p| (p, i)));
+    }
+    text_at
+}
+
+fn wire_part(grid: &Grid, diagram: &Diagram, text_at: &HashMap<Pos, usize>, w: usize) -> WirePart {
+    let wire = &diagram.wires[w];
+    let mut terms: Vec<Term> = wire
+        .ends
+        .iter()
+        .map(|e| {
+            let end = match e.kind {
+                EndKind::Port(p) => port_index(&diagram.boxes, p).map_or(End::Blocked, |(b, k)| End::Port(b, k)),
+                EndKind::Arrow => End::Arrow(across(grid, diagram, text_at, e.pos, e.facing)),
+                EndKind::Open => End::Open(across(grid, diagram, text_at, e.pos, e.facing)),
+                EndKind::Blocked => End::Blocked,
+            };
+            Term { facing: e.facing, end }
+        })
+        .collect();
+    terms.sort();
+    WirePart { terms, tees: wire.tees.len(), crossings: wire.crossings.len() }
 }
 
 /// Each wire's terms, with as much of its routing as `routing` keeps,
@@ -587,6 +606,78 @@ mod tests {
         // The fan-out into its inputs is cut to one end, so it goes too.
         let want = want.relabel(&map);
         assert_eq!(want.expect(&Structure::of(&ng, &nd), Routing::Ignored), Ok(()), "{gone}");
+    }
+
+    /// Stray strokes: a blocked end, loose ends across strokes and across
+    /// nothing, and a look-alike pair.
+    const STRAYS: &str = "\
+╭─ ·𐑛𐑳𐑚𐑩𐑤 ──────────╮
+│                   │
+▶ 𐑯 ────────────────▶ 𐑬
+│                   │
+│  ───   ───│       │
+│                   │
+╰───────────────────╯
+  ───
+";
+
+    #[test]
+    fn each_wire_reads_as_the_whole_does() {
+        let sheets = [
+            DOUBLE,
+            include_str!("../../../corpus/04-abs.shaw"),
+            include_str!("../../../corpus/13-fanout.shaw"),
+            include_str!("../../../corpus/15-fanout-cross.shaw"),
+            STRAYS,
+        ];
+        let mut seen = std::collections::HashSet::new();
+        for src in sheets {
+            let (grid, d) = read(src);
+            let mut parts: Vec<WirePart> = (0..d.wires.len()).map(|w| Structure::wire(&grid, &d, w)).collect();
+            parts.sort();
+            assert_eq!(parts, Structure::of(&grid, &d).wires, "{src}");
+            seen.extend(parts.iter().flat_map(|p| &p.terms).map(|t| match t.end {
+                End::Port(..) => End::Port(0, 0),
+                End::Arrow(_) => End::Arrow(Across::Nothing),
+                End::Open(Across::Text(_)) => End::Open(Across::Text(0)),
+                other => other,
+            }));
+        }
+        // Every kind of end occurs, so every branch of the reading is compared.
+        let kinds = [
+            End::Port(0, 0),
+            End::Arrow(Across::Nothing),
+            End::Open(Across::Text(0)),
+            End::Open(Across::Stroke),
+            End::Open(Across::Nothing),
+            End::Blocked,
+        ];
+        assert!(kinds.iter().all(|k| seen.contains(k)), "{seen:?}");
+    }
+
+    #[test]
+    fn a_look_alike_is_removed_one_at_a_time() {
+        let pair = edit(STRAYS, &[("│  ───   ───│       │", "│  ───       ───    │")]);
+        let (grid, d) = read(&pair);
+        let w = d.wires.iter().position(|w| w.cells.contains(&Pos::new(4, 3))).unwrap();
+        let part = Structure::wire(&grid, &d, w);
+        let mut s = Structure::of(&grid, &d);
+        assert_eq!(s.wires.iter().filter(|p| **p == part).count(), 2);
+        // No term names just one of them: removing by term takes both.
+        let mut by_term = s.clone();
+        by_term.remove_wire(part.terms[0]);
+        assert_eq!(by_term.wires.iter().filter(|p| **p == part).count(), 0);
+        s.remove_part(&part);
+        assert_eq!(s.wires.iter().filter(|p| **p == part).count(), 1);
+    }
+
+    #[test]
+    fn a_blocked_end_is_a_term_not_a_code() {
+        let (grid, d) = read(STRAYS);
+        assert!(d.diagnostics.iter().any(|x| x.code == "S010"), "{:?}", d.diagnostics);
+        let s = Structure::of(&grid, &d);
+        assert!(!s.codes.contains(&"S010"));
+        assert!(s.wires.iter().flat_map(|w| &w.terms).any(|t| t.end == End::Blocked));
     }
 
     #[test]

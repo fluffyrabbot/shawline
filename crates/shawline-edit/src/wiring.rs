@@ -214,12 +214,7 @@ pub(crate) fn remove_wire(doc: &Doc, at: Pos) -> Result<Doc, Refusal> {
         Some(term) => expected.remove_wire(term),
         // A wire joining only loose ends shares its terms with any
         // look-alike, so it's named whole, and just one goes.
-        None => {
-            let part = model.part(w);
-            if let Some(i) = expected.wires.iter().position(|p| *p == part) {
-                expected.wires.remove(i);
-            }
-        }
+        None => expected.remove_part(&Structure::wire(grid, diagram, w)),
     }
     finish(canvas.render(), diagram, at, "the wire can't be removed", |map| expected.relabel(map))
 }

@@ -10,7 +10,7 @@ use std::collections::{HashMap, HashSet};
 
 use shawline_grid::{Dir, Grid, Pos, Rect};
 use shawline_shape::stroke::Kind;
-use shawline_shape::structure::{self, Across, End, WirePart};
+use shawline_shape::structure::{self, Across, End};
 use shawline_shape::{Diagram, EndKind, Port, PortKind, TextKind};
 
 use crate::{Refusal, RefusalKind};
@@ -454,43 +454,4 @@ impl<'a> Model<'a> {
         Some(structure::Term { facing, end })
     }
 
-    /// Wire `w` as [`Structure::of`](structure::Structure::of) records it:
-    /// what names a wire that no port or text does ([`Model::named`]).
-    pub(crate) fn part(&self, w: usize) -> WirePart {
-        let wire = &self.diagram.wires[w];
-        let mut terms: Vec<structure::Term> = wire
-            .ends
-            .iter()
-            .map(|e| {
-                let end = match e.kind {
-                    EndKind::Port(p) => structure::port_index(&self.diagram.boxes, p)
-                        .map_or(End::Blocked, |(b, k)| End::Port(b, k)),
-                    EndKind::Arrow => End::Arrow(self.meets(e.pos, e.facing)),
-                    EndKind::Open => End::Open(self.meets(e.pos, e.facing)),
-                    EndKind::Blocked => End::Blocked,
-                };
-                structure::Term { facing: e.facing, end }
-            })
-            .collect();
-        terms.sort();
-        WirePart { terms, tees: wire.tees.len(), crossings: wire.crossings.len() }
-    }
-
-    /// What lies across spaces from `from` in `dir`, as a structure names
-    /// it. Text meets a wire only along a row (SPEC §6).
-    fn meets(&self, from: Pos, dir: Dir) -> Across {
-        if !dir.is_horizontal() {
-            return Across::Nothing;
-        }
-        let (gap, text) = across(self.grid, &self.texts, from, dir);
-        if let Some(t) = text {
-            return Across::Text(t);
-        }
-        let next = gap.last().copied().unwrap_or(from).step(dir);
-        if next.is_some_and(|q| self.diagram.strokes.get(q).is_some()) {
-            Across::Stroke
-        } else {
-            Across::Nothing
-        }
-    }
 }

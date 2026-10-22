@@ -417,14 +417,14 @@ Two read-only Codex audits, one on UX (checked against WAI, MDN, Blender and Unr
 - **Found, not fixed:** box parent and overlap checks are quadratic in the number of boxes (3.9 s at 65,536 boxes), and the CLI's diagnostic printer rescans the source for each diagnostic.
 
 **Next, in order:**
-1. **Document spine.** See P8 below; it precedes Phase 2.
+1. **Document spine** ✅. See P8 below.
 2. **Gloss layer.** See P9 below; it also precedes Phase 2.
 3. **Keyboard and semantic selection.** A real palette combobox with phonemic search, zoom and pan, and a node inspector.
 4. **Repair in place.** `fix` in the playground and as an LSP quick fix, and richer diagnostics.
 5. **Onboarding.** A tour that tracks undo, README prerequisites, VS Code server status, and CLI `--help`.
 6. **Phase 2 order.** Insert rows and columns, constants by mouse, switch outputs, drawing switches, extracting definitions, then scrubbing.
 
-### P8: Document spine (before Studio Phase 2)
+### P8: Document spine (before Studio Phase 2) ✅
 
 **Goal.** Each text revision is read once, and every consumer shares that one reading: the CLI, the corpus, the language server, the playground and the edits. Edits return the revision they already checked. They refuse with a kind the UI can act on, and stop re-deriving facts that recognition already has. In wave 2, the three "did this edit change only what it meant to" checks become one structural comparison.
 
@@ -588,21 +588,43 @@ Wave 1 gate (done). E (`92e202a`) and W (`2fe35c9`) merged without conflicts.
 - **F** moves `fmt::verify` to it; **E** moves `edit::check` and `edit::model`'s `Print` to it. Both old fingerprint types are deleted.
 - **Gate:** every existing gate stays green, including jitter, `fmt_mutations`, the formatter property test, `studio`, `edit_moves` and `studio_sequences`. `grep` finds no second fingerprint type.
 
-Wave 2 contract (done): `shawline-shape/src/structure.rs`, lead-owned, with 9 unit tests. Nothing uses it yet.
+Wave 2 contract (done): `shawline-shape/src/structure.rs`, lead-owned, with 12 unit tests.
 - **What it records:**
   - **boxes:** style, title, slips, parent, ports (side, kind, direction, what an arrowhead meets) and guarded dividers;
   - **texts:** kind, content, owner, and the boxes they title or guard;
   - **wires:** sorted term lists, each term a facing and what it meets (a port by box and port index, or a free arrowhead, a loose end or a blocked stroke, with what lies across);
-  - **shape codes,** without `S012`.
+  - **shape codes,** without `S012` and `S010`: each box counts its own slips, and each wire names its own blocked ends.
 - **`Mapping` relabels box and text indices.** `Mapping::by_place` builds one from where a step should have put each box and text. Relabelling drops what maps to nothing:
   - a wire loses its terms at a dropped box;
   - a wire left with fewer than two terms goes, as when a node is removed;
   - a reference across a dropped text becomes `Nothing`.
-- **One comparison, `expect(found, routing)`,** reports the first part that differs (boxes, texts, wires or codes). Wiring edits declare their graph change with `connect`, `remove_wire` and `disconnect`.
+- **One comparison, `expect(found, routing)`,** reports the first part that differs (boxes, texts, wires or codes). Wiring edits declare their graph change with `connect`, `remove_wire` and `disconnect`. A wire that no term names alone, such as one of two look-alike stray strokes, is read with `Structure::wire` and declared removed with `remove_part`.
 - **Deviations from the design above**, each decided while writing it:
   - **Wires keep tee and crossing counts, and `Routing` says how far a step may change them.** `Kept` is for formatting and insertion. `Rerouted` lets crossings change, because today's move check ignores them and a re-routed stretch may cross a wire the old one didn't. `Ignored` is for wiring edits. Without this, moving the move check onto the structure would refuse moves that pass today.
   - **Texts name the box they title or guard,** rather than carrying flags. The formatter's net already compared these by index, so flags would weaken it.
   - **Syntax codes stay outside the structure,** because `shawline-shape` sits upstream of syntax. The formatter compares them beside it, as before.
+
+Wave 2 gate (done). F (`2c23150`) and E (`d1d09ad`) merged without conflicts.
+- **F, `shawline-fmt`:**
+  - the safety net is `Structure` at `Routing::Kept`, with the syntax codes compared beside it as a sorted list;
+  - a repair expects the structure with that box's slips at 0.
+- **E, `shawline-edit`:**
+  - a move relabels the input's structure by place and expects the result at `Rerouted`;
+  - each wiring edit declares its change and expects the result at `Ignored`, its old diagram mapped by unchanged places, so a stray move still fails;
+  - `place_node` inserts the expected box and word at their row-major indices.
+  
+  Each `Part` keeps the reason its old check gave, so no `.studio` line changed.
+- **Contract changes at the gate,** both proposed by E with diffs:
+  - **`S010` left out of the codes.** The tracer emits one per blocked end, and each is already an `End::Blocked` term, so the formatter's net is exactly as strict. Without the change, removing a stroke that runs into another was refused as a changed diagnostic. The new crate test `a_stroke_that_runs_into_another_can_be_removed` fails with `S010` put back.
+  - **`Structure::wire` and `remove_part`.** These replace `Model::part`, a private copy of how the structure reads a wire. Its consistency test moved into `structure.rs`, which now also checks a look-alike pair and blocked ends.
+- **Gate:**
+  - 284 tests;
+  - clippy clean on host and wasm;
+  - the playground build (533,837-byte wasm, down from 554,475 now the duplicate checks are gone) and its 37 Node checks green;
+  - no corpus file re-blessed;
+  - `fmt` and `fmt --fix` give byte-identical output to `7c71b4e` on all 37 corpus programs;
+  - no `Fingerprint`, `Print`, `BoxPrint`, `TextPrint`, `WirePrint`, `EndPrint` or `Target` type is left in any crate.
+- **P8 closed.**
 
 **Then Phase 2**, starting with inserting rows and columns. With wave 2 in place, insertion is a mapping that leaves structure equal, and needs no new check.
 
