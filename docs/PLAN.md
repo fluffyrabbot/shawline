@@ -16,6 +16,7 @@ How Shawline gets built: what is built in what order, who builds it, and how the
 | Character set | Closed repertoire, every character one cell wide | One font can cover everything, so alignment never depends on font fallback. |
 | Verification | One golden corpus plus per-crate unit tests | A single oracle, checked once at each gate (see Orchestration). |
 | Transliteration | Phonemic ASCII keys, no dictionary | Deterministic and license-free. A dictionary is an optional extra. |
+| Teaching the alphabet | An English gloss layer, on by default, drawn beside the program but never part of it (P9) | Every surface should teach Shavian to a newcomer. Because the layer is never source, turning it off costs fluent readers nothing. |
 
 ## Architecture
 
@@ -417,10 +418,11 @@ Two read-only Codex audits, one on UX (checked against WAI, MDN, Blender and Unr
 
 **Next, in order:**
 1. **Document spine.** See P8 below; it precedes Phase 2.
-2. **Keyboard and semantic selection.** A real palette combobox with phonemic search, zoom and pan, and a node inspector.
-3. **Repair in place.** `fix` in the playground and as an LSP quick fix, and richer diagnostics.
-4. **Onboarding.** A tour that tracks undo, README prerequisites, VS Code server status, and CLI `--help`.
-5. **Phase 2 order.** Insert rows and columns, constants by mouse, switch outputs, drawing switches, extracting definitions, then scrubbing.
+2. **Gloss layer.** See P9 below; it also precedes Phase 2.
+3. **Keyboard and semantic selection.** A real palette combobox with phonemic search, zoom and pan, and a node inspector.
+4. **Repair in place.** `fix` in the playground and as an LSP quick fix, and richer diagnostics.
+5. **Onboarding.** A tour that tracks undo, README prerequisites, VS Code server status, and CLI `--help`.
+6. **Phase 2 order.** Insert rows and columns, constants by mouse, switch outputs, drawing switches, extracting definitions, then scrubbing.
 
 ### P8: Document spine (before Studio Phase 2)
 
@@ -604,6 +606,61 @@ Wave 2 contract (done): `shawline-shape/src/structure.rs`, lead-owned, with 9 un
 
 **Then Phase 2**, starting with inserting rows and columns. With wave 2 in place, insertion is a mapping that leaves structure equal, and needs no new check.
 
+### P9: Gloss layer (after P8, before Studio Phase 2)
+
+**Goal.** Every surface teaches the Shavian alphabet to a newcomer. English sits beside the drawing, on by default, and one toggle turns it off. The rule that keeps it minimal: **English goes in the margin, never in the grid.** A gloss is never source text, never takes up a column, and never changes a program's meaning. SPEC §2's closed repertoire and one-cell rule hold exactly as before.
+
+**What exists today:**
+- **Primitive meanings are written out three times.** There is `gloss()` in `shawline-edit/src/wiring.rs` for the palette, `meaning()` in `shawline-lsp/src/analysis.rs` for hover, and SPEC §9's table.
+- **Transliteration goes one way.** `shawline-word` turns keys into letters. Nothing turns a word back into its keys.
+- **Nothing outside the palette shows any English** for a word on the sheet. Hover shows arity and the mirror partner, but not how a word is read.
+- **The renderer draws only the repertoire.** Every glyph is a path from `shawline-glyph`, and the SVG needs no fonts.
+
+**Two tiers, both exact.**
+1. **The reading** of a word is the keys you would type to produce it. `·𐑥𐑱𐑯` reads `=mayn`, `𐑣𐑧𐑤𐑴` reads `heloh`, and `𐑑𐑣` reads `t/h`. Shavian is phonemic, so for most words the reading already tells you the word. It also teaches typing.
+2. **The gloss** of a primitive is its English name: 𐑐 `add`, 𐑚 `sub`. Each pair of duals is named as a pair, so the strip teaches the mirror principle (SPEC §1.2) wherever a primitive appears.
+
+**Decisions.**
+
+| Decision | Choice | Rationale |
+|---|---|---|
+| Where English appears | Only in a view layer: the SVG strip, hover, the palette, and diagnostic messages. It never appears in `.shaw` text or any dump except `.gloss` | The source of truth stays Shavian. With the layer off, every output is byte-identical to today's. |
+| What a reading is | `shawline_word::reading(word)`, the inverse of `transliterate`. It inserts `/` only where the longest match would read otherwise (`t/h`, `a/y`, a leading `/v`), and writes the namer dot as `=` | There is one form to learn, and it is exactly what you type. A round-trip test makes it exact: `transliterate(reading(w)) == w`. |
+| Meanings for user-defined words | None. User words show their reading only, and ReadLex is not bundled | Chosen by the user. A phonemic reading already conveys the word. A lexicon would add wasm size and homophone ambiguity, and a learning aid that is sometimes wrong teaches distrust. |
+| Primitive names | One table in the contract: `Prim::gloss()`, at most 6 lowercase letters, and `Prim::meaning()`, SPEC §9's phrase. Both private copies are deleted | The short names are what the strip shows and what the palette lists. The phrase goes in hover. |
+| The short names | add/sub, mul/div, pair/unpair, cons/uncons, less/more, same/differ, min/max, show/read | Each mirror pair reads as a pair. At most 6 letters at half a cell each fits the 3-cell interior of a node box. |
+| What the strip shows per word | A primitive's node word shows its gloss. Every other Shavian word shows its reading, including names, ports, words inside `«»` text, and comments. Numbers show nothing | A primitive's letter is a sign rather than a word. Its key (`p`) teaches typing but says nothing about what the node does. Hover shows both. |
+| Layout | With glosses on, a strip half a cell high opens under every row. Glosses sit in the strip, centred under their word, in Latin glyphs half a cell wide, drawn in the comment ink. Vertical strokes continue through the strip | The grid opens to make room for English and closes again when the layer is off. Nothing is ever drawn over a stroke. |
+| A gloss that doesn't fit | A gloss is shown only if it lies entirely within its strip's free run (bounded by vertical strokes) and is at least one gloss character away from any gloss already placed in row-major order. Otherwise it is dropped from the strip, and hover still has it | Glosses are never truncated, shifted or drawn over a stroke. Each gate records how many were dropped, and placement is revisited if many are. |
+| Gloss glyphs | Lowercase `a`–`z`, `@`, `=` and `/` as procedural skeletons in `shawline-glyph`. They are not added to Shawline Mono | One geometric source keeps the stroke weight consistent, and the SVG still needs no fonts. Editors never draw a gloss, so the font doesn't need these glyphs. |
+| Renderer API | `render(grid, theme)` is unchanged and plain. New: `render_with(grid, Options { theme, gloss })`, `glosses(grid) -> Vec<Gloss>`, and `row_pitch(gloss) -> f64` | The corpus `svg` stage and its blessed files are unaffected. The playground computes hit-testing from the pitch rather than from a hard-coded `CELL_H`. |
+| Diagnostics | `shawline_word::annotate(message)` appends `(reading)` after each Shavian run, as in `𐑥𐑱𐑯 (mayn)`. It is applied where messages are printed (the CLI, the LSP, wasm `check`), not where they are written | No message site changes, and the corpus checks codes rather than wording. |
+| Editors | Hover gains a `Reading:` line for every word. There are no inlay hints and no CodeLens | Inlay hints shift columns and would break the drawing. The Studio is where the alphabet is taught. |
+| The default and the toggle | On everywhere. The playground has a "Readings" checkbox, kept in `store`. The CLI has `--plain` on `check`, `run` and `render`. The LSP has the setting `shawline.gloss`, which defaults to true | This is what the thesis asks for: guardrails by default, one switch to turn them off. |
+| Peek | In the playground, holding Alt by itself flips the layer until Alt is released. Pressing any other key cancels the peek | Readers learn to read without glosses by checking only when unsure. Only a lone Alt counts, so Option-typing on macOS doesn't flash the layer. |
+| The `.gloss` dump | A new corpus stage with one line per Shavian word in row-major order: `ROW:COL WORD READING [GLOSS] shown\|dropped` | Readings, glosses and placement are checked facts, in house dump style. The lead blesses it after reading every line. |
+| Order relative to Phase 2 | Before | Every Phase 2 overlay is written against the pitch-aware coordinates from the start. |
+
+**Contracts** (lead):
+- `Prim::gloss()` and `Prim::meaning()` in `shawline-vm/src/bytecode.rs`. The lead switches the palette and hover call sites to them and deletes both private copies. Palette and hover output stays the same except for the new short names.
+- Signatures, with thin first implementations: `shawline_word::reading` and `annotate`, and `shawline_render::{Options, Gloss, render_with, glosses, row_pitch}`.
+- Corpus stage `gloss` (`glosses` behind the `Display` impl of `Gloss`), and gate `gloss_clear`: for each valid program, no shown gloss overlaps a stroke, its strip's bounds, or another gloss.
+- SPEC §13 gains a "Reading" paragraph, and §9's primitive table gains the short-name column.
+- The CLI's `--plain` flag, its annotated diagnostics, and its glossed `render`.
+
+**Construction.** Four agents, with disjoint files:
+- **K** owns `shawline-word`: `reading` and `annotate`, plus the round-trip test over every pair of letters and a finite set of seeded random words (run under `scripts/capped`).
+- **G** owns `shawline-glyph`: the gloss skeletons, at half the width and height of the Shavian letters, and a specimen sheet.
+- **R** owns `shawline-render`: the strip, gloss placement, `row_pitch`, and drawing glosses through G's skeletons. It works against the contract's stub skeletons, so it doesn't wait for G.
+- **W** owns `shawline-wasm` and `playground/`: the Readings toggle, peek, pitch-aware coordinates for every overlay and hit test, annotated messages, and a tour step that introduces the layer.
+- The LSP changes (the hover reading line, `annotate`, and `shawline.gloss`) are small enough to go to whichever agent finishes first, as its own crate assignment.
+
+**Gate:**
+- The workspace tests pass. Every existing `.svg` is byte-identical without re-blessing. `.gloss` is blessed. `gloss_clear` and the round-trip test pass.
+- Clippy is clean on host and wasm. The playground build and its Node checks pass, plus new checks that toggling the layer and peeking leave the editor text unchanged. Everything runs under `scripts/capped`.
+- The number of dropped glosses across the corpus is recorded here.
+- **By hand:** screenshots of `01-hello` and the largest corpus sheet, glossed and plain, in light and dark. The layer passes if it reads as annotation and never as clutter. If it doesn't, the strip height and gloss scale are tuned here.
+
 ## Risks
 
 | Risk | Mitigation |
@@ -613,5 +670,6 @@ Wave 2 contract (done): `shawline-shape/src/structure.rs`, lead-owned, with 9 un
 | ASCII joints (`+ . '`) join an unrelated neighbouring stroke | SPEC §3: keep ASCII joints one cell from strokes they shouldn't meet. Canonical glyphs can't mis-join, and the formatter converts sketches to canonical form. |
 | Jitter straightening in the formatter is the hardest algorithm | B2 builds character normalization, spacing and snapping first, and straightening last, behind the P5 jitter corpus. |
 | `write-fonts` API churn | Pin the version. Fallback: emit a UFO and build it with `fontmake`. |
+| Glosses crowd the drawing | Readings in glyphs half a cell wide are usually narrower than their word. A gloss that doesn't fit is dropped rather than squeezed in (P9), and the layer turns off with one switch. |
 | No suitably licensed English → Shavian lexicon | v1 transliteration needs no dictionary (SPEC §13). |
 | Tail-call detection through switch arms | Defined in SPEC §10; B5 tests it directly and A4 tests constant-stack execution from `.shawasm`. |
