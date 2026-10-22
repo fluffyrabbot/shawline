@@ -20,9 +20,11 @@ pub(crate) struct Chain {
     pub ink: Ink,
 }
 
-type Key = (i64, i64, Ink);
+/// A stroke end, as chaining matches them: its point to an eighth of a unit,
+/// and its ink.
+pub(crate) type Key = (i64, i64, Ink);
 
-fn key(p: Point, ink: Ink) -> Key {
+pub(crate) fn key(p: Point, ink: Ink) -> Key {
     ((p.x * 8.0).round() as i64, (p.y * 8.0).round() as i64, ink)
 }
 
