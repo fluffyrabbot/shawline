@@ -530,6 +530,51 @@ Wave 1 contracts (done):
 - The self-crossing regression test passes.
 - **By hand:** time a refresh and a 20-cell preview drag on the largest corpus sheet, before and after, and record it here. Then edit during a long Run and see the output dim.
 
+Wave 1 gate (done). E (`92e202a`) and W (`2fe35c9`) merged without conflicts.
+- **E, `shawline-edit`:**
+  - edits borrow the `Doc`'s grid, diagram and canonical revision, and each returns the revision it checked, formatted afresh;
+  - a kind is set at every refusal site; the reason-to-kind table is in the P8 notes;
+  - `Wire::links` replaces `own_mask`, and `Placed` reports the ports it drew;
+  - the crate no longer depends on `shawline-fmt`.
+  
+  Judgment calls accepted:
+  - look-alike wires on untidy text are `unreadable`;
+  - a corner in no box is `target`, but a node sticking out of its definition is `blocked`;
+  - a constant with no blank cell after it is `blocked`;
+  - too many ports and a wire looping back into its own box are `unsupported`.
+  
+  New: a result that formats differently a second time is refused as `changed`; nothing in the corpus reaches it.
+- **W, `shawline-wasm` and `playground/`:**
+  - a `Doc` class, whose methods replace the text-taking exports; `run` and `trace` still take text, because the workers can't share wasm memory;
+  - `docs.js`, the two-entry cache;
+  - `flight.js`, which runs worker jobs one at a time, each with its `rev` and its own kill timer;
+  - stale Run output;
+  - `place_and_connect`, composed in Rust through `Placed`.
+- **Re-blessed `.studio`:** a refusal reads `refused KIND AT`. The diff was read before keeping it:
+  - the 36 refused moves gain `blocked`, with their cells unchanged;
+  - `15-fanout-cross`'s rewire now runs to its end. It ends on the same fan-out drawn without the self-crossing, a different text but the same program.
+  
+  The regression test is no longer ignored and passes.
+- **Gate:**
+  - 271 tests;
+  - clippy clean on host and wasm;
+  - the playground build (554,475-byte wasm) and 37 Node checks green.
+  
+  `cargo metadata` shows no crate depends on `shawline-cli`, which has no library.
+- **Timing,** median / p95 in ms, release build. Both builds were loaded into one page and timed interleaved. A refresh reads diagnostics, endpoints, wires, boxes and the drawing; a preview drag is 20 cells along a blank row.
+
+  | Sheet | Refresh `59952d2` | Refresh, new text | Refresh, after an edit | Preview `59952d2` | Preview |
+  |---|---|---|---|---|---|
+  | `11-even-odd` | 3.1 / 3.9 | 2.3 / 2.5 | 2.0 / 2.2 | 3.0 / 3.3 | 0.3 / 0.5 |
+  | `09-length` | 2.3 / 2.4 | 1.8 / 1.9 | 1.5 / 1.7 | 2.2 / 2.6 | 0.3 / 0.6 |
+
+  The browser pane was hidden, so a background page's timers could drift; one early run read 7 ms for a refresh. The same calls in Node agree with the table:
+  - `11-even-odd`: refresh 3.5 → 2.5 (2.2 after an edit), preview 3.7 → 0.34;
+  - `09-length`: refresh 2.6 → 1.9 (1.7 after an edit), preview 2.8 → 0.32.
+  
+  The preview's p95 stays under 1 ms, so no worker is needed.
+- **Stale Run, by hand:** Run on `84-heap-runaway`, with an edit 0.3 s in. The result arrived dimmed (opacity 0.45) and labelled "1757 ms · from an earlier version", and its `R008` link was a disabled button. The console showed no errors.
+
 **Wave 2: one structural comparison.**
 - **Lead contract:** `shawline-shape/src/structure.rs`, a `Structure::of(&Grid, &Diagram)` that ignores where things sit. It records:
   - boxes: style, titled, slips, parent, ports with what each meets, guarded dividers;

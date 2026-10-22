@@ -64,15 +64,15 @@ move 4:14 -1 0 ok 96b92c9c20f6
 move 4:14 1 0 ok 7af12cbffb50
 move 4:14 0 -1 ok 3eae273a8763
 move 4:14 0 1 ok 3cfb29f4e7ab
-move 12:16 -1 0 refused 12:16
-move 12:16 1 0 refused 12:16
-move 12:16 0 -1 refused 14:16
+move 12:16 -1 0 refused blocked 12:16
+move 12:16 1 0 refused blocked 12:16
+move 12:16 0 -1 refused blocked 14:16
 move 12:16 0 1 ok b7c38854f593
-move 12:24 -1 0 refused 12:24
+move 12:24 -1 0 refused blocked 12:24
 move 12:24 1 0 ok ddc415623b22
 move 12:24 0 -1 ok 2980397356f6
 move 12:24 0 1 ok 9f24ad920a2b
-move 12:36 -1 0 refused 12:36
+move 12:36 -1 0 refused blocked 12:36
 move 12:36 1 0 ok dd90f60d33eb
 move 12:36 0 -1 ok fd33385baefc
 move 12:36 0 1 ok b497bf15916b

@@ -56,22 +56,22 @@ rebuild 𐑨𐑚𐑕 25:16
   connect 26:3 26:16 ok 553571c81b48
   connect 26:22 26:30 ok 1d0ee8b1c254
 move 4:14 -1 0 ok b596e436a822
-move 4:14 1 0 refused 6:14
-move 4:14 0 -1 refused 6:14
+move 4:14 1 0 refused blocked 6:14
+move 4:14 0 -1 refused blocked 6:14
 move 4:14 0 1 ok 33e42a8b9519
-move 12:18 -1 0 refused 12:18
-move 12:18 1 0 refused 12:18
+move 12:18 -1 0 refused blocked 12:18
+move 12:18 1 0 refused blocked 12:18
 move 12:18 0 -1 ok be3460083ceb
 move 12:18 0 1 ok 42e570018328
 move 22:6 -1 0 ok dbb135fd1139
-move 22:6 1 0 refused 22:6
+move 22:6 1 0 refused blocked 22:6
 move 22:6 0 -1 ok f8085c6d910d
 move 22:6 0 1 ok 868c1e1efa9b
 move 22:16 -1 0 ok 74c8eb5070cc
-move 22:16 1 0 refused 22:16
+move 22:16 1 0 refused blocked 22:16
 move 22:16 0 -1 ok aa7b95f39f52
 move 22:16 0 1 ok 0e44bd121b71
-move 25:16 -1 0 refused 25:16
+move 25:16 -1 0 refused blocked 25:16
 move 25:16 1 0 ok 9d9d0c42597e
 move 25:16 0 -1 ok 00565bbd478c
 move 25:16 0 1 ok 2cfe9f4f5a4d

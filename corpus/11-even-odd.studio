@@ -89,11 +89,11 @@ move 4:14 -1 0 ok df035abc613e
 move 4:14 1 0 ok a47c9281e086
 move 4:14 0 -1 ok 6e42b7ca354b
 move 4:14 0 1 ok 3f8032bfb693
-move 12:16 -1 0 refused 12:16
-move 12:16 1 0 refused 12:16
+move 12:16 -1 0 refused blocked 12:16
+move 12:16 1 0 refused blocked 12:16
 move 12:16 0 -1 ok cf1b785dfeef
 move 12:16 0 1 ok 5ca33f156936
-move 12:25 -1 0 refused 12:25
+move 12:25 -1 0 refused blocked 12:25
 move 12:25 1 0 ok 9c0e3c4e32bc
 move 12:25 0 -1 ok bbe2deea90c8
 move 12:25 0 1 ok 466a59e233dd
@@ -101,11 +101,11 @@ move 22:14 -1 0 ok 4b2f60b44505
 move 22:14 1 0 ok adcaf2aec6d0
 move 22:14 0 -1 ok a4cc3a50c159
 move 22:14 0 1 ok 82b2991841d5
-move 30:16 -1 0 refused 30:16
-move 30:16 1 0 refused 30:16
+move 30:16 -1 0 refused blocked 30:16
+move 30:16 1 0 refused blocked 30:16
 move 30:16 0 -1 ok 4c439837087c
 move 30:16 0 1 ok 554baffd361c
-move 30:25 -1 0 refused 30:25
+move 30:25 -1 0 refused blocked 30:25
 move 30:25 1 0 ok 8cc6db2ce242
 move 30:25 0 -1 ok 3135d705b1f1
 move 30:25 0 1 ok 84839f1c547a

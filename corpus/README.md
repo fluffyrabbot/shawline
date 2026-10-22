@@ -10,7 +10,7 @@ The single oracle for every pipeline stage. Each `*.shaw` program may have expec
 | `.check` | Every static diagnostic, as `ROW:COL CODE` (SPEC §14) | Gate B |
 | `.out` | Program stdout, or `error ROW:COL CODE` | Gate B |
 | `.fmt.shaw` | Formatter output for a non-canonical input | Gate B |
-| `.studio` | How each Studio edit ends: `ok` with a hash of the result, or `refused` at a cell (`shawline_corpus::studio`) | P8 |
+| `.studio` | How each Studio edit ends: `ok` with a hash of the result, or `refused` with the refusal's kind and cell (`shawline_corpus::studio`) | P8 |
 
 A program with an empty `.check` and no `.fmt.shaw` is canonical: it must format to itself.
 

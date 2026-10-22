@@ -44,14 +44,14 @@ rebuild 𐑒𐑬𐑯𐑑 22:11
   connect 23:2 23:11 ok e496ed4e69dd
   connect 23:18 23:24 ok a96f65cf1db3
 move 4:14 -1 0 ok ce0248994175
-move 4:14 1 0 refused 6:14
-move 4:14 0 -1 refused 6:14
+move 4:14 1 0 refused blocked 6:14
+move 4:14 0 -1 refused blocked 6:14
 move 4:14 0 1 ok e506a776a5f4
-move 12:17 -1 0 refused 12:17
-move 12:17 1 0 refused 12:17
-move 12:17 0 -1 refused 14:17
+move 12:17 -1 0 refused blocked 12:17
+move 12:17 1 0 refused blocked 12:17
+move 12:17 0 -1 refused blocked 14:17
 move 12:17 0 1 ok 60107e73df0c
-move 12:26 -1 0 refused 12:26
+move 12:26 -1 0 refused blocked 12:26
 move 12:26 1 0 ok 20a62adfbf75
 move 12:26 0 -1 ok f821256bcb9c
 move 12:26 0 1 ok fed9374dffbd

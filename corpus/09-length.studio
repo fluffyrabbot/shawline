@@ -79,19 +79,19 @@ rebuild 𐑤𐑧𐑙𐑔 26:28
   connect 27:23 27:28 ok 2e27ae08f76b
   connect 27:35 27:40 ok 928abde62e62
 move 4:16 -1 0 ok f2301ab5f432
-move 4:16 1 0 refused 6:16
-move 4:16 0 -1 refused 6:16
+move 4:16 1 0 refused blocked 6:16
+move 4:16 0 -1 refused blocked 6:16
 move 4:16 0 1 ok 0531bb269fe8
-move 12:18 -1 0 refused 12:18
-move 12:18 1 0 refused 12:18
+move 12:18 -1 0 refused blocked 12:18
+move 12:18 1 0 refused blocked 12:18
 move 12:18 0 -1 ok d1073730955a
 move 12:18 0 1 ok 7f1485caa096
-move 12:40 -1 0 refused 12:40
-move 12:40 1 0 refused 12:40
+move 12:40 -1 0 refused blocked 12:40
+move 12:40 1 0 refused blocked 12:40
 move 12:40 0 -1 ok cb7e1bb1ff6c
 move 12:40 0 1 ok 2e4358ed42d9
 move 13:26 -1 0 ok 1366fd781fb1
-move 13:26 1 0 refused 13:26
+move 13:26 1 0 refused blocked 13:26
 move 13:26 0 -1 ok 805a20f7350a
 move 13:26 0 1 ok 0ab3ebbf6875
 move 22:8 -1 0 ok 61140f3e5d3d

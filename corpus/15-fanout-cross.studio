@@ -1,2 +1,4 @@
 rewire
-  remove_wire 2:4 refused 2:4
+  remove_wire 2:4 ok 1d104b3f637e
+  connect 2:2 6:22 ok 9466815b25ba
+  connect 2:2 7:22 ok 9cfea41f00dc

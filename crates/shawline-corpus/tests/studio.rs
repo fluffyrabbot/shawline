@@ -301,10 +301,9 @@ fn studio_trace() {
 }
 
 /// A fan-out whose branches cross each other owns both axes of the
-/// crossing, so removing the wire must take both (PLAN P8). Editing reads
-/// one axis per crossing today and leaves the other behind.
+/// crossing, so removing the wire must take both (PLAN P8). Edits read
+/// which axes a wire owns from `Wire::links`.
 #[test]
-#[ignore = "P8 wave 1: edits read crossing ownership from Wire::links"]
 fn removing_a_wire_that_crosses_itself_leaves_no_stroke() {
     let src = fs::read_to_string(root().join("15-fanout-cross.shaw")).unwrap();
     let doc = shawline_edit::remove_wire(&Doc::new(src), Pos::new(2, 4)).unwrap_or_else(|r| panic!("{r:?}"));

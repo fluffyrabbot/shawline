@@ -13,8 +13,8 @@
 //!
 //! A sequence stops at its first refusal. The dump has one line per step:
 //! the step, then `ok` with a hash of the resulting text, or `refused` with
-//! the cell the refusal points at. Wording is never recorded, as with
-//! diagnostics. The hash makes a refactor that should change nothing prove
+//! the refusal's kind and the cell it points at. Wording is never recorded,
+//! as with diagnostics. The hash makes a refactor that should change nothing prove
 //! it: any different text, even an equally good route, shows as a diff.
 
 use std::fmt::{self, Write};
@@ -249,7 +249,7 @@ fn walk(out: &mut String, indent: &str, src: &str, steps: &[Step]) {
                 doc = next;
             }
             Err(refusal) => {
-                writeln!(out, "{indent}{step} refused {}", refusal.at).unwrap();
+                writeln!(out, "{indent}{step} refused {} {}", refusal.kind, refusal.at).unwrap();
                 return;
             }
         }
