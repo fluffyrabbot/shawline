@@ -14,7 +14,7 @@ name = "shawline-lsp"
 path = "src/main.rs"
 
 [dependencies]
-shawline-cli.workspace = true
+shawline-doc.workspace = true
 shawline-grid.workspace = true
 shawline-shape.workspace = true
 shawline-syntax.workspace = true

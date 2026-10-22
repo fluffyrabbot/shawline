@@ -9,7 +9,8 @@ publish.workspace = true
 crate-type = ["cdylib"]
 
 [dependencies]
-shawline-cli.workspace = true
+shawline-doc.workspace = true
+shawline-render.workspace = true
 shawline-grid.workspace = true
 shawline-shape.workspace = true
 shawline-edit.workspace = true

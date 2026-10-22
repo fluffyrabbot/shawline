@@ -11,6 +11,7 @@
 use std::fs;
 
 use shawline_corpus::{STAGES, programs, root};
+use shawline_doc::Doc;
 use shawline_grid::{Dir, Grid, Pos};
 use shawline_shape::{PortKind, recognize};
 
@@ -21,12 +22,9 @@ fn stage(name: &str) -> fn(&str) -> String {
 /// Non-lint diagnostic codes, sorted: positions legitimately change when a
 /// box moves.
 fn codes(src: &str) -> Vec<String> {
-    let diagnostics = match shawline_cli::check(src) {
-        Ok(checked) => checked.diagnostics,
-        Err(errors) => errors,
-    };
+    let doc = Doc::new(src);
     let mut codes: Vec<String> =
-        diagnostics.iter().filter(|d| !d.code.starts_with('L')).map(|d| d.code.to_owned()).collect();
+        doc.diagnostics().iter().filter(|d| !d.code.starts_with('L')).map(|d| d.code.to_owned()).collect();
     codes.sort();
     codes
 }
@@ -57,10 +55,11 @@ fn every_node_box_moves_one_cell_or_is_refused_with_a_reason() {
         }
         let src = fs::read_to_string(&program).unwrap();
         let (want_codes, want_out) = (codes(&src), out(&src));
+        let doc = Doc::new(src.as_str());
         for corner in node_corners(&src) {
             for (dr, dc) in [(-1, 0), (1, 0), (0, -1), (0, 1)] {
                 let what = format!("{name}: box at {corner} by ({dr}, {dc})");
-                match shawline_edit::move_box(&src, corner, dr, dc) {
+                match shawline_edit::move_box(&doc, corner, dr, dc).map(|moved| moved.text().to_owned()) {
                     Err(refusal) => {
                         refused += 1;
                         if refusal.reason.trim().is_empty() {
@@ -79,7 +78,7 @@ fn every_node_box_moves_one_cell_or_is_refused_with_a_reason() {
                             failures.push(format!("{what}: diagnostics change\n{text}"));
                         } else if out(&text) != want_out {
                             failures.push(format!("{what}: output changes\n{text}"));
-                        } else if shawline_cli::format(&text).as_deref() != Ok(text.as_str()) {
+                        } else if Doc::new(text.as_str()).formatted() != Some(text.as_str()) {
                             failures.push(format!("{what}: result isn't canonical\n{text}"));
                         }
                     }

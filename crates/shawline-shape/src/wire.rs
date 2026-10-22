@@ -17,6 +17,11 @@ use shawline_grid::{Dir, Pos};
 pub struct Wire {
     /// Every cell of the wire, row-major. Crossings appear in both wires.
     pub cells: Vec<Pos>,
+    /// Parallel to `cells`: the directions (`Dir::bit`s) in which each cell
+    /// joins this wire. A cell's own strokes, except at a crossing, where
+    /// the wire owns one axis, or both when it crosses itself. Not part of
+    /// the `.wires` dump.
+    pub links: Vec<u8>,
     /// Tees inside the wire: fan-out points, or merges of switch outputs.
     pub tees: Vec<Pos>,
     /// Crossings the wire passes through.

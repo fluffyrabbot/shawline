@@ -19,6 +19,7 @@ use std::fs;
 use shawline_corpus::jitter::{Fired, Rng, jitter};
 use shawline_corpus::studio::{Link, Step, links, rebuilds};
 use shawline_corpus::{STAGES, programs, root};
+use shawline_doc::Doc;
 use shawline_grid::{Grid, Pos};
 
 /// Each wire as its source cell and its sink cells, the sinks row-major.
@@ -33,16 +34,12 @@ fn wiring_of(list: &[Link]) -> Wiring {
     list.iter().map(|l| (l.from, l.to.clone())).collect()
 }
 
-fn wiring(text: &str) -> Wiring {
-    wiring_of(&links(&shawline_cli::check(text).expect("on the grid").sheet))
+fn wiring(doc: &Doc) -> Wiring {
+    wiring_of(&links(doc.sheet().expect("on the grid")))
 }
 
-fn codes(text: &str) -> BTreeSet<String> {
-    let found = match shawline_cli::check(text) {
-        Ok(checked) => checked.diagnostics,
-        Err(errors) => errors,
-    };
-    found.iter().filter(|d| !d.code.starts_with('L')).map(|d| d.code.to_owned()).collect()
+fn codes(doc: &Doc) -> BTreeSet<String> {
+    doc.diagnostics().iter().filter(|d| !d.code.starts_with('L')).map(|d| d.code.to_owned()).collect()
 }
 
 /// A step and the wiring it must leave.
@@ -62,8 +59,9 @@ fn add(wiring: &mut Wiring, from: Pos, to: Pos) {
 
 /// The sequence for one program, or `None` when it has nothing editable.
 fn sequence(src: &str) -> Option<Vec<Expect>> {
-    let sheet = shawline_cli::check(src).ok()?.sheet;
-    let all = links(&sheet);
+    let doc = Doc::new(src);
+    let sheet = doc.sheet()?;
+    let all = links(sheet);
     let whole = wiring_of(&all);
     let mut out = Vec::new();
 
@@ -78,7 +76,7 @@ fn sequence(src: &str) -> Option<Vec<Expect>> {
     }
 
     // Remove a node with its wires, place it again, reconnect it, move it.
-    if let Some((call, steps)) = rebuilds(&sheet).into_iter().next() {
+    if let Some((call, steps)) = rebuilds(sheet).into_iter().next() {
         let mut now: Wiring = BTreeSet::new();
         for (from, to) in &whole {
             if call.outputs.contains(from) {
@@ -112,15 +110,21 @@ fn sequence(src: &str) -> Option<Vec<Expect>> {
     Some(out)
 }
 
-/// How each step went: the text it produced, or the cell it was refused at.
-type Trail = Vec<Result<String, Pos>>;
+/// How each step went: the revision it produced, or the cell it was refused
+/// at.
+type Trail = Vec<Result<Doc, Pos>>;
 
 /// Walks `expects` from `start`, the first step naming `start`'s cells
 /// through `at`. Stops at the first refusal.
 fn walk(start: &str, at: impl Fn(Pos) -> Pos, expects: &[Expect]) -> Trail {
-    let mut trail = Vec::new();
-    let mut text = start.to_owned();
+    let first = Doc::new(start);
+    let mut trail: Trail = Vec::new();
     for (k, e) in expects.iter().enumerate() {
+        // Each step edits the revision the last one returned.
+        let doc = match trail.last() {
+            Some(Ok(doc)) => doc,
+            _ => &first,
+        };
         let step = if k > 0 {
             e.step.clone()
         } else {
@@ -129,11 +133,8 @@ fn walk(start: &str, at: impl Fn(Pos) -> Pos, expects: &[Expect]) -> Trail {
                 other => other.clone(),
             }
         };
-        match step.apply(&text) {
-            Ok(next) => {
-                trail.push(Ok(next.clone()));
-                text = next;
-            }
+        match step.apply(doc) {
+            Ok(next) => trail.push(Ok(next)),
             Err(r) => {
                 trail.push(Err(r.at));
                 break;
@@ -158,20 +159,22 @@ fn studio_sequences() {
         let src = fs::read_to_string(&program).unwrap();
         let Some(expects) = sequence(&src) else { continue };
         programs_tried += 1;
-        let base = codes(&src);
+        let base = codes(&Doc::new(src.as_str()));
         let trail = walk(&src, |p| p, &expects);
         for (e, got) in expects.iter().zip(&trail) {
-            let Ok(text) = got else { continue };
+            let Ok(doc) = got else { continue };
             steps_checked += 1;
             let what = format!("{name}: {}", e.step);
-            if shawline_cli::format(text).as_deref() != Ok(text.as_str()) {
+            let text = doc.text();
+            // A fresh revision, so the formatter really runs.
+            if Doc::new(text).formatted() != Some(text) {
                 failures.push(format!("{what}: result isn't canonical\n{text}"));
             }
-            let found = wiring(text);
+            let found = wiring(doc);
             if found != e.wiring {
                 failures.push(format!("{what}: wires are\n{found:?}\nexpected\n{:?}\n{text}", e.wiring));
             }
-            for code in codes(text).difference(&base) {
+            for code in codes(doc).difference(&base) {
                 if !WHILE_UNWIRED.contains(&code.as_str()) {
                     failures.push(format!("{what}: gains {code}\n{text}"));
                 }
@@ -182,8 +185,8 @@ fn studio_sequences() {
             && let Some(Ok(last)) = trail.last()
         {
             finished += 1;
-            if codes(last) != base || out(last) != out(&src) {
-                failures.push(format!("{name}: the sequence doesn't end with the same program\n{last}"));
+            if codes(last) != base || out(last.text()) != out(&src) {
+                failures.push(format!("{name}: the sequence doesn't end with the same program\n{}", last.text()));
             }
         }
         // The same steps from a jittered copy of the text.
@@ -192,7 +195,9 @@ fn studio_sequences() {
         let shown = jitter(&src, &wire, &mut Rng(0), &mut Fired::default());
         // Refusals point at the text each start showed, so only which step
         // refused is compared.
-        let texts = |t: &Trail| -> Vec<Option<String>> { t.iter().map(|r| r.as_ref().ok().cloned()).collect() };
+        let texts = |t: &Trail| -> Vec<Option<String>> {
+            t.iter().map(|r| r.as_ref().ok().map(|doc| doc.text().to_owned())).collect()
+        };
         let (want, got) = (texts(&trail), texts(&walk(&shown.text, |p| shown.at(p), &expects)));
         if got != want {
             let k = got.iter().zip(&want).position(|(a, b)| a != b).unwrap_or(want.len().min(got.len()));

@@ -3,13 +3,16 @@
 //!
 //! # Contract
 //!
-//! The signatures and the semantics written on them are lead-owned and frozen
-//! for the P6 spike. The implementation behind them is agent E's: add modules
-//! freely, but don't change what these functions take, return or promise.
+//! The signatures and the semantics written on them are lead-owned (P6, P7,
+//! and P8's revisions and refusal kinds). The implementation behind them is
+//! the edit agent's: add modules freely, but don't change what these
+//! functions take, return or promise.
 //!
-//! Every function here takes the sheet as text and returns new text or a
-//! [`Refusal`]. The text is the only state (Studio principle 1), so undo,
-//! sharing and the CLI need nothing new.
+//! Every function here takes one revision of the sheet as a [`Doc`] and
+//! returns a new revision or a [`Refusal`]. The text is the only state
+//! (Studio principle 1), so undo, sharing and the CLI need nothing new.
+//! An edit returns the revision it checked, so whatever reads it next
+//! shares that reading (PLAN P8).
 //!
 //! An edit is **checked**: before returning `Ok`, the result is recognized
 //! again and compared with the input. It must have the same boxes (apart from
@@ -27,9 +30,11 @@ mod sheet;
 mod wiring;
 
 use std::collections::HashSet;
+use std::fmt;
 
-use shawline_grid::{Dir, Grid, Pos};
-use shawline_shape::{Diagram, recognize};
+use shawline_doc::Doc;
+use shawline_grid::{Dir, Grid, Pos, Rect};
+use shawline_shape::{Diagram, PortKind};
 
 use router::{BUDGET, CELL, CLEARANCE, Cell, Start, Terrain};
 
@@ -38,14 +43,62 @@ use router::{BUDGET, CELL, CLEARANCE, Cell, Start, Terrain};
 pub struct Refusal {
     /// The cell the refusal is about, for the UI to point at.
     pub at: Pos,
+    /// What kind of obstacle it is, so the UI can pick a remedy. The corpus
+    /// checks kinds and cells, never wording.
+    pub kind: RefusalKind,
     /// A sentence the UI can show as is, such as "no free path for the wire
     /// from 𐑐; insert a column?".
     pub reason: String,
 }
 
+/// What stopped an edit (PLAN P8).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum RefusalKind {
+    /// The sheet can't be read for editing: a grid error, or a text the
+    /// formatter can't tidy.
+    Unreadable,
+    /// The cell named isn't what the edit needs: no box corner, no source,
+    /// no sink, no editable wire, or a sink that already has a wire.
+    Target,
+    /// Studio can't make this edit yet: a switch's merged outputs, a wire
+    /// touching an inline node, a word that isn't Shavian.
+    Unsupported,
+    /// There is no room: the result would overlap a box, leave its parent,
+    /// or find no free path. Inserting rows or columns may help.
+    Blocked,
+    /// The router's search budget ran out before it found a path.
+    GaveUp,
+    /// The result would change something the edit promises to keep: the
+    /// connections, the diagnostics, or its own canonical form.
+    Changed,
+}
+
+impl RefusalKind {
+    /// Its name in dumps and in JS: `unreadable`, `target`, `unsupported`,
+    /// `blocked`, `gave-up` or `changed`.
+    pub const fn name(self) -> &'static str {
+        match self {
+            RefusalKind::Unreadable => "unreadable",
+            RefusalKind::Target => "target",
+            RefusalKind::Unsupported => "unsupported",
+            RefusalKind::Blocked => "blocked",
+            RefusalKind::GaveUp => "gave-up",
+            RefusalKind::Changed => "changed",
+        }
+    }
+}
+
+impl fmt::Display for RefusalKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.name())
+    }
+}
+
 impl Refusal {
+    /// Temporary (P8 wave 1): every refusal is `Changed` until agent E sets
+    /// the kind at each site and removes this constructor.
     pub(crate) fn new(at: Pos, reason: impl Into<String>) -> Self {
-        Self { at, reason: reason.into() }
+        Self { at, kind: RefusalKind::Changed, reason: reason.into() }
     }
 }
 
@@ -62,22 +115,21 @@ impl Refusal {
 /// - **Refusals:** no box has its corner at `corner`, the box would overlap
 ///   another box or leave its parent, or a wire can't be re-routed within the
 ///   search budget.
-pub fn move_box(src: &str, corner: Pos, dr: isize, dc: isize) -> Result<String, Refusal> {
-    mover::move_box(src, corner, dr, dc)
+pub fn move_box(doc: &Doc, corner: Pos, dr: isize, dc: isize) -> Result<Doc, Refusal> {
+    mover::move_box(doc.text(), corner, dr, dc).map(Doc::new)
 }
 
 /// The cheapest orthogonal path for a wire from cell `from` to cell `to`,
-/// through cells that are blank in `src` (both ends included in the path).
+/// through cells that are blank in `doc` (both ends included in the path).
 ///
 /// Cost follows the formatter's aesthetics (SPEC §11–§12): each cell costs 1,
 /// each bend costs more, each crossing of an existing wire much more, and a
 /// cell beside a box border or another wire costs a little extra (clearance).
 /// The search is best-first with a fixed budget of expanded cells. `None`
 /// when no path exists or the budget runs out, so a caller can't hang.
-pub fn route(src: &str, from: Pos, to: Pos) -> Option<Vec<Pos>> {
-    let grid = Grid::parse(src).ok()?;
-    let diagram = recognize(&grid);
-    let sheet = Plain::new(&grid, &diagram, from, to);
+pub fn route(doc: &Doc, from: Pos, to: Pos) -> Option<Vec<Pos>> {
+    let (grid, diagram) = (doc.grid().ok()?, doc.diagram()?);
+    let sheet = Plain::new(grid, diagram, from, to);
     if sheet.cell(from) != Cell::Free || sheet.cell(to) != Cell::Free {
         return None;
     }
@@ -120,50 +172,81 @@ pub struct Candidate {
 /// old one plus this pair, and nothing else changes. The result is canonical.
 /// Refused when `to` already has a wire, the cells aren't a source and a sink,
 /// or no route fits within the router's budget.
-pub fn connect(src: &str, from: Pos, to: Pos) -> Result<String, Refusal> {
-    wiring::connect(src, from, to)
+pub fn connect(doc: &Doc, from: Pos, to: Pos) -> Result<Doc, Refusal> {
+    wiring::connect(doc.text(), from, to).map(Doc::new)
 }
 
 /// Removes the whole wire that passes through cell `at`, with every branch.
 /// Refused when no editable wire passes through `at`.
-pub fn remove_wire(src: &str, at: Pos) -> Result<String, Refusal> {
-    wiring::remove_wire(src, at)
+pub fn remove_wire(doc: &Doc, at: Pos) -> Result<Doc, Refusal> {
+    wiring::remove_wire(doc.text(), at).map(Doc::new)
 }
 
 /// Removes only the branch of a wire that reaches sink `to`, back to the tee
 /// it leaves from. A tee left with two arms becomes a plain stroke. When the
 /// wire has no other sink, the whole wire goes, as with [`remove_wire`].
-pub fn disconnect(src: &str, to: Pos) -> Result<String, Refusal> {
-    wiring::disconnect(src, to)
+pub fn disconnect(doc: &Doc, to: Pos) -> Result<Doc, Refusal> {
+    wiring::disconnect(doc.text(), to).map(Doc::new)
 }
 
 /// Places a canonical node box for `word` with its top-left corner at
 /// `corner`: `inputs` arrowheads on its left border, `outputs` tees on its
 /// right, and no wires. Refused when the box would overlap anything, or not
 /// lie wholly inside one definition (or one arm of a switch).
+///
+/// The result names the new node's ports in its own cells, so a compound
+/// gesture (place, then connect) can name them without guessing.
 pub fn place_node(
-    src: &str,
+    doc: &Doc,
     corner: Pos,
     word: &str,
     inputs: u16,
     outputs: u16,
-) -> Result<String, Refusal> {
-    wiring::place_node(src, corner, word, inputs, outputs)
+) -> Result<Placed, Refusal> {
+    let placed = Doc::new(wiring::place_node(doc.text(), corner, word, inputs, outputs)?);
+    let Some((inputs, outputs)) = new_ports(doc, &placed) else {
+        return Err(Refusal::new(corner, "the placed node can't be found again; please report it"));
+    };
+    Ok(Placed { doc: placed, inputs, outputs })
+}
+
+/// A node [`place_node`] placed.
+#[derive(Debug)]
+pub struct Placed {
+    /// The sheet with the node in it.
+    pub doc: Doc,
+    /// The node's input arrowheads, top to bottom: sinks for [`connect`].
+    pub inputs: Vec<Pos>,
+    /// The node's output tees, top to bottom: sources for [`connect`].
+    pub outputs: Vec<Pos>,
+}
+
+/// Temporary (P8 wave 1, until agent E reports ports from the placement
+/// itself): the ports of the one box in `after` that the canonical form of
+/// `before` lacks.
+fn new_ports(before: &Doc, after: &Doc) -> Option<(Vec<Pos>, Vec<Pos>)> {
+    let old: HashSet<Rect> = before.canonical()?.diagram()?.boxes.iter().map(|b| b.rect).collect();
+    let new = after.diagram()?.boxes.iter().find(|b| !old.contains(&b.rect))?;
+    let ports = |side: Dir, kind: PortKind| -> Vec<Pos> {
+        let found = new.ports.iter().filter(|p| p.side == side && p.kind == kind && p.dir == Dir::E);
+        found.map(|p| p.pos).collect()
+    };
+    Some((ports(Dir::W, PortKind::Arrow), ports(Dir::E, PortKind::Tee)))
 }
 
 /// Removes the node box whose top-left corner is `corner`. Every wire it
 /// sources goes too, and only the branches that reach its inputs
 /// ([`disconnect`]).
-pub fn remove_node(src: &str, corner: Pos) -> Result<String, Refusal> {
-    wiring::remove_node(src, corner)
+pub fn remove_node(doc: &Doc, corner: Pos) -> Result<Doc, Refusal> {
+    wiring::remove_node(doc.text(), corner).map(Doc::new)
 }
 
 /// What the context palette offers, in a fixed order: primitives first in
 /// SPEC §9 table order (with `𐑯𐑦𐑤`), then the sheet's definitions in sheet
 /// order. With `from`, a wire is being dragged from that source, so only
 /// candidates with at least one input are offered.
-pub fn palette(src: &str, from: Option<Pos>) -> Vec<Candidate> {
-    wiring::palette(src, from)
+pub fn palette(doc: &Doc, from: Option<Pos>) -> Vec<Candidate> {
+    wiring::palette(doc, from)
 }
 
 // ---------------------------------------------------------------------------
@@ -186,12 +269,13 @@ pub struct Endpoint {
     pub span: usize,
 }
 
-/// Every source and every sink of `src`, each in row-major order. Empty
+/// Every source and every sink of `doc`, each in row-major order. Empty
 /// when the text has grid errors.
-pub fn endpoints(src: &str) -> (Vec<Endpoint>, Vec<Endpoint>) {
-    let Ok(grid) = Grid::parse(src) else { return (Vec::new(), Vec::new()) };
-    let diagram = recognize(&grid);
-    let model = model::Model::new(&grid, &diagram);
+pub fn endpoints(doc: &Doc) -> (Vec<Endpoint>, Vec<Endpoint>) {
+    let (Ok(grid), Some(diagram)) = (doc.grid(), doc.diagram()) else {
+        return (Vec::new(), Vec::new());
+    };
+    let model = model::Model::new(grid, diagram);
     let (sources, sinks) = model.endpoints();
     let sources = sources
         .into_iter()
@@ -211,15 +295,15 @@ pub fn endpoints(src: &str) -> (Vec<Endpoint>, Vec<Endpoint>) {
 /// `to`: what [`connect`] would draw when `to` is a free sink in reach, or
 /// a route to the blank cell `to`. `None` when nothing fits. For a live
 /// preview; nothing is edited.
-pub fn preview(src: &str, from: Pos, to: Pos) -> Option<Vec<Pos>> {
-    wiring::preview(src, from, to)
+pub fn preview(doc: &Doc, from: Pos, to: Pos) -> Option<Vec<Pos>> {
+    wiring::preview(doc.text(), from, to)
 }
 
 /// For each wire of the recognized diagram (`Diagram::wires` order), the
 /// cell naming its source as [`connect`] takes it, when the wire is
 /// editable: so a drag may start on a wire to fan it out.
-pub fn wire_sources(src: &str) -> Vec<Option<Pos>> {
-    wiring::wire_sources(src)
+pub fn wire_sources(doc: &Doc) -> Vec<Option<Pos>> {
+    wiring::wire_sources(doc.text())
 }
 
 /// A sheet as [`route`] sees it: blank cells are free except where a new

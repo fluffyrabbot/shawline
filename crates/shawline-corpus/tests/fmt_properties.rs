@@ -8,6 +8,7 @@
 use std::fs;
 
 use shawline_corpus::{STAGES, programs, root};
+use shawline_doc::Doc;
 
 fn stage(name: &str) -> fn(&str) -> String {
     STAGES.iter().find(|s| s.name == name).expect("registered stage").run
@@ -41,16 +42,16 @@ fn formatting_is_idempotent_and_preserves_meaning() {
 
     for program in programs(&root()) {
         let src = fs::read_to_string(&program).unwrap();
-        let Ok(checked_src) = shawline_cli::check(&src) else { continue };
-        if checked_src.has_errors() {
+        if Doc::new(src.as_str()).has_errors() {
             continue;
         }
         let name = program.file_name().unwrap().to_string_lossy().into_owned();
         for (variant, text) in [("canonical", src.clone()), ("ascii", ascii(&src))] {
             let (want_check, want_out) = (check(&text), out(&text));
-            let formatted = shawline_cli::format(&text).expect("no grid errors");
+            let formatted = Doc::new(text.as_str()).formatted().expect("no grid errors").to_owned();
             checked += 1;
-            if shawline_cli::format(&formatted).as_deref() != Ok(formatted.as_str()) {
+            // A fresh revision, so the formatter really runs again.
+            if Doc::new(formatted.as_str()).formatted() != Some(formatted.as_str()) {
                 failures.push(format!("{name} ({variant}): formatting twice changes it"));
             }
             if check(&formatted) != want_check {

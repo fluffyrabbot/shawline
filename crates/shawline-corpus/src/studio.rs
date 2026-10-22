@@ -19,6 +19,8 @@
 
 use std::fmt::{self, Write};
 
+use shawline_doc::Doc;
+use shawline_edit::Refusal;
 use shawline_grid::{Dir, Grid, Pos};
 use shawline_shape::{PortKind, recognize};
 use shawline_syntax::ast::{Endpoint, Graph, NodeKind, Sheet};
@@ -146,16 +148,16 @@ pub enum Step {
 }
 
 impl Step {
-    /// Applies the step to `text`.
-    pub fn apply(&self, text: &str) -> Result<String, shawline_edit::Refusal> {
+    /// Applies the step to `doc`.
+    pub fn apply(&self, doc: &Doc) -> Result<Doc, Refusal> {
         match self {
-            Step::RemoveWire(at) => shawline_edit::remove_wire(text, *at),
-            Step::Connect(from, to) => shawline_edit::connect(text, *from, *to),
-            Step::RemoveNode(corner) => shawline_edit::remove_node(text, *corner),
+            Step::RemoveWire(at) => shawline_edit::remove_wire(doc, *at),
+            Step::Connect(from, to) => shawline_edit::connect(doc, *from, *to),
+            Step::RemoveNode(corner) => shawline_edit::remove_node(doc, *corner),
             Step::PlaceNode { corner, word, inputs, outputs } => {
-                shawline_edit::place_node(text, *corner, word, *inputs, *outputs)
+                shawline_edit::place_node(doc, *corner, word, *inputs, *outputs).map(|placed| placed.doc)
             }
-            Step::Move { corner, dr, dc } => shawline_edit::move_box(text, *corner, *dr, *dc),
+            Step::Move { corner, dr, dc } => shawline_edit::move_box(doc, *corner, *dr, *dc),
         }
     }
 }
@@ -239,12 +241,12 @@ pub fn moves(src: &str) -> Vec<Step> {
 
 /// Runs `steps` from `src` until one is refused, writing a line per step.
 fn walk(out: &mut String, indent: &str, src: &str, steps: &[Step]) {
-    let mut text = src.to_owned();
+    let mut doc = Doc::new(src);
     for step in steps {
-        match step.apply(&text) {
+        match step.apply(&doc) {
             Ok(next) => {
-                writeln!(out, "{indent}{step} ok {}", digest(&next)).unwrap();
-                text = next;
+                writeln!(out, "{indent}{step} ok {}", digest(next.text())).unwrap();
+                doc = next;
             }
             Err(refusal) => {
                 writeln!(out, "{indent}{step} refused {}", refusal.at).unwrap();
@@ -256,16 +258,17 @@ fn walk(out: &mut String, indent: &str, src: &str, steps: &[Step]) {
 
 /// The `.studio` dump of a valid program.
 pub fn dump(src: &str) -> String {
-    let sheet = match shawline_cli::check(src) {
-        Ok(checked) if !checked.has_errors() => checked.sheet,
+    let doc = Doc::new(src);
+    let sheet = match doc.sheet() {
+        Some(sheet) if !doc.has_errors() => sheet,
         _ => return "not a valid program\n".to_owned(),
     };
     let mut out = String::new();
-    if let Some(steps) = rewire(src, &sheet) {
+    if let Some(steps) = rewire(src, sheet) {
         out.push_str("rewire\n");
         walk(&mut out, "  ", src, &steps);
     }
-    for (call, steps) in rebuilds(&sheet) {
+    for (call, steps) in rebuilds(sheet) {
         writeln!(out, "rebuild {} {}", call.word, call.corner).unwrap();
         walk(&mut out, "  ", src, &steps);
     }

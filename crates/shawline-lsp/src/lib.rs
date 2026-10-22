@@ -29,8 +29,7 @@ use lsp_types::{
     SemanticTokensServerCapabilities, ServerCapabilities, TextDocumentSyncCapability,
     TextDocumentSyncKind, TextEdit, Uri,
 };
-use shawline_cli::Checked;
-use shawline_grid::Diagnostic;
+use shawline_doc::Doc;
 
 use position::Encoding;
 use typing::Typing;
@@ -103,24 +102,16 @@ pub fn capabilities(enc: Encoding) -> ServerCapabilities {
     }
 }
 
-struct Doc {
-    text: String,
+/// An open document: one revision per version the client sends.
+struct Open {
+    doc: Doc,
     version: i32,
-    checked: Result<Checked, Vec<Diagnostic>>,
     typing: Typing,
-}
-
-impl Doc {
-    fn set(&mut self, text: String, version: i32) {
-        self.checked = shawline_cli::check(&text);
-        self.text = text;
-        self.version = version;
-    }
 }
 
 struct Server {
     enc: Encoding,
-    docs: HashMap<Uri, Doc>,
+    docs: HashMap<Uri, Open>,
 }
 
 impl Server {
@@ -149,11 +140,9 @@ impl Server {
                     return Vec::new();
                 };
                 let doc = p.text_document;
-                let checked = shawline_cli::check(&doc.text);
-                let entry = Doc {
-                    text: doc.text,
+                let entry = Open {
+                    doc: Doc::new(doc.text),
                     version: doc.version,
-                    checked,
                     typing: Typing::default(),
                 };
                 self.docs.insert(doc.uri.clone(), entry);
@@ -167,13 +156,14 @@ impl Server {
                 };
                 let uri = p.text_document.uri;
                 // Sync is FULL, so the last change holds the whole text.
-                let (Some(doc), Some(change)) = (
+                let (Some(open), Some(change)) = (
                     self.docs.get_mut(&uri),
                     p.content_changes.into_iter().last(),
                 ) else {
                     return Vec::new();
                 };
-                doc.set(change.text, p.text_document.version);
+                open.doc = Doc::new(change.text);
+                open.version = p.text_document.version;
                 uri
             }
             DidCloseTextDocument::METHOD => {
@@ -188,21 +178,17 @@ impl Server {
             }
             _ => return Vec::new(),
         };
-        let doc = &self.docs[&uri];
+        let open = &self.docs[&uri];
         let params =
-            PublishDiagnosticsParams::new(uri.clone(), self.diagnostics(doc), Some(doc.version));
+            PublishDiagnosticsParams::new(uri.clone(), self.diagnostics(&open.doc), Some(open.version));
         vec![Notification::new(PublishDiagnostics::METHOD.into(), params)]
     }
 
     fn diagnostics(&self, doc: &Doc) -> Vec<lsp_types::Diagnostic> {
-        let found = match &doc.checked {
-            Ok(checked) => &checked.diagnostics,
-            Err(grid) => grid,
-        };
-        found
+        doc.diagnostics()
             .iter()
             .map(|d| lsp_types::Diagnostic {
-                range: position::cells_range(&doc.text, self.enc, d.at, 1),
+                range: position::cells_range(doc.text(), self.enc, d.at, 1),
                 severity: Some(if d.is_warning() {
                     DiagnosticSeverity::WARNING
                 } else {
@@ -217,24 +203,21 @@ impl Server {
     }
 
     fn formatting(&self, p: DocumentFormattingParams) -> Option<Vec<TextEdit>> {
-        let doc = self.docs.get(&p.text_document.uri)?;
-        let formatted = shawline_cli::format(&doc.text).ok()?;
-        if formatted == doc.text {
+        let doc = &self.docs.get(&p.text_document.uri)?.doc;
+        let formatted = doc.formatted()?;
+        if formatted == doc.text() {
             return Some(Vec::new());
         }
-        let whole = Range::new(Default::default(), position::end_of(&doc.text, self.enc));
-        Some(vec![TextEdit::new(whole, formatted)])
+        let whole = Range::new(Default::default(), position::end_of(doc.text(), self.enc));
+        Some(vec![TextEdit::new(whole, formatted.to_owned())])
     }
 
     fn semantic_tokens(&self, p: SemanticTokensParams) -> Option<SemanticTokensResult> {
-        let doc = self.docs.get(&p.text_document.uri)?;
-        let Ok(checked) = &doc.checked else {
-            return Some(SemanticTokensResult::Tokens(SemanticTokens::default()));
-        };
+        let doc = &self.docs.get(&p.text_document.uri)?.doc;
         let mut data = Vec::new();
         let (mut line, mut start) = (0, 0);
-        for token in analysis::tokens(checked) {
-            let range = position::cells_range(&doc.text, self.enc, token.at, token.width);
+        for token in analysis::tokens(doc) {
+            let range = position::cells_range(doc.text(), self.enc, token.at, token.width);
             let (token_type, token_modifiers_bitset) = token.kind.encode();
             let delta_line = range.start.line - line;
             let delta_start = if delta_line == 0 {
@@ -259,35 +242,35 @@ impl Server {
 
     fn hover(&self, p: HoverParams) -> Option<Hover> {
         let at = p.text_document_position_params;
-        let doc = self.docs.get(&at.text_document.uri)?;
-        let checked = doc.checked.as_ref().ok()?;
-        let cell = position::lsp_to_cell(&doc.text, self.enc, at.position);
-        let (start, width, text) = analysis::hover(checked, cell)?;
+        let doc = &self.docs.get(&at.text_document.uri)?.doc;
+        let cell = position::lsp_to_cell(doc.text(), self.enc, at.position);
+        let (start, width, text) = analysis::hover(doc, cell)?;
         Some(Hover {
             contents: HoverContents::Markup(MarkupContent {
                 kind: MarkupKind::Markdown,
                 value: text,
             }),
-            range: Some(position::cells_range(&doc.text, self.enc, start, width)),
+            range: Some(position::cells_range(doc.text(), self.enc, start, width)),
         })
     }
 
     fn on_type(&mut self, p: DocumentOnTypeFormattingParams) -> Option<Vec<TextEdit>> {
         let at = p.text_document_position;
         let enc = self.enc;
-        let doc = self.docs.get_mut(&at.text_document.uri)?;
+        let open = self.docs.get_mut(&at.text_document.uri)?;
         let mut key = p.ch.chars();
         let (Some(key), None) = (key.next(), key.next()) else {
-            doc.typing.reset();
+            open.typing.reset();
             return None;
         };
+        let text = open.doc.text();
         let row = at.position.line as usize;
-        let line = position::line(&doc.text, row);
-        let cursor = position::from_lsp(&doc.text, enc, at.position);
-        let r = doc.typing.on_type(line, row, cursor, key)?;
+        let line = position::line(text, row);
+        let cursor = position::from_lsp(text, enc, at.position);
+        let r = open.typing.on_type(line, row, cursor, key)?;
         let range = Range::new(
-            position::to_lsp(&doc.text, enc, r.row, r.start),
-            position::to_lsp(&doc.text, enc, r.row, r.end),
+            position::to_lsp(text, enc, r.row, r.start),
+            position::to_lsp(text, enc, r.row, r.end),
         );
         Some(vec![TextEdit::new(range, r.text)])
     }

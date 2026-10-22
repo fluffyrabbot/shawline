@@ -557,12 +557,9 @@ dependencies = [
 name = "shawline-cli"
 version = "0.0.1"
 dependencies = [
- "shawline-fmt",
+ "shawline-doc",
  "shawline-grid",
- "shawline-ir",
  "shawline-render",
- "shawline-shape",
- "shawline-syntax",
  "shawline-vm",
 ]
 
@@ -570,18 +567,31 @@ dependencies = [
 name = "shawline-corpus"
 version = "0.0.1"
 dependencies = [
- "shawline-cli",
+ "shawline-doc",
  "shawline-edit",
  "shawline-grid",
+ "shawline-render",
  "shawline-shape",
  "shawline-syntax",
+]
+
+[[package]]
+name = "shawline-doc"
+version = "0.0.1"
+dependencies = [
+ "shawline-fmt",
+ "shawline-grid",
+ "shawline-ir",
+ "shawline-shape",
+ "shawline-syntax",
+ "shawline-vm",
 ]
 
 [[package]]
 name = "shawline-edit"
 version = "0.0.1"
 dependencies = [
- "shawline-cli",
+ "shawline-doc",
  "shawline-fmt",
  "shawline-grid",
  "shawline-shape",
@@ -640,7 +650,7 @@ dependencies = [
  "lsp-server",
  "lsp-types",
  "serde_json",
- "shawline-cli",
+ "shawline-doc",
  "shawline-grid",
  "shawline-shape",
  "shawline-syntax",
@@ -686,9 +696,10 @@ name = "shawline-wasm"
 version = "0.0.1"
 dependencies = [
  "js-sys",
- "shawline-cli",
+ "shawline-doc",
  "shawline-edit",
  "shawline-grid",
+ "shawline-render",
  "shawline-shape",
  "shawline-vm",
  "shawline-word",

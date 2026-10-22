@@ -12,6 +12,7 @@
 
 use std::collections::HashSet;
 
+use shawline_doc::Doc;
 use shawline_grid::{Dir, Grid, Pos, Rect};
 use shawline_shape::stroke::Kind;
 use shawline_shape::{BoxStyle, Diagram, EndKind, PortKind, recognize};
@@ -667,7 +668,7 @@ fn gloss(p: Prim) -> &'static str {
     }
 }
 
-pub(crate) fn palette(src: &str, from: Option<Pos>) -> Vec<Candidate> {
+pub(crate) fn palette(doc: &Doc, from: Option<Pos>) -> Vec<Candidate> {
     // SPEC §9's table, row by row: each letter, then its mirror.
     let mut order: Vec<Prim> = Vec::new();
     for p in Prim::ALL {
@@ -696,9 +697,9 @@ pub(crate) fn palette(src: &str, from: Option<Pos>) -> Vec<Candidate> {
         gloss: "empty list".to_owned(),
         mirror: None,
     });
-    if let Ok(checked) = shawline_cli::check(src) {
+    if let Some(sheet) = doc.sheet() {
         let mut seen = HashSet::new();
-        for def in &checked.sheet.definitions {
+        for def in &sheet.definitions {
             // The entry point runs the program; nothing calls it.
             if def.name.text == "𐑥𐑱𐑯" || !seen.insert(def.name.text.clone()) {
                 continue;

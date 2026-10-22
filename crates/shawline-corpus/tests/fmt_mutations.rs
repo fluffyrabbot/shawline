@@ -9,6 +9,7 @@
 use std::fs;
 
 use shawline_corpus::{programs, root};
+use shawline_doc::Doc;
 
 const MUTANTS_PER_PROGRAM: u64 = 40;
 
@@ -62,12 +63,9 @@ fn mutate(src: &str, rng: &mut Rng) -> String {
 
 /// Every non-lint diagnostic code, sorted: what a sheet means, positions aside.
 fn codes(src: &str) -> Vec<String> {
-    let diagnostics = match shawline_cli::check(src) {
-        Ok(checked) => checked.diagnostics,
-        Err(errors) => errors,
-    };
+    let doc = Doc::new(src);
     let mut codes: Vec<String> =
-        diagnostics.iter().filter(|d| !d.code.starts_with('L')).map(|d| d.code.to_owned()).collect();
+        doc.diagnostics().iter().filter(|d| !d.code.starts_with('L')).map(|d| d.code.to_owned()).collect();
     codes.sort();
     codes
 }
@@ -81,9 +79,10 @@ fn mutants_format_idempotently_and_keep_their_diagnostics() {
         let name = program.file_name().unwrap().to_string_lossy().into_owned();
         for seed in 0..MUTANTS_PER_PROGRAM {
             let mutant = mutate(&src, &mut Rng(seed));
-            let Ok(once) = shawline_cli::format(&mutant) else { continue };
+            let Some(once) = Doc::new(mutant.as_str()).formatted().map(str::to_owned) else { continue };
             tried += 1;
-            let twice = shawline_cli::format(&once).expect("formatted text stays on the grid");
+            // A fresh revision, so the formatter really runs again.
+            let twice = Doc::new(once.as_str()).formatted().expect("formatted text stays on the grid").to_owned();
             if twice != once {
                 failures.push(format!("{name} seed {seed}: formatting twice changes it\n{mutant}"));
             } else if codes(&once) != codes(&mutant) {

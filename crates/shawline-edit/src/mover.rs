@@ -104,12 +104,9 @@ fn moved(
 
 /// Non-lint diagnostic codes, sorted: positions move with the box.
 fn codes(src: &str) -> Vec<&'static str> {
-    let found = match shawline_cli::check(src) {
-        Ok(checked) => checked.diagnostics,
-        Err(errors) => errors,
-    };
+    let doc = shawline_doc::Doc::new(src);
     let mut codes: Vec<&'static str> =
-        found.iter().map(|d| d.code).filter(|c| !c.starts_with('L')).collect();
+        doc.diagnostics().iter().map(|d| d.code).filter(|c| !c.starts_with('L')).collect();
     codes.sort_unstable();
     codes
 }

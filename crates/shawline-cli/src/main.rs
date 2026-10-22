@@ -3,8 +3,9 @@
 use std::process::ExitCode;
 use std::{env, fs};
 
-use shawline_cli::Theme;
+use shawline_doc::Doc;
 use shawline_grid::Diagnostic;
+use shawline_render::Theme;
 
 const USAGE: &str = "usage: shawline <command> [flags] <file.shaw>
 
@@ -52,49 +53,45 @@ fn main() -> ExitCode {
         ExitCode::FAILURE
     };
 
+    let doc = Doc::new(src.as_str());
+    let grid = match doc.grid() {
+        Ok(grid) => grid,
+        Err(errors) => return report_all(errors),
+    };
+
     match command.as_str() {
-        "fmt" => match if flag("--fix") { shawline_cli::fix(&src) } else { shawline_cli::format(&src) } {
-            Ok(text) if flag("--write") => {
-                if text != src
-                    && let Err(e) = replace(path, &text)
-                {
-                    eprintln!("shawline: {path}: {e}");
-                    return ExitCode::FAILURE;
-                }
-            }
-            Ok(text) => print!("{text}"),
-            Err(errors) => return report_all(&errors),
-        },
-        "render" => {
-            let theme = if flag("--dark") { Theme::DARK } else { Theme::LIGHT };
-            match shawline_cli::render(&src, theme) {
-                Ok(svg) => print!("{svg}"),
-                Err(errors) => return report_all(&errors),
-            }
-        }
-        _ => {
-            let checked = match shawline_cli::check(&src) {
-                Ok(checked) => checked,
-                Err(errors) => return report_all(&errors),
-            };
-            match command.as_str() {
-                "diagram" => print!("{}", checked.diagram),
-                "ast" => print!("{}", checked.sheet),
-                _ => {}
-            }
-            report_all(&checked.diagnostics);
-            if checked.has_errors() {
+        "fmt" => {
+            // On the grid, formatting always succeeds.
+            let text = if flag("--fix") { doc.fixed() } else { doc.formatted() }.unwrap_or_default();
+            if !flag("--write") {
+                print!("{text}");
+            } else if text != src
+                && let Err(e) = replace(path, text)
+            {
+                eprintln!("shawline: {path}: {e}");
                 return ExitCode::FAILURE;
             }
-            // `check` guarantees a program whenever there are no errors.
-            let Some(program) = checked.program.as_ref() else {
+        }
+        "render" => {
+            let theme = if flag("--dark") { Theme::DARK } else { Theme::LIGHT };
+            print!("{}", shawline_render::render(grid, theme));
+        }
+        _ => {
+            match command.as_str() {
+                "diagram" => print!("{}", doc.diagram().expect("on the grid")),
+                "ast" => print!("{}", doc.sheet().expect("on the grid")),
+                _ => {}
+            }
+            report_all(doc.diagnostics());
+            // A sheet without errors always has a module.
+            let Some(module) = doc.module() else {
                 return ExitCode::FAILURE;
             };
             if command.as_str() == "asm" {
-                print!("{}", shawline_cli::asm(program));
+                print!("{}", shawline_vm::disassemble(module));
             }
             if command.as_str() == "run" {
-                match shawline_cli::run(program) {
+                match shawline_vm::run(module) {
                     Ok(values) => values.iter().for_each(|v| println!("{v}")),
                     Err(e) => {
                         // SPEC §9: zero-based position, nothing on stdout.

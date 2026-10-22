@@ -10,7 +10,8 @@ shawline-grid.workspace = true
 shawline-shape.workspace = true
 # The check on every edit: canonical form and diagnostic codes.
 shawline-fmt.workspace = true
-shawline-cli.workspace = true
+# One revision of a sheet, read once (PLAN P8).
+shawline-doc.workspace = true
 # The palette: the primitive table and the sheet's definitions.
 shawline-vm.workspace = true
 shawline-syntax.workspace = true

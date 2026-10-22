@@ -1,5 +1,7 @@
 //! Limits too large to keep as corpus files: these sheets are generated.
 
+use shawline_doc::Doc;
+
 /// `·𐑚𐑦𐑜` with `inputs` unused inputs, beside a main that gives 1.
 fn wide(inputs: usize) -> String {
     let word = |i: usize| -> String {
@@ -16,13 +18,13 @@ fn wide(inputs: usize) -> String {
 /// compiles, even uncalled; one more input is `C007` at its namer dot.
 #[test]
 fn frame_limit() {
-    let fits = shawline_cli::check(&wide(65_535)).unwrap();
+    let fits = Doc::new(wide(65_535));
     assert!(!fits.has_errors());
-    let values = shawline_cli::run(fits.program.as_ref().unwrap()).unwrap();
+    let values = fits.run().unwrap().unwrap();
     assert_eq!(values.iter().map(|v| v.to_string()).collect::<Vec<_>>(), ["1"]);
 
-    let over = shawline_cli::check(&wide(65_536)).unwrap();
+    let over = Doc::new(wide(65_536));
     let errors: Vec<String> =
-        over.diagnostics.iter().filter(|d| !d.is_warning()).map(|d| format!("{} {}", d.at, d.code)).collect();
+        over.diagnostics().iter().filter(|d| !d.is_warning()).map(|d| format!("{} {}", d.at, d.code)).collect();
     assert_eq!(errors, ["0:3 C007"]);
 }

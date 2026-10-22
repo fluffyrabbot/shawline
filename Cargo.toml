@@ -19,7 +19,7 @@ shawline-fmt = { path = "crates/shawline-fmt" }
 shawline-glyph = { path = "crates/shawline-glyph" }
 shawline-render = { path = "crates/shawline-render" }
 shawline-font = { path = "crates/shawline-font" }
-shawline-cli = { path = "crates/shawline-cli" }
+shawline-doc = { path = "crates/shawline-doc" }
 shawline-edit = { path = "crates/shawline-edit" }
 
 [workspace.lints.rust]

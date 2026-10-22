@@ -2,7 +2,7 @@
 //! Both work in grid cells; the caller converts to LSP positions.
 
 use lsp_types::{SemanticTokenModifier, SemanticTokenType};
-use shawline_cli::Checked;
+use shawline_doc::Doc;
 use shawline_grid::Pos;
 use shawline_syntax::ast::{Definition, Graph, Literal, Name, NodeKind, Sheet};
 use shawline_vm::bytecode::Prim;
@@ -76,18 +76,21 @@ pub struct Token {
     pub kind: Kind,
 }
 
-/// Every token in the sheet, sorted by position.
-pub fn tokens(checked: &Checked) -> Vec<Token> {
+/// Every token in the sheet, sorted by position. None when the text has
+/// grid errors.
+pub fn tokens(doc: &Doc) -> Vec<Token> {
+    let (Some(diagram), Some(sheet)) = (doc.diagram(), doc.sheet()) else {
+        return Vec::new();
+    };
     let mut out = Vec::new();
     let width_at = |at: Pos| {
-        checked
-            .diagram
+        diagram
             .texts
             .iter()
             .find(|t| t.pos == at)
             .map_or(1, |t| t.width)
     };
-    for def in &checked.sheet.definitions {
+    for def in &sheet.definitions {
         out.push(Token {
             at: def.name.at,
             width: name_width(&def.name) + 1,
@@ -100,9 +103,9 @@ pub fn tokens(checked: &Checked) -> Vec<Token> {
                 kind: Kind::Port,
             });
         }
-        graph_tokens(&checked.sheet, &def.body, &width_at, &mut out);
+        graph_tokens(sheet, &def.body, &width_at, &mut out);
     }
-    for t in &checked.diagram.texts {
+    for t in &diagram.texts {
         if t.kind == shawline_shape::TextKind::Comment {
             out.push(Token {
                 at: t.pos,
@@ -194,8 +197,8 @@ fn callee<'a>(sheet: &'a Sheet, name: &Name) -> Callee<'a> {
 
 /// Hover text for the call word or definition title covering `at`, with the
 /// word's first cell and width.
-pub fn hover(checked: &Checked, at: Pos) -> Option<(Pos, usize, String)> {
-    let sheet = &checked.sheet;
+pub fn hover(doc: &Doc, at: Pos) -> Option<(Pos, usize, String)> {
+    let sheet = doc.sheet()?;
     let covers = |start: Pos, width: usize| {
         start.row == at.row && (start.col..start.col + width).contains(&at.col)
     };

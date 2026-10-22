@@ -10,6 +10,7 @@ use shawline_grid::{Grid, Pos};
 
 use shawline_corpus::jitter::{Fired, Rng, jitter};
 use shawline_corpus::{programs, root};
+use shawline_doc::Doc;
 
 const SEEDS: u64 = 24;
 
@@ -32,8 +33,9 @@ fn jittered_programs_format_back_to_canonical() {
         for seed in 0..SEEDS {
             let jittered = jitter(&src, &wire, &mut Rng(seed), &mut fired).text;
             tried += 1;
-            let formatted = shawline_cli::format(&jittered);
-            if formatted.as_deref() != Ok(src.as_str()) {
+            let doc = Doc::new(jittered.as_str());
+            let formatted = doc.formatted();
+            if formatted != Some(src.as_str()) {
                 failures.push(format!("{name} seed {seed}"));
                 first.get_or_insert_with(|| format!("{name} seed {seed}\njittered:\n{jittered}\nformatted:\n{}", formatted.unwrap_or_default()));
             }

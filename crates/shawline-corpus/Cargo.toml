@@ -8,7 +8,8 @@ publish.workspace = true
 [dependencies]
 shawline-grid.workspace = true
 shawline-shape.workspace = true
-shawline-cli.workspace = true
+shawline-doc.workspace = true
+shawline-render.workspace = true
 shawline-edit.workspace = true
 shawline-syntax.workspace = true
 

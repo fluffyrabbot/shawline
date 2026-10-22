@@ -1,24 +1,87 @@
 //! The router's preferences, and one move per way a wire meets a box.
 
+use shawline_doc::Doc;
 use shawline_grid::{Dir, Pos};
 
 use crate::router::{self, BUDGET, CELL, Cell, Miss, Start, Terrain};
-use crate::{move_box, route};
+use text::{move_box, route};
+
+/// The edits over plain text, as these tests were written before edits took
+/// revisions (P8 wave 1).
+mod text {
+    use shawline_doc::Doc;
+    use shawline_grid::Pos;
+
+    use crate::{Candidate, Endpoint, Refusal};
+
+    fn text(result: Result<Doc, Refusal>) -> Result<String, Refusal> {
+        result.map(|doc| doc.text().to_owned())
+    }
+
+    pub fn move_box(src: &str, corner: Pos, dr: isize, dc: isize) -> Result<String, Refusal> {
+        text(crate::move_box(&Doc::new(src), corner, dr, dc))
+    }
+
+    pub fn route(src: &str, from: Pos, to: Pos) -> Option<Vec<Pos>> {
+        crate::route(&Doc::new(src), from, to)
+    }
+
+    pub fn connect(src: &str, from: Pos, to: Pos) -> Result<String, Refusal> {
+        text(crate::connect(&Doc::new(src), from, to))
+    }
+
+    pub fn remove_wire(src: &str, at: Pos) -> Result<String, Refusal> {
+        text(crate::remove_wire(&Doc::new(src), at))
+    }
+
+    pub fn disconnect(src: &str, to: Pos) -> Result<String, Refusal> {
+        text(crate::disconnect(&Doc::new(src), to))
+    }
+
+    pub fn place_node(src: &str, corner: Pos, word: &str, inputs: u16, outputs: u16) -> Result<String, Refusal> {
+        text(crate::place_node(&Doc::new(src), corner, word, inputs, outputs).map(|placed| placed.doc))
+    }
+
+    pub fn remove_node(src: &str, corner: Pos) -> Result<String, Refusal> {
+        text(crate::remove_node(&Doc::new(src), corner))
+    }
+
+    pub fn palette(src: &str, from: Option<Pos>) -> Vec<Candidate> {
+        crate::palette(&Doc::new(src), from)
+    }
+
+    pub fn endpoints(src: &str) -> (Vec<Endpoint>, Vec<Endpoint>) {
+        crate::endpoints(&Doc::new(src))
+    }
+
+    pub fn preview(src: &str, from: Pos, to: Pos) -> Option<Vec<Pos>> {
+        crate::preview(&Doc::new(src), from, to)
+    }
+
+    pub fn wire_sources(src: &str) -> Vec<Option<Pos>> {
+        crate::wire_sources(&Doc::new(src))
+    }
+}
+
+/// The canonical form of `src`, from a fresh revision.
+fn format(src: &str) -> String {
+    Doc::new(src).formatted().expect("on the grid").to_owned()
+}
 
 const DOUBLE: &str = include_str!("../../../corpus/03-double.shaw");
 const ABS: &str = include_str!("../../../corpus/04-abs.shaw");
 
 /// main's outputs, as printed.
 fn outputs(src: &str) -> Vec<String> {
-    let checked = shawline_cli::check(src).unwrap_or_else(|e| panic!("{e:?}"));
-    let program = checked.program.unwrap_or_else(|| panic!("{:?}\n{src}", checked.diagnostics));
-    shawline_cli::run(&program).unwrap().iter().map(ToString::to_string).collect()
+    let doc = Doc::new(src);
+    let run = doc.run().unwrap_or_else(|| panic!("{:?}\n{src}", doc.diagnostics()));
+    run.unwrap().iter().map(ToString::to_string).collect()
 }
 
 /// Moves the box and checks the result is canonical and means the same.
 fn moved(src: &str, corner: Pos, dr: isize, dc: isize) -> String {
     let text = move_box(src, corner, dr, dc).unwrap_or_else(|r| panic!("refused: {r:?}"));
-    assert_eq!(shawline_cli::format(&text).unwrap(), text, "not canonical");
+    assert_eq!(format(&text), text, "not canonical");
     assert_eq!(outputs(&text), outputs(src), "{text}");
     text
 }
@@ -204,11 +267,11 @@ fn refusals_say_why() {
 // ---------------------------------------------------------------------------
 // P7: wiring edits and the palette.
 
-use crate::{connect, disconnect, palette, place_node, remove_node, remove_wire};
+use text::{connect, disconnect, palette, place_node, remove_node, remove_wire};
 
 /// Checks an edit's result is canonical, and returns it.
 fn canon(text: String) -> String {
-    assert_eq!(shawline_cli::format(&text).unwrap(), text, "not canonical");
+    assert_eq!(format(&text), text, "not canonical");
     text
 }
 
@@ -319,7 +382,8 @@ use std::collections::HashMap;
 use shawline_grid::Grid;
 use shawline_shape::{EndKind, PortKind, recognize};
 
-use crate::{Refusal, endpoints, preview, wire_sources};
+use crate::Refusal;
+use text::{endpoints, preview, wire_sources};
 
 #[test]
 fn a_leading_blank_line_shifts_what_the_corner_names() {
@@ -339,7 +403,7 @@ fn a_leading_blank_line_shifts_what_the_corner_names() {
 fn a_doubled_blank_line_shifts_the_second_definition() {
     // No diagnostic, no lint: only the formatter's blank-line rule.
     let shown = DOUBLE.replacen("╯\n\n╭", "╯\n\n\n╭", 1);
-    assert!(shawline_cli::check(&shown).unwrap().diagnostics.is_empty());
+    assert!(Doc::new(shown.as_str()).diagnostics().is_empty());
     // main's 21 feeds 𐑛𐑳𐑚𐑩𐑤 on row 14 of the canonical text, 15 here.
     let wire = remove_wire(&shown, Pos::new(15, 6)).unwrap();
     assert_eq!(wire, remove_wire(DOUBLE, Pos::new(14, 6)).unwrap());
@@ -436,7 +500,7 @@ fn variants(src: &str) -> Vec<Variant> {
             }
         }
         let v = Variant { what, text, rows };
-        assert_eq!(shawline_cli::format(&v.text).unwrap(), src, "{} doesn't format back", v.what);
+        assert_eq!(format(&v.text), src, "{} doesn't format back", v.what);
         assert_ne!(v.text, src, "{} changes nothing", v.what);
         v
     };

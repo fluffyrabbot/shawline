@@ -15,8 +15,9 @@ pub mod studio;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use shawline_cli::Theme;
-use shawline_grid::{Diagnostic, Grid};
+use shawline_doc::Doc;
+use shawline_grid::Diagnostic;
+use shawline_render::Theme;
 use shawline_shape::Diagram;
 
 pub struct Stage {
@@ -38,18 +39,18 @@ impl Stage {
 pub const STAGES: &[Stage] = &[
     Stage::new("diagram", |src| with_diagram(src, |d| d.to_string())),
     Stage::new("wires", |src| with_diagram(src, |d| shawline_shape::wire::dump(&d.wires))),
-    Stage::new("ast", |src| match shawline_cli::check(src) {
-        Ok(checked) => checked.sheet.to_string(),
-        Err(errors) => lines(&errors),
+    Stage::new("ast", |src| {
+        let doc = Doc::new(src);
+        doc.sheet().map_or_else(|| lines(doc.diagnostics()), ToString::to_string)
     }),
-    Stage::new("check", |src| match shawline_cli::check(src) {
-        Ok(checked) => lines(&checked.diagnostics),
-        Err(errors) => lines(&errors),
-    }),
+    Stage::new("check", |src| lines(Doc::new(src).diagnostics())),
     Stage::new("out", out),
     Stage {
         name: "fmt.shaw",
-        run: |src| shawline_cli::format(src).unwrap_or_else(|errors| lines(&errors)),
+        run: |src| {
+            let doc = Doc::new(src);
+            doc.formatted().map_or_else(|| lines(doc.diagnostics()), str::to_owned)
+        },
         // A program with no diagnostics and no `.fmt.shaw` is canonical.
         fallback: Some(|program, src| {
             let check = fs::read_to_string(program.with_extension("check")).ok()?;
@@ -59,13 +60,19 @@ pub const STAGES: &[Stage] = &[
     },
     Stage {
         name: "fix.shaw",
-        run: |src| shawline_cli::fix(src).unwrap_or_else(|errors| lines(&errors)),
+        run: |src| {
+            let doc = Doc::new(src);
+            doc.fixed().map_or_else(|| lines(doc.diagnostics()), str::to_owned)
+        },
         fallback: None,
         selective: true,
     },
     Stage {
         name: "svg",
-        run: |src| shawline_cli::render(src, Theme::LIGHT).unwrap_or_else(|errors| lines(&errors)),
+        run: |src| match Doc::new(src).grid() {
+            Ok(grid) => shawline_render::render(grid, Theme::LIGHT),
+            Err(errors) => lines(errors),
+        },
         fallback: None,
         selective: true,
     },
@@ -75,16 +82,10 @@ pub const STAGES: &[Stage] = &[
 
 /// Program stdout, or `error ROW:COL CODE` (SPEC §9).
 fn out(src: &str) -> String {
-    let program = match shawline_cli::check(src) {
-        Ok(checked) => checked.program,
-        Err(_) => None,
-    };
-    let Some(program) = program else {
-        return "static errors\n".to_owned();
-    };
-    match shawline_cli::run(&program) {
-        Ok(values) => values.iter().map(|v| format!("{v}\n")).collect(),
-        Err(e) => format!("error {} {}\n", e.at, e.code),
+    match Doc::new(src).run() {
+        None => "static errors\n".to_owned(),
+        Some(Ok(values)) => values.iter().map(|v| format!("{v}\n")).collect(),
+        Some(Err(e)) => format!("error {} {}\n", e.at, e.code),
     }
 }
 
@@ -94,9 +95,10 @@ fn lines(diagnostics: &[Diagnostic]) -> String {
 }
 
 fn with_diagram(src: &str, show: fn(&Diagram) -> String) -> String {
-    match Grid::parse(src) {
-        Ok(grid) => show(&shawline_shape::recognize(&grid)),
-        Err(errors) => errors.iter().map(|e| format!("error {e}\n")).collect(),
+    let doc = Doc::new(src);
+    match doc.diagram() {
+        Some(diagram) => show(diagram),
+        None => doc.diagnostics().iter().map(|e| format!("error {e}\n")).collect(),
     }
 }
 

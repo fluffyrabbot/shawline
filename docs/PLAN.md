@@ -53,7 +53,9 @@ Grid ──► shawline-render (SVG) ◄── shawline-glyph (stroke skeletons)
 | `shawline-font` | Shawline Mono TTF | B4 | — |
 | `shawline-ir` | AST → IR → bytecode, checker | B5 | `src/ir.rs` (P1) |
 | `shawline-lsp` | Language server | C2 | — |
-| `shawline-cli` | `shawline` binary | P0 ✅ → lead at each gate | — |
+| `shawline-cli` | `shawline` binary over `shawline-doc` and `shawline-render` (no library since P8) | P0 ✅ → lead at each gate | — |
+| `shawline-doc` | One revision of a sheet, each stage read once (`Doc`) | P8 (lead) | the whole crate |
+| `shawline-edit` | Studio's checked edits | P6 → P7 → P8 | the signatures in `src/lib.rs` |
 | `shawline-corpus` | The oracle: stage registry and runner | P0 ✅ → lead | the whole crate |
 
 ### Entry points
@@ -491,6 +493,18 @@ Oracle baseline (done):
   - `RefusalKind` is added.
   
   The lead lands these with thin adapters over the current internals, so the contracts compile and stay green from the first commit.
+
+Wave 1 contracts (done):
+- **`shawline-doc`** holds the old glue, and `shawline-cli` is a binary only, so nothing depends on it. The corpus, the CLI, the language server (one `Doc` per document version) and the wasm crate read through it.
+  - `run()` runs again on each call rather than keeping its result, and `trace(steps)` is `None` when there is no program; the errors are in `diagnostics()`.
+  - The canonical revision of an untidy text is seeded as its own canonical form, because the formatter is idempotent. A check of canonical form must therefore format a fresh `Doc::new(text)`, and every gate now does.
+- **`Wire::links`** is the OR of the tracer's node masks per cell. Two tracer tests cover a crossing's single axis and a self-crossing wire's both axes. Every `.wires` file is unchanged.
+- **`shawline-edit`** takes and returns `Doc`s through adapters.
+  - `RefusalKind::name()` (`unreadable`, `target`, `unsupported`, `blocked`, `gave-up`, `changed`) is the one spelling for the dump and for JS, so neither matches on variants.
+  - Until E sets kinds, `Refusal::new` fills `Changed`.
+  - The `Placed` adapter reports the ports of the one box that the input's canonical form lacks.
+  - The crate's own tests reach the new API through a text shim in `tests.rs`.
+- **Proof the adapters change nothing.** Every `.studio` dump is byte-identical without re-blessing. 267 tests pass, with one ignored, which still fails under `--ignored` with the same refusal. Clippy is clean on host and wasm, and the playground build (554,946-byte wasm) and its 28 Node checks are green.
 
 **Wave 1 construction.** Two agents with disjoint files:
 - **E** owns `shawline-edit`:

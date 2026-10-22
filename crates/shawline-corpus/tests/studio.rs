@@ -30,6 +30,7 @@ use std::time::{Duration, Instant};
 use shawline_corpus::jitter::{Fired, Jittered, Rng, jitter};
 use shawline_corpus::studio::{Link, calls, links};
 use shawline_corpus::{STAGES, programs, root};
+use shawline_doc::{Doc, TRACE_STEPS};
 use shawline_grid::{Grid, Pos};
 use shawline_syntax::ast::{Endpoint, Sheet};
 
@@ -39,12 +40,9 @@ fn stage(name: &str) -> fn(&str) -> String {
 
 /// Non-lint diagnostic codes, sorted: positions legitimately change.
 fn codes(src: &str) -> Vec<String> {
-    let diagnostics = match shawline_cli::check(src) {
-        Ok(checked) => checked.diagnostics,
-        Err(errors) => errors,
-    };
+    let doc = Doc::new(src);
     let mut codes: Vec<String> =
-        diagnostics.iter().filter(|d| !d.code.starts_with('L')).map(|d| d.code.to_owned()).collect();
+        doc.diagnostics().iter().filter(|d| !d.code.starts_with('L')).map(|d| d.code.to_owned()).collect();
     codes.sort();
     codes
 }
@@ -78,7 +76,7 @@ fn starts(src: &str) -> Vec<(String, Jittered)> {
 }
 
 fn sheet(src: &str) -> Sheet {
-    shawline_cli::check(src).expect("on the grid").sheet
+    Doc::new(src).sheet().expect("on the grid").clone()
 }
 
 /// What must survive an edit: each wire as its source and sink cells.
@@ -99,7 +97,7 @@ fn same_program(src: &str, text: &str) -> Result<(), String> {
     if wiring(text) != wiring(src) {
         return Err(format!("wires change\n{text}"));
     }
-    if shawline_cli::format(text).as_deref() != Ok(text) {
+    if Doc::new(text).formatted() != Some(text) {
         return Err(format!("result isn't canonical\n{text}"));
     }
     Ok(())
@@ -147,17 +145,17 @@ fn studio_rewire() {
             .collect();
 
         let rewire = |shown: &Jittered| -> Outcome {
-            let mut text = shown.text.clone();
+            let mut doc = Doc::new(shown.text.as_str());
             for (k, &(what, at, to)) in steps.iter().enumerate() {
                 // Only the first edit sees the shown text.
                 let (cell, end) = if k == 0 { (shown.at(at), to.map(|t| shown.at(t))) } else { (at, to) };
                 let result = match end {
-                    None => shawline_edit::remove_wire(&text, cell),
-                    Some(end) => shawline_edit::connect(&text, cell, end),
+                    None => shawline_edit::remove_wire(&doc, cell),
+                    Some(end) => shawline_edit::connect(&doc, cell, end),
                 };
-                text = result.map_err(|r| (format!("{what} at {at}"), r.reason))?;
+                doc = result.map_err(|r| (format!("{what} at {at}"), r.reason))?;
             }
-            Ok(text)
+            Ok(doc.text().to_owned())
         };
         let starts = starts(&src);
         let want = rewire(&starts[0].1);
@@ -204,7 +202,7 @@ fn studio_rebuild() {
             let from = touching.iter().find(|l| l.to.iter().any(|t| inputs.contains(t))).map(|l| l.from);
             let arity = (inputs.len() as u16, outputs.len() as u16);
             let offers = |shown: &Jittered| {
-                let offered = shawline_edit::palette(&shown.text, from.map(|f| shown.at(f)));
+                let offered = shawline_edit::palette(&Doc::new(shown.text.as_str()), from.map(|f| shown.at(f)));
                 offered.iter().any(|c| c.word == word && (c.inputs, c.outputs) == arity)
             };
             if let Some((start, _)) = starts.iter().find(|(_, shown)| !offers(shown)) {
@@ -221,14 +219,15 @@ fn studio_rebuild() {
             let rebuild = |shown: &Jittered| -> Outcome {
                 // Only the removal sees the shown text.
                 let refused = |step: &'static str| move |r: shawline_edit::Refusal| (step.to_owned(), r.reason);
-                let mut text = shawline_edit::remove_node(&shown.text, shown.at(corner))
+                let mut doc = shawline_edit::remove_node(&Doc::new(shown.text.as_str()), shown.at(corner))
                     .map_err(refused("remove_node"))?;
-                text = shawline_edit::place_node(&text, corner, &word, arity.0, arity.1)
-                    .map_err(refused("place_node"))?;
+                doc = shawline_edit::place_node(&doc, corner, &word, arity.0, arity.1)
+                    .map_err(refused("place_node"))?
+                    .doc;
                 for &(from, to) in &connects {
-                    text = shawline_edit::connect(&text, from, to).map_err(refused("connect"))?;
+                    doc = shawline_edit::connect(&doc, from, to).map_err(refused("connect"))?;
                 }
-                Ok(text)
+                Ok(doc.text().to_owned())
             };
             let want = rebuild(&starts[0].1);
             match &want {
@@ -260,12 +259,10 @@ fn studio_trace() {
     for (name, src) in clean_programs(90) {
         let expected = fs::read_to_string(root().join(name.replace(".shaw", ".out"))).unwrap_or_default();
         let started = Instant::now();
-        let trace = match shawline_cli::trace(&src) {
-            Ok(trace) => trace,
-            Err(errors) => {
-                failures.push(format!("{name}: no trace: {errors:?}"));
-                continue;
-            }
+        let doc = Doc::new(src.as_str());
+        let Some(trace) = doc.trace(TRACE_STEPS) else {
+            failures.push(format!("{name}: no trace: {:?}", doc.diagnostics()));
+            continue;
         };
         if started.elapsed() > Duration::from_secs(5) {
             failures.push(format!("{name}: tracing took {:?}", started.elapsed()));
@@ -310,7 +307,6 @@ fn studio_trace() {
 #[ignore = "P8 wave 1: edits read crossing ownership from Wire::links"]
 fn removing_a_wire_that_crosses_itself_leaves_no_stroke() {
     let src = fs::read_to_string(root().join("15-fanout-cross.shaw")).unwrap();
-    let text = shawline_edit::remove_wire(&src, Pos::new(2, 4)).unwrap_or_else(|r| panic!("{r:?}"));
-    let diagram = shawline_shape::recognize(&Grid::parse(&text).unwrap());
-    assert!(diagram.wires.is_empty(), "a stroke is left:\n{text}");
+    let doc = shawline_edit::remove_wire(&Doc::new(src), Pos::new(2, 4)).unwrap_or_else(|r| panic!("{r:?}"));
+    assert!(doc.diagram().unwrap().wires.is_empty(), "a stroke is left:\n{}", doc.text());
 }

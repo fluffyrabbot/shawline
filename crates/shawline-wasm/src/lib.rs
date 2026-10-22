@@ -1,12 +1,13 @@
 //! WebAssembly bindings for the Shawline playground: a thin layer over
-//! `shawline_cli` and `shawline_word` that turns results into plain JS
-//! objects. No pipeline logic lives here.
+//! `shawline_doc`, `shawline_edit` and `shawline_word` that turns results
+//! into plain JS objects. No pipeline logic lives here.
 //!
 //! Positions are zero-based `row`/`col` in code points, as in every dump.
 
 use js_sys::{Array, Object, Reflect};
-use shawline_cli::Theme;
+use shawline_doc::{Doc, TRACE_STEPS};
 use shawline_grid::{Diagnostic, Dir, Pos};
+use shawline_render::Theme;
 use wasm_bindgen::prelude::*;
 
 #[wasm_bindgen]
@@ -27,10 +28,7 @@ pub fn start() {
 /// `"warning"` or `"lint"`.
 #[wasm_bindgen]
 pub fn check(src: &str) -> Array {
-    match shawline_cli::check(src) {
-        Ok(checked) => diagnostics(&checked.diagnostics),
-        Err(errors) => diagnostics(&errors),
-    }
+    diagnostics(Doc::new(src).diagnostics())
 }
 
 /// Checks and runs `src`. Returns `{ outputs, error, at, diagnostics }`:
@@ -44,26 +42,20 @@ pub fn run(src: &str) -> Object {
     let result = Object::new();
     let outputs = Array::new();
     let mut runtime = JsValue::NULL;
-    let found = match shawline_cli::check(src) {
-        Ok(checked) => {
-            if let Some(program) = &checked.program {
-                match shawline_cli::run(program) {
-                    Ok(values) => values.iter().for_each(|v| {
-                        outputs.push(&v.to_string().into());
-                    }),
-                    Err(e) => {
-                        runtime = format!("error {} {}: {}", e.at, e.code, e.message).into();
-                        set(&result, "at", &diagnostic(&e));
-                    }
-                }
-            }
-            checked.diagnostics
+    let doc = Doc::new(src);
+    match doc.run() {
+        Some(Ok(values)) => values.iter().for_each(|v| {
+            outputs.push(&v.to_string().into());
+        }),
+        Some(Err(e)) => {
+            runtime = format!("error {} {}: {}", e.at, e.code, e.message).into();
+            set(&result, "at", &diagnostic(&e));
         }
-        Err(errors) => errors,
-    };
+        None => {}
+    }
     set(&result, "outputs", &outputs);
     set(&result, "error", &runtime);
-    set(&result, "diagnostics", &diagnostics(&found));
+    set(&result, "diagnostics", &diagnostics(doc.diagnostics()));
     result
 }
 
@@ -71,14 +63,15 @@ pub fn run(src: &str) -> Object {
 /// grid errors and can't be read as a sheet.
 #[wasm_bindgen]
 pub fn format(src: &str) -> Option<String> {
-    shawline_cli::format(src).ok()
+    Doc::new(src).formatted().map(str::to_owned)
 }
 
 /// `src` drawn as a standalone SVG in the light or dark theme, or
 /// `undefined` when the text has grid errors.
 #[wasm_bindgen]
 pub fn render(src: &str, dark: bool) -> Option<String> {
-    shawline_cli::render(src, if dark { Theme::DARK } else { Theme::LIGHT }).ok()
+    let doc = Doc::new(src);
+    Some(shawline_render::render(doc.grid().ok()?, if dark { Theme::DARK } else { Theme::LIGHT }))
 }
 
 /// The node and definition boxes of `src`, for hit-testing: an array of
@@ -86,8 +79,8 @@ pub fn render(src: &str, dark: bool) -> Option<String> {
 /// `"node"` or `"definition"`), empty when the text has grid errors.
 #[wasm_bindgen]
 pub fn boxes(src: &str) -> Array {
-    let Ok(grid) = shawline_grid::Grid::parse(src) else { return Array::new() };
-    let diagram = shawline_shape::recognize(&grid);
+    let doc = Doc::new(src);
+    let Some(diagram) = doc.diagram() else { return Array::new() };
     diagram
         .boxes
         .iter()
@@ -118,16 +111,16 @@ pub fn boxes(src: &str) -> Array {
 /// is unchanged.
 #[wasm_bindgen]
 pub fn move_box(src: &str, row: u32, col: u32, dr: i32, dc: i32) -> Object {
-    edited(shawline_edit::move_box(src, at(row, col), dr as isize, dc as isize))
+    edited(shawline_edit::move_box(&Doc::new(src), at(row, col), dr as isize, dc as isize))
 }
 
 /// The result of a checked edit, as `move_box` returns it.
-fn edited(result: Result<String, shawline_edit::Refusal>) -> Object {
+fn edited(result: Result<Doc, shawline_edit::Refusal>) -> Object {
     let o = Object::new();
     match result {
-        Ok(text) => {
+        Ok(doc) => {
             set(&o, "ok", &true.into());
-            set(&o, "text", &text.into());
+            set(&o, "text", &doc.text().into());
         }
         Err(refusal) => {
             set(&o, "ok", &false.into());
@@ -155,33 +148,34 @@ fn cell(p: Pos) -> JsValue {
 /// joining the source's wire with a tee. Returns what `move_box` returns.
 #[wasm_bindgen]
 pub fn connect(src: &str, from_row: u32, from_col: u32, to_row: u32, to_col: u32) -> Object {
-    edited(shawline_edit::connect(src, at(from_row, from_col), at(to_row, to_col)))
+    edited(shawline_edit::connect(&Doc::new(src), at(from_row, from_col), at(to_row, to_col)))
 }
 
 /// Removes the whole wire through the cell, with every branch.
 #[wasm_bindgen]
 pub fn remove_wire(src: &str, row: u32, col: u32) -> Object {
-    edited(shawline_edit::remove_wire(src, at(row, col)))
+    edited(shawline_edit::remove_wire(&Doc::new(src), at(row, col)))
 }
 
 /// Removes only the branch reaching the sink arrowhead at the cell.
 #[wasm_bindgen]
 pub fn disconnect(src: &str, row: u32, col: u32) -> Object {
-    edited(shawline_edit::disconnect(src, at(row, col)))
+    edited(shawline_edit::disconnect(&Doc::new(src), at(row, col)))
 }
 
 /// Places a canonical node box for `word` with its top-left corner at the
 /// cell, `inputs` arrowheads and `outputs` tees, and no wires.
 #[wasm_bindgen]
 pub fn place_node(src: &str, row: u32, col: u32, word: &str, inputs: u16, outputs: u16) -> Object {
-    edited(shawline_edit::place_node(src, at(row, col), word, inputs, outputs))
+    let placed = shawline_edit::place_node(&Doc::new(src), at(row, col), word, inputs, outputs);
+    edited(placed.map(|placed| placed.doc))
 }
 
 /// Removes the node box with its top-left corner at the cell, the wires it
 /// feeds and the branches into its inputs.
 #[wasm_bindgen]
 pub fn remove_node(src: &str, row: u32, col: u32) -> Object {
-    edited(shawline_edit::remove_node(src, at(row, col)))
+    edited(shawline_edit::remove_node(&Doc::new(src), at(row, col)))
 }
 
 /// What the context palette offers: an array of `{ word, inputs, outputs,
@@ -190,7 +184,7 @@ pub fn remove_node(src: &str, row: u32, col: u32) -> Object {
 #[wasm_bindgen]
 pub fn palette(src: &str, from_row: Option<u32>, from_col: Option<u32>) -> Array {
     let from = from_row.zip(from_col).map(|(r, c)| at(r, c));
-    shawline_edit::palette(src, from)
+    shawline_edit::palette(&Doc::new(src), from)
         .into_iter()
         .map(|c| {
             let o = Object::new();
@@ -210,7 +204,7 @@ pub fn palette(src: &str, from_row: Option<u32>, from_col: Option<u32>) -> Array
 /// `scope` string, and a `wired` sink takes no second wire.
 #[wasm_bindgen]
 pub fn endpoints(src: &str) -> Object {
-    let (sources, sinks) = shawline_edit::endpoints(src);
+    let (sources, sinks) = shawline_edit::endpoints(&Doc::new(src));
     let list = |ends: Vec<shawline_edit::Endpoint>| -> Array {
         ends.into_iter()
             .map(|e| {
@@ -235,7 +229,7 @@ pub fn endpoints(src: &str) -> Object {
 /// `undefined` when nothing fits. Nothing is edited.
 #[wasm_bindgen]
 pub fn preview(src: &str, from_row: u32, from_col: u32, to_row: u32, to_col: u32) -> Option<Array> {
-    let path = shawline_edit::preview(src, at(from_row, from_col), at(to_row, to_col))?;
+    let path = shawline_edit::preview(&Doc::new(src), at(from_row, from_col), at(to_row, to_col))?;
     Some(path.into_iter().map(cell).collect())
 }
 
@@ -245,9 +239,9 @@ pub fn preview(src: &str, from_row: u32, from_col: u32, to_row: u32, to_col: u32
 /// source for `connect` (`null` when the wire isn't editable by mouse).
 #[wasm_bindgen]
 pub fn wires(src: &str) -> Array {
-    let Ok(grid) = shawline_grid::Grid::parse(src) else { return Array::new() };
-    let diagram = shawline_shape::recognize(&grid);
-    let sources = shawline_edit::wire_sources(src);
+    let doc = Doc::new(src);
+    let Some(diagram) = doc.diagram() else { return Array::new() };
+    let sources = shawline_edit::wire_sources(&doc);
     diagram
         .wires
         .iter()
@@ -263,7 +257,7 @@ pub fn wires(src: &str) -> Array {
         .collect()
 }
 
-/// The value on every wire, for live badges (`shawline_cli::trace`):
+/// The value on every wire, for live badges (`Doc::trace`):
 /// `{ wires, error, stopped }`. `wires` holds `{ wire, value }` with each
 /// value printed as SPEC §9 prints it, cut to 24 characters. `error` is the
 /// runtime error that ended the run, or the first static error when the
@@ -273,8 +267,9 @@ pub fn wires(src: &str) -> Array {
 pub fn trace(src: &str) -> Object {
     let o = Object::new();
     let values = Array::new();
-    let (error, stopped) = match shawline_cli::trace(src) {
-        Ok(found) => {
+    let doc = Doc::new(src);
+    let (error, stopped) = match doc.trace(TRACE_STEPS) {
+        Some(found) => {
             for (wire, value) in &found.wires {
                 let pair = Object::new();
                 set(&pair, "wire", &(*wire as u32).into());
@@ -283,7 +278,11 @@ pub fn trace(src: &str) -> Object {
             }
             (found.error.as_ref().map_or(JsValue::NULL, diagnostic), found.stopped)
         }
-        Err(errors) => (errors.first().map_or(JsValue::NULL, diagnostic), false),
+        // The first static error, as the old glue reported it.
+        None => {
+            let first = doc.diagnostics().iter().find(|d| !d.is_warning());
+            (first.map_or(JsValue::NULL, diagnostic), false)
+        }
     };
     set(&o, "wires", &values);
     set(&o, "error", &error);

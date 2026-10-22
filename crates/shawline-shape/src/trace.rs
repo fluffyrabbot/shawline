@@ -57,9 +57,12 @@ impl Tracer<'_> {
             }
         }
 
-        let mut cells: Vec<Pos> = nodes.iter().map(|&(p, _)| p).collect();
-        cells.sort();
-        cells.dedup();
+        // A crossing the wire passes both ways is two nodes of one cell.
+        let mut joins: BTreeMap<Pos, u8> = BTreeMap::new();
+        for &(p, mask) in &nodes {
+            *joins.entry(p).or_default() |= mask;
+        }
+        let (cells, links): (Vec<Pos>, Vec<u8>) = joins.into_iter().unzip();
         let of_kind = |want: fn(Kind) -> bool| -> Vec<Pos> {
             let has = |p: &&Pos| self.strokes.get(**p).is_some_and(|s| want(s.kind));
             cells.iter().filter(has).copied().collect()
@@ -87,7 +90,7 @@ impl Tracer<'_> {
         }
         ends.sort();
         ends.dedup();
-        Wire { cells, tees, crossings, ends }
+        Wire { cells, links, tees, crossings, ends }
     }
 }
 
@@ -188,6 +191,26 @@ mod tests {
             assert_eq!(w.crossings, [Pos::new(1, 1)]);
             assert!(w.ends.iter().all(|e| e.kind == EndKind::Open && e.pos != Pos::new(1, 1)));
         }
+    }
+
+    #[test]
+    fn a_crossing_links_only_its_own_axis() {
+        let d = diagram(" │\n─┼─\n │\n");
+        let at = |w: &Wire, p: Pos| w.links[w.cells.iter().position(|&c| c == p).unwrap()];
+        assert_eq!(at(&d.wires[0], Pos::new(1, 1)), N | S);
+        assert_eq!(at(&d.wires[1], Pos::new(1, 1)), E | W);
+        assert_eq!(at(&d.wires[1], Pos::new(1, 0)), E | W);
+    }
+
+    #[test]
+    fn a_wire_crossing_itself_links_both_axes() {
+        // One wire loops round and crosses itself at 1:1.
+        let d = diagram(" ┌─┐\n─┼─┘\n └─\n");
+        assert_eq!(d.wires.len(), 1, "{}", dump(&d.wires));
+        let w = &d.wires[0];
+        assert_eq!(w.links.len(), w.cells.len());
+        assert_eq!(w.links[w.cells.iter().position(|&c| c == Pos::new(1, 1)).unwrap()], N | E | S | W);
+        assert_eq!(w.links[w.cells.iter().position(|&c| c == Pos::new(0, 1)).unwrap()], E | S);
     }
 
     #[test]
