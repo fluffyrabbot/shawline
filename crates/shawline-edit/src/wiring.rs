@@ -3,7 +3,7 @@
 //!
 //! Each edit draws on a copy of the canonical sheet, formats the result and
 //! recognizes it again. What it recognizes to must equal the input's
-//! [`Print`] with exactly the intended change applied, or the edit is
+//! [`Structure`] with exactly the change the edit declares, or the edit is
 //! refused and the sheet stays as it was.
 //!
 //! The caller's cells name the text as given, which may not be canonical,
@@ -15,13 +15,15 @@ use std::collections::HashSet;
 use shawline_doc::Doc;
 use shawline_grid::{Dir, Grid, Pos, Rect};
 use shawline_shape::stroke::Kind;
-use shawline_shape::{BoxStyle, Diagram, EndKind, PortKind};
+use shawline_shape::structure::{
+    Across, BoxPart, Mapping, Part, PortPart, Routing, Structure, TextPart,
+};
+use shawline_shape::{BoxStyle, Diagram, EndKind, PortKind, TextKind};
 use shawline_vm::bytecode::Prim;
 
 use crate::canon::{Sheets, tidy};
-use crate::model::{
-    BoxKind, BoxPrint, Model, NIL, Print, Sink, Source, Term, TextPrint, key, no_sink, no_source,
-};
+use crate::check::DIAGNOSTICS;
+use crate::model::{BoxKind, Model, NIL, Sink, Source, Term, no_sink, no_source};
 use crate::router::{self, BEND, BUDGET, CLEARANCE, Cell, Found, Miss, Start, TEE, Terrain, toward};
 use crate::sheet::{glyph, keep_clear};
 use crate::{Candidate, Placed, Refusal, RefusalKind};
@@ -70,13 +72,30 @@ fn here(at: Pos) -> impl Fn(Refusal) -> Refusal {
     move |r| Refusal { at, ..r }
 }
 
-/// Formats `text` and checks it recognizes to `expected`: the revision
-/// the edit returns, already read.
-fn finish(text: String, expected: &Print, at: Pos, what: &str) -> Result<Doc, Refusal> {
+/// Formats `text` and checks it recognizes to what the edit declares:
+/// `expected`, given where each box and text of `old` went. Nothing moves in
+/// a wiring edit, so they're found where they were, and a stray move leaves
+/// one unfound. Gives the revision the edit returns, already read.
+fn finish(
+    text: String,
+    old: &Diagram,
+    at: Pos,
+    what: &str,
+    expected: impl FnOnce(&Mapping) -> Structure,
+) -> Result<Doc, Refusal> {
     let refuse = |why: &str| Refusal::new(at, RefusalKind::Changed, format!("{what}: {why}"));
     let doc = tidy(Doc::new(text)).map_err(refuse)?;
     let (grid, diagram) = read(&doc);
-    expected.expect(&Print::of(&Model::new(grid, diagram))).map_err(refuse)?;
+    let map = Mapping::by_place(old, diagram, |_, r| r, |_, p| p);
+    let found = Structure::of(grid, diagram);
+    expected(&map).expect(&found, Routing::Ignored).map_err(|part| {
+        refuse(match part {
+            Part::Boxes => "it would change a box",
+            Part::Texts => "it would change the text on the sheet",
+            Part::Wires => "it would change what another wire connects",
+            Part::Codes => DIAGNOSTICS,
+        })
+    })?;
     Ok(doc)
 }
 
@@ -190,10 +209,19 @@ pub(crate) fn remove_wire(doc: &Doc, at: Pos) -> Result<Doc, Refusal> {
         .map_err(|why| Refusal::new(at, RefusalKind::Unreadable, why))?;
     let mut canvas = Canvas::new(grid);
     erase_wire(&mut canvas, &model, w);
-    let mut expected = Print::of(&model);
-    let gone = expected.wires.iter().position(|t| *t == model.terms[w]).expect("printed");
-    expected.wires.remove(gone);
-    finish(canvas.render(), &expected, at, "the wire can't be removed")
+    let mut expected = Structure::of(grid, diagram);
+    match model.terms[w].iter().find_map(|&t| model.named(t)) {
+        Some(term) => expected.remove_wire(term),
+        // A wire joining only loose ends shares its terms with any
+        // look-alike, so it's named whole, and just one goes.
+        None => {
+            let part = model.part(w);
+            if let Some(i) = expected.wires.iter().position(|p| *p == part) {
+                expected.wires.remove(i);
+            }
+        }
+    }
+    finish(canvas.render(), diagram, at, "the wire can't be removed", |map| expected.relabel(map))
 }
 
 pub(crate) fn disconnect(doc: &Doc, to: Pos) -> Result<Doc, Refusal> {
@@ -208,10 +236,9 @@ pub(crate) fn disconnect(doc: &Doc, to: Pos) -> Result<Doc, Refusal> {
     model.editable(w).map_err(|why| Refusal::new(to, RefusalKind::Unsupported, why))?;
     let mut canvas = Canvas::new(grid);
     cut_branch(&mut canvas, &model, w, &sink);
-    let mut expected = Print::of(&model);
-    expected.cut(sink.term());
-    expected.sort();
-    finish(canvas.render(), &expected, to, "the wire can't be cut here")
+    let mut expected = Structure::of(grid, diagram);
+    expected.disconnect(model.named(sink.term()).expect("a sink is a port"));
+    finish(canvas.render(), diagram, to, "the wire can't be cut here", |map| expected.relabel(map))
 }
 
 pub(crate) fn remove_node(doc: &Doc, corner: Pos) -> Result<Doc, Refusal> {
@@ -227,7 +254,6 @@ pub(crate) fn remove_node(doc: &Doc, corner: Pos) -> Result<Doc, Refusal> {
         return Err(Refusal::new(corner, RefusalKind::Target, why));
     }
     let shape = &diagram.boxes[b];
-    let mut expected = Print::of(&model);
     let inputs: Vec<Sink> = shape.ports.iter().filter_map(|p| model.sink(p.pos).ok()).collect();
     let outputs: Vec<Term> = shape
         .ports
@@ -253,7 +279,6 @@ pub(crate) fn remove_node(doc: &Doc, corner: Pos) -> Result<Doc, Refusal> {
             cut_branch(&mut canvas, &m, w, sink);
             cut = Some(Doc::new(canvas.render()));
         }
-        expected.cut(sink.term());
     }
     for &term in &outputs {
         let (g, d) = cut.as_ref().map_or((grid, diagram), read);
@@ -263,7 +288,6 @@ pub(crate) fn remove_node(doc: &Doc, corner: Pos) -> Result<Doc, Refusal> {
             erase_wire(&mut canvas, &m, w);
             cut = Some(Doc::new(canvas.render()));
         }
-        expected.drop_wire(term);
     }
     let mut canvas = Canvas::new(cut.as_ref().map_or(grid, |doc| read(doc).0));
     let r = shape.rect;
@@ -272,11 +296,14 @@ pub(crate) fn remove_node(doc: &Doc, corner: Pos) -> Result<Doc, Refusal> {
             canvas.set(Pos::new(row, col), ' ');
         }
     }
-    let rect = key(r);
-    expected.boxes.retain(|p| p.rect != rect);
-    expected.texts.retain(|t| t.owner != Some(rect));
-    expected.sort();
-    finish(canvas.render(), &expected, corner, "the node can't be deleted")
+    // Its outputs' wires go. The node and its word are left out of the
+    // mapping, which takes its inputs off their wires.
+    let mut expected = Structure::of(grid, diagram);
+    for term in outputs.iter().filter_map(|&t| model.named(t)) {
+        expected.remove_wire(term);
+    }
+    let what = "the node can't be deleted";
+    finish(canvas.render(), diagram, corner, what, |map| expected.relabel(map))
 }
 
 // ---------------------------------------------------------------------------
@@ -389,30 +416,47 @@ pub(crate) fn place_node(
     let row = |k: usize| rect.top + 1 + k;
     let arrows: Vec<Pos> = (0..inputs as usize).map(|k| Pos::new(row(k), rect.left)).collect();
     let tees: Vec<Pos> = (0..outputs as usize).map(|k| Pos::new(row(k), rect.right)).collect();
-    let mut expected = Print::of(&model);
-    let mut ports: Vec<_> = arrows.iter().map(|&p| (p, Dir::W, true, Dir::E)).collect();
-    ports.extend(tees.iter().map(|&p| (p, Dir::E, false, Dir::E)));
-    ports.sort();
-    expected.boxes.push(BoxPrint {
-        rect: key(rect),
-        style: BoxStyle::Square,
-        title_gap: None,
-        ports,
-        dividers: Vec::new(),
-        slips: 0,
-        parent: Some(key(diagram.boxes[holder].rect)),
-    });
-    expected.texts.push(TextPrint {
-        pos: Pos::new(rect.top + 1, rect.left + 2),
-        width: word.chars().count(),
-        kind: 0,
+    // The new box and its word take their places in row-major order.
+    let corner_of = |r: Rect| (r.top, r.left);
+    let index = diagram.boxes.iter().filter(|b| corner_of(b.rect) < corner_of(rect)).count();
+    let word_at = Pos::new(rect.top + 1, rect.left + 2);
+    let text = diagram.texts.iter().filter(|t| t.pos < word_at).count();
+    let mut ports = Vec::new();
+    for k in 0..usize::from(inputs.max(outputs)) {
+        if k < usize::from(inputs) {
+            // The first input points at the word, the others across the box.
+            let meets = if k == 0 { Across::Text(text) } else { Across::Stroke };
+            ports.push(PortPart { side: Dir::W, kind: PortKind::Arrow, dir: Dir::E, meets });
+        }
+        if k < usize::from(outputs) {
+            let meets = Across::Nothing;
+            ports.push(PortPart { side: Dir::E, kind: PortKind::Tee, dir: Dir::E, meets });
+        }
+    }
+    let named = TextPart {
+        kind: TextKind::Word,
         content: word.to_owned(),
-        owner: Some(key(rect)),
-        title: false,
-        divider: false,
-    });
-    expected.sort();
-    let doc = finish(canvas.render(), &expected, corner, "the node can't go there")?;
+        owner: Some(index),
+        title_of: None,
+        divider_of: None,
+    };
+    let old = Structure::of(grid, diagram);
+    let expected = |map: &Mapping| {
+        let mut expected = old.relabel(map);
+        let node = BoxPart {
+            style: BoxStyle::Square,
+            titled: false,
+            slips: 0,
+            parent: map.boxes[holder],
+            ports,
+            dividers: Vec::new(),
+        };
+        // A stray move leaves fewer, and the comparison fails on that.
+        expected.boxes.insert(index.min(expected.boxes.len()), node);
+        expected.texts.insert(text.min(expected.texts.len()), named);
+        expected
+    };
+    let doc = finish(canvas.render(), diagram, corner, "the node can't go there", expected)?;
     Ok(Placed { doc, inputs: arrows, outputs: tees })
 }
 
@@ -598,13 +642,10 @@ pub(crate) fn connect(doc: &Doc, from: Pos, to: Pos) -> Result<Doc, Refusal> {
     let mut canvas = Canvas::new(grid);
     draw(&mut canvas, &wiring, &found.path);
 
-    let mut expected = Print::of(&model);
-    match expected.wires.iter_mut().find(|w| w.contains(&source.term)) {
-        Some(w) => w.push(sink.term()),
-        None => expected.wires.push(vec![source.term, sink.term()]),
-    }
-    expected.sort();
-    finish(canvas.render(), &expected, to, "the wire can't go there")
+    let mut expected = Structure::of(grid, diagram);
+    let named = |t| model.named(t).expect("sources and sinks are ports or texts");
+    expected.connect(named(source.term), named(sink.term()));
+    finish(canvas.render(), diagram, to, "the wire can't go there", |map| expected.relabel(map))
 }
 
 /// The cells a wire from `from` would take if released at `to`: exactly

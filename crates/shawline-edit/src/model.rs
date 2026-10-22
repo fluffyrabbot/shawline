@@ -1,6 +1,6 @@
 //! The sheet as Studio's wiring edits see it (PLAN P7): what kind each box
-//! is, which cells are sources and sinks, and a position-free print of the
-//! sheet that an edit may change only as it intends.
+//! is, which cells are sources and sinks, and what a change an edit declares
+//! calls them in a [`Structure`](structure::Structure).
 //!
 //! Everything is read off the recognized [`Diagram`], not the syntax tree,
 //! because edits run on half-built sheets: a constant whose wire was just
@@ -10,7 +10,8 @@ use std::collections::{HashMap, HashSet};
 
 use shawline_grid::{Dir, Grid, Pos, Rect};
 use shawline_shape::stroke::Kind;
-use shawline_shape::{BoxStyle, Diagram, EndKind, Port, PortKind, TextKind};
+use shawline_shape::structure::{self, Across, End, WirePart};
+use shawline_shape::{Diagram, EndKind, Port, PortKind, TextKind};
 
 use crate::{Refusal, RefusalKind};
 use crate::sheet::{across, borders, text_cells};
@@ -436,135 +437,60 @@ impl<'a> Model<'a> {
         sinks.sort_by_key(|(s, _)| s.at);
         (sources, sinks)
     }
-}
 
-/// A box as an edit must keep it.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct BoxPrint {
-    pub rect: (usize, usize, usize, usize),
-    pub style: BoxStyle,
-    pub title_gap: Option<(usize, usize)>,
-    pub ports: Vec<(Pos, Dir, bool, Dir)>,
-    pub dividers: Vec<(usize, Option<(usize, usize)>)>,
-    pub slips: usize,
-    pub parent: Option<(usize, usize, usize, usize)>,
-}
-
-/// A text as an edit must keep it.
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
-pub(crate) struct TextPrint {
-    pub pos: Pos,
-    pub width: usize,
-    pub kind: u8,
-    pub content: String,
-    pub owner: Option<(usize, usize, usize, usize)>,
-    pub title: bool,
-    pub divider: bool,
-}
-
-/// The whole sheet, position-free where wires are concerned.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct Print {
-    pub boxes: Vec<BoxPrint>,
-    pub texts: Vec<TextPrint>,
-    /// Each wire's sorted terms, the list sorted.
-    pub wires: Vec<Vec<Term>>,
-}
-
-pub(crate) fn key(r: Rect) -> (usize, usize, usize, usize) {
-    (r.top, r.left, r.bottom, r.right)
-}
-
-pub(crate) fn text_kind(kind: TextKind) -> u8 {
-    match kind {
-        TextKind::Word => 0,
-        TextKind::Number => 1,
-        TextKind::Literal => 2,
-        TextKind::Comment => 3,
-    }
-}
-
-impl Print {
-    pub(crate) fn of(model: &Model) -> Self {
-        let d = model.diagram;
-        let mut boxes: Vec<BoxPrint> = d
-            .boxes
-            .iter()
-            .map(|b| {
-                let mut ports: Vec<_> = b
-                    .ports
-                    .iter()
-                    .map(|p| (p.pos, p.side, p.kind == PortKind::Arrow, p.dir))
-                    .collect();
-                ports.sort();
-                BoxPrint {
-                    rect: key(b.rect),
-                    style: b.style,
-                    title_gap: b.title_gap,
-                    ports,
-                    dividers: b.dividers.iter().map(|v| (v.row, v.gap)).collect(),
-                    slips: b.slips.len(),
-                    parent: b.parent.map(|p| key(d.boxes[p].rect)),
-                }
-            })
-            .collect();
-        boxes.sort_by_key(|b| b.rect);
-        let mut texts: Vec<TextPrint> = d
-            .texts
-            .iter()
-            .map(|t| TextPrint {
-                pos: t.pos,
-                width: t.width,
-                kind: text_kind(t.kind),
-                content: t.content.clone(),
-                owner: t.owner.map(|o| key(d.boxes[o].rect)),
-                title: t.title_of.is_some(),
-                divider: t.divider_of.is_some(),
-            })
-            .collect();
-        texts.sort();
-        let mut wires = model.terms.clone();
-        wires.sort();
-        Print { boxes, texts, wires }
-    }
-
-    pub(crate) fn sort(&mut self) {
-        self.boxes.sort_by_key(|b| b.rect);
-        self.texts.sort();
-        for w in &mut self.wires {
-            w.sort();
-        }
-        self.wires.retain(|w| !w.is_empty());
-        self.wires.sort();
-    }
-
-    /// Takes `term` off its wire; a wire left with one end goes entirely.
-    pub(crate) fn cut(&mut self, term: Term) {
-        for w in &mut self.wires {
-            w.retain(|&t| t != term);
-            if w.len() < 2 {
-                w.clear();
+    /// What `term` is called in a [`Structure`](structure::Structure) when
+    /// it names a port or a text, as a declared change names it. Only one
+    /// wire stops at a port, or at a text from one side, so the name is
+    /// that wire's alone.
+    pub(crate) fn named(&self, term: Term) -> Option<structure::Term> {
+        let (facing, end) = match term {
+            Term::Port(p, facing) => {
+                let (b, k) = structure::port_index(&self.diagram.boxes, p)?;
+                (facing, End::Port(b, k))
             }
-        }
+            Term::Text(p, facing) => (facing, End::Open(Across::Text(self.text_at(p)?))),
+            Term::Arrow(_) | Term::Loose(..) => return None,
+        };
+        Some(structure::Term { facing, end })
     }
 
-    /// Removes the wire with an end meeting `term`.
-    pub(crate) fn drop_wire(&mut self, term: Term) {
-        self.wires.retain(|w| !w.contains(&term));
+    /// Wire `w` as [`Structure::of`](structure::Structure::of) records it:
+    /// what names a wire that no port or text does ([`Model::named`]).
+    pub(crate) fn part(&self, w: usize) -> WirePart {
+        let wire = &self.diagram.wires[w];
+        let mut terms: Vec<structure::Term> = wire
+            .ends
+            .iter()
+            .map(|e| {
+                let end = match e.kind {
+                    EndKind::Port(p) => structure::port_index(&self.diagram.boxes, p)
+                        .map_or(End::Blocked, |(b, k)| End::Port(b, k)),
+                    EndKind::Arrow => End::Arrow(self.meets(e.pos, e.facing)),
+                    EndKind::Open => End::Open(self.meets(e.pos, e.facing)),
+                    EndKind::Blocked => End::Blocked,
+                };
+                structure::Term { facing: e.facing, end }
+            })
+            .collect();
+        terms.sort();
+        WirePart { terms, tees: wire.tees.len(), crossings: wire.crossings.len() }
     }
 
-    /// `Ok` if `self` (what the edit meant) equals `found` (what the result
-    /// recognizes to); otherwise what differs.
-    pub(crate) fn expect(&self, found: &Print) -> Result<(), &'static str> {
-        if self.boxes != found.boxes {
-            return Err("it would change a box");
+    /// What lies across spaces from `from` in `dir`, as a structure names
+    /// it. Text meets a wire only along a row (SPEC §6).
+    fn meets(&self, from: Pos, dir: Dir) -> Across {
+        if !dir.is_horizontal() {
+            return Across::Nothing;
         }
-        if self.texts != found.texts {
-            return Err("it would change the text on the sheet");
+        let (gap, text) = across(self.grid, &self.texts, from, dir);
+        if let Some(t) = text {
+            return Across::Text(t);
         }
-        if self.wires != found.wires {
-            return Err("it would change what another wire connects");
+        let next = gap.last().copied().unwrap_or(from).step(dir);
+        if next.is_some_and(|q| self.diagram.strokes.get(q).is_some()) {
+            Across::Stroke
+        } else {
+            Across::Nothing
         }
-        Ok(())
     }
 }

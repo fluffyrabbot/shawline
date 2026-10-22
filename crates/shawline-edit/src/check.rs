@@ -1,16 +1,19 @@
-//! The check on every edit (the contract's module docs): the result must
-//! recognize to the same boxes, wire connections and text adjacency as the
-//! input, allowing only for the deliberate move.
+//! The check on a move (the contract's module docs): the result must have
+//! the input's [`Structure`], with each box and text named by where the move
+//! should have put it.
 //!
-//! Positions may change, so boxes and texts are matched by where the move
-//! should have put them, and everything else is compared by those matches.
+//! The move re-routes the stretches of wire that follow the box, so
+//! crossings may come and go, but tees are the author's and stay
+//! ([`Routing::Rerouted`]).
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 
-use shawline_grid::{Dir, Grid, Pos, Rect};
-use shawline_shape::{BoxStyle, Diagram, EndKind, PortKind, TextKind};
+use shawline_grid::{Grid, Pos, Rect};
+use shawline_shape::Diagram;
+use shawline_shape::structure::{Mapping, Part, Routing, Structure};
 
-use crate::sheet::{across, text_cells};
+/// Why an edit is refused when its result's diagnostics differ.
+pub(crate) const DIAGNOSTICS: &str = "it would change the sheet's diagnostics";
 
 /// What a move shifts: some boxes with everything inside them, plus a few
 /// texts outside (a definition's output names).
@@ -36,50 +39,6 @@ impl Shift {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
-enum Target {
-    Text(usize),
-    Stroke,
-    Nothing,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
-enum EndPrint {
-    Port(usize, usize),
-    Arrow(Target),
-    Open(Target),
-    Blocked,
-}
-
-#[derive(Debug, PartialEq, Eq)]
-struct BoxPrint {
-    style: BoxStyle,
-    titled: bool,
-    slips: usize,
-    parent: Option<usize>,
-    ports: Vec<(Dir, PortKind, Dir, Target)>,
-    dividers: Vec<bool>,
-}
-
-#[derive(Debug, PartialEq, Eq)]
-struct TextPrint {
-    kind: TextKind,
-    content: String,
-    owner: Option<usize>,
-    title_of: Option<usize>,
-    divider_of: Option<usize>,
-}
-
-type WirePrint = (Vec<(Dir, EndPrint)>, usize);
-
-/// One side of the comparison, with indices already in the result's terms.
-#[derive(Debug, PartialEq, Eq)]
-struct Print {
-    boxes: Vec<BoxPrint>,
-    texts: Vec<TextPrint>,
-    wires: Vec<WirePrint>,
-}
-
 /// `Ok` if `new` is `old` with `shift` applied; otherwise a sentence
 /// saying what changed.
 pub(crate) fn same(
@@ -95,141 +54,23 @@ pub(crate) fn same(
     if od.texts.len() != nd.texts.len() {
         return Err("it would change the text on the sheet");
     }
-    let rect_index: HashMap<Rect, usize> =
-        nd.boxes.iter().enumerate().map(|(i, b)| (b.rect, i)).collect();
-    let mut box_map = Vec::with_capacity(od.boxes.len());
-    for (i, b) in od.boxes.iter().enumerate() {
-        let want = if shift.boxes.contains(&i) { shift.rect(b.rect) } else { b.rect };
-        box_map.push(*rect_index.get(&want).ok_or("it would break a box")?);
+    let map = Mapping::by_place(
+        od,
+        nd,
+        |i, r| if shift.boxes.contains(&i) { shift.rect(r) } else { r },
+        |i, p| if shift.texts.contains(&i) || shift.rect.contains(p) { shift.pos(p) } else { p },
+    );
+    if map.boxes.contains(&None) {
+        return Err("it would break a box");
     }
-
-    let text_index: HashMap<Pos, usize> =
-        nd.texts.iter().enumerate().map(|(i, t)| (t.pos, i)).collect();
-    let mut text_map = Vec::with_capacity(od.texts.len());
-    for (i, t) in od.texts.iter().enumerate() {
-        let moved = shift.texts.contains(&i) || shift.rect.contains(t.pos);
-        let want = if moved { shift.pos(t.pos) } else { t.pos };
-        text_map.push(*text_index.get(&want).ok_or("it would separate text from its place")?);
+    if map.texts.contains(&None) {
+        return Err("it would separate text from its place");
     }
-
-    let ident: Vec<usize> = (0..nd.boxes.len()).collect();
-    let ident_text: Vec<usize> = (0..nd.texts.len()).collect();
-    let before = print(og, od, &box_map, &text_map);
-    let after = print(ng, nd, &ident, &ident_text);
-    if before.boxes != after.boxes {
-        return Err("it would change a box or what its ports meet");
-    }
-    if before.texts != after.texts {
-        return Err("it would move text out of its box");
-    }
-    if before.wires != after.wires {
-        return Err("it would change what a wire connects");
-    }
-    Ok(())
-}
-
-/// The structure of one diagram, with box and text indices mapped through
-/// `boxes` and `texts`, and orders made position-free.
-fn print(grid: &Grid, d: &Diagram, boxes: &[usize], texts: &[usize]) -> Print {
-    let cells = text_cells(d);
-    let target = |p: Pos, dir: Dir| -> Target {
-        if !dir.is_horizontal() {
-            return Target::Nothing;
-        }
-        let (gap, text) = across(grid, &cells, p, dir);
-        match text {
-            Some(i) => Target::Text(texts[i]),
-            None => {
-                let next = gap.last().copied().unwrap_or(p).step(dir);
-                if next.is_some_and(|q| d.strokes.get(q).is_some()) {
-                    Target::Stroke
-                } else {
-                    Target::Nothing
-                }
-            }
-        }
-    };
-    let port_index: HashMap<Pos, (usize, usize)> = d
-        .boxes
-        .iter()
-        .enumerate()
-        .flat_map(|(b, shape)| shape.ports.iter().enumerate().map(move |(i, p)| (p.pos, (b, i))))
-        .collect();
-
-    let mut box_prints: Vec<(usize, BoxPrint)> = d
-        .boxes
-        .iter()
-        .enumerate()
-        .map(|(i, b)| {
-            let ports = b
-                .ports
-                .iter()
-                .map(|p| {
-                    let t = match p.kind {
-                        PortKind::Arrow => target(p.pos, p.dir),
-                        PortKind::Tee => Target::Nothing,
-                    };
-                    (p.side, p.kind, p.dir, t)
-                })
-                .collect();
-            let print = BoxPrint {
-                style: b.style,
-                titled: b.title_gap.is_some(),
-                slips: b.slips.len(),
-                parent: b.parent.map(|p| boxes[p]),
-                ports,
-                dividers: b.dividers.iter().map(|d| d.gap.is_some()).collect(),
-            };
-            (boxes[i], print)
-        })
-        .collect();
-    box_prints.sort_by_key(|&(i, _)| i);
-
-    let mut text_prints: Vec<(usize, TextPrint)> = d
-        .texts
-        .iter()
-        .enumerate()
-        .map(|(i, t)| {
-            let print = TextPrint {
-                kind: t.kind,
-                content: t.content.clone(),
-                owner: t.owner.map(|b| boxes[b]),
-                title_of: t.title_of.map(|b| boxes[b]),
-                divider_of: t.divider_of.map(|b| boxes[b]),
-            };
-            (texts[i], print)
-        })
-        .collect();
-    text_prints.sort_by_key(|&(i, _)| i);
-
-    let mut wires: Vec<WirePrint> = d
-        .wires
-        .iter()
-        .map(|w| {
-            let mut ends: Vec<(Dir, EndPrint)> = w
-                .ends
-                .iter()
-                .map(|e| {
-                    let print = match e.kind {
-                        EndKind::Port(p) => port_index
-                            .get(&p)
-                            .map_or(EndPrint::Blocked, |&(b, i)| EndPrint::Port(boxes[b], i)),
-                        EndKind::Arrow => EndPrint::Arrow(target(e.pos, e.facing)),
-                        EndKind::Open => EndPrint::Open(target(e.pos, e.facing)),
-                        EndKind::Blocked => EndPrint::Blocked,
-                    };
-                    (e.facing, print)
-                })
-                .collect();
-            ends.sort();
-            (ends, w.tees.len())
-        })
-        .collect();
-    wires.sort();
-
-    Print {
-        boxes: box_prints.into_iter().map(|(_, p)| p).collect(),
-        texts: text_prints.into_iter().map(|(_, p)| p).collect(),
-        wires,
-    }
+    let expected = Structure::of(og, od).relabel(&map);
+    expected.expect(&Structure::of(ng, nd), Routing::Rerouted).map_err(|part| match part {
+        Part::Boxes => "it would change a box or what its ports meet",
+        Part::Texts => "it would move text out of its box",
+        Part::Wires => "it would change what a wire connects",
+        Part::Codes => DIAGNOSTICS,
+    })
 }
