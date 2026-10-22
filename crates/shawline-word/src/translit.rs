@@ -153,7 +153,7 @@ pub fn transliterate(input: &str) -> String {
 
 /// One longest-match step on non-empty `s`: the byte length consumed and the
 /// character produced. A character that starts no key passes through.
-fn munch(s: &str) -> (usize, char) {
+pub(crate) fn munch(s: &str) -> (usize, char) {
     TABLE
         .iter()
         .filter(|(key, _)| s.starts_with(key))
