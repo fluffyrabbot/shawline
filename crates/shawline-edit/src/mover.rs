@@ -12,15 +12,16 @@
 
 use std::collections::{HashMap, HashSet};
 
+use shawline_doc::Doc;
 use shawline_grid::{Dir, Grid, Pos, Rect};
 use shawline_shape::stroke::{self, Kind};
-use shawline_shape::{Diagram, EndKind, PortKind, recognize};
+use shawline_shape::{Diagram, EndKind, PortKind};
 
-use crate::Refusal;
-use crate::canon::Sheets;
+use crate::canon::{Sheets, tidy};
 use crate::check::{Shift, same};
 use crate::router::{self, BEND, BUDGET, CLEARANCE, Cell, Found, Miss, Start, TEE, Terrain, toward};
 use crate::sheet::{across, borders, glyph, is_corner, keep_clear, perimeter, text_cells};
+use crate::{Refusal, RefusalKind};
 
 /// Using a cell of another pending wire's chain: it may want it back.
 const OTHER_CHAIN: u32 = 2;
@@ -29,22 +30,22 @@ const OTHER_CHAIN: u32 = 2;
 /// never preferred.
 const TIGHT: u32 = 4;
 
-pub(crate) fn move_box(src: &str, corner: Pos, dr: isize, dc: isize) -> Result<String, Refusal> {
-    move_within(src, corner, dr, dc, BUDGET)
+pub(crate) fn move_box(doc: &Doc, corner: Pos, dr: isize, dc: isize) -> Result<Doc, Refusal> {
+    move_within(doc, corner, dr, dc, BUDGET)
 }
 
 /// [`move_box`], with `budget` router expansions for the whole move.
 pub(crate) fn move_within(
-    src: &str,
+    doc: &Doc,
     corner: Pos,
     dr: isize,
     dc: isize,
     budget: usize,
-) -> Result<String, Refusal> {
+) -> Result<Doc, Refusal> {
     // The box is found on the text as given, then carried over to the
     // canonical text the move draws on (`crate::canon`). Refusals point at
     // canonical cells, so they're carried back.
-    let sheets = Sheets::read(src, corner)?;
+    let sheets = Sheets::read(doc, corner)?;
     let Some(index) = sheets
         .given()
         .1
@@ -52,7 +53,8 @@ pub(crate) fn move_within(
         .iter()
         .position(|b| (b.rect.top, b.rect.left) == (corner.row, corner.col))
     else {
-        return Err(Refusal::new(corner, "there is no box with its top-left corner here"));
+        let why = "there is no box with its top-left corner here";
+        return Err(Refusal::new(corner, RefusalKind::Target, why));
     };
     moved(&sheets, index, dr, dc, budget)
         .map_err(|r| Refusal { at: sheets.back(index, r.at).unwrap_or(corner), ..r })
@@ -64,47 +66,41 @@ fn moved(
     dr: isize,
     dc: isize,
     budget: usize,
-) -> Result<String, Refusal> {
-    let canon = sheets.text();
+) -> Result<Doc, Refusal> {
+    let canon = sheets.doc();
     if dr == 0 && dc == 0 {
-        return Ok(canon.to_owned());
+        return Ok(Doc::new(canon.text()));
     }
     let (grid, diagram) = sheets.canon();
     let rect = diagram.boxes[index].rect;
     let at = Pos::new(rect.top, rect.left);
+    let changed = |why: &str| {
+        Refusal::new(at, RefusalKind::Changed, format!("the box can't go there: {why}"))
+    };
 
-    let text = Mover::new(grid, diagram, index, dr, dc)?.run(budget)?;
+    let drawn = Doc::new(Mover::new(grid, diagram, index, dr, dc)?.run(budget)?);
 
     // The check (contract module docs): same structure, same diagnostics.
-    let new_grid = Grid::parse(&text).expect("edits write only repertoire characters");
-    let new_diagram = recognize(&new_grid);
+    let new_grid = drawn.grid().expect("edits write only repertoire characters");
+    let new_diagram = drawn.diagram().expect("a sheet on the grid is recognized");
     let shift = shift_of(grid, diagram, index, dr, dc);
-    if let Err(what) = same((grid, diagram), (&new_grid, &new_diagram), &shift) {
-        return Err(Refusal::new(at, format!("the box can't go there: {what}")));
-    }
-    if codes(canon) != codes(&text) {
-        return Err(Refusal::new(
-            at,
-            "the box can't go there: it would change the sheet's diagnostics",
-        ));
-    }
-    let formatted = shawline_fmt::format(&new_grid, &new_diagram);
-    if formatted == text {
-        return Ok(text);
+    same((grid, diagram), (new_grid, new_diagram), &shift).map_err(changed)?;
+    if codes(canon) != codes(&drawn) {
+        return Err(changed("it would change the sheet's diagnostics"));
     }
     // The formatter tidies what the edit left loose (a constant pulled up to
     // its shortened wire). It keeps the structure, but not necessarily the box.
-    let g = Grid::parse(&formatted).expect("the formatter writes only repertoire characters");
+    let result = tidy(drawn).map_err(changed)?;
     let moved = shift.rect(rect);
-    if !recognize(&g).boxes.iter().any(|b| b.rect == moved) {
-        return Err(Refusal::new(at, "formatting would undo this move"));
+    let boxes = &result.diagram().expect("a canonical sheet is on the grid").boxes;
+    if !boxes.iter().any(|b| b.rect == moved) {
+        return Err(Refusal::new(at, RefusalKind::Changed, "formatting would undo this move"));
     }
-    Ok(formatted)
+    Ok(result)
 }
 
 /// Non-lint diagnostic codes, sorted: positions move with the box.
-fn codes(src: &str) -> Vec<&'static str> {
-    let doc = shawline_doc::Doc::new(src);
+fn codes(doc: &Doc) -> Vec<&'static str> {
     let mut codes: Vec<&'static str> =
         doc.diagnostics().iter().map(|d| d.code).filter(|c| !c.starts_with('L')).collect();
     codes.sort_unstable();
@@ -279,12 +275,13 @@ impl<'a> Mover<'a> {
         let b = &diagram.boxes[index];
         let rect = b.rect;
         let at = Pos::new(rect.top, rect.left);
-        let refuse = |reason: &str| Refusal::new(at, reason);
+        let refuse = |kind, reason: &str| Refusal::new(at, kind, reason);
         let shifted = |p: Pos| add(p, dr, dc);
         let (Some(tl), Some(br)) =
             (shifted(Pos::new(rect.top, rect.left)), shifted(Pos::new(rect.bottom, rect.right)))
         else {
-            return Err(refuse("the box can't move past the edge of the sheet"));
+            let why = "the box can't move past the edge of the sheet";
+            return Err(refuse(RefusalKind::Blocked, why));
         };
         let new_rect = Rect { top: tl.row, left: tl.col, bottom: br.row, right: br.col };
 
@@ -299,7 +296,8 @@ impl<'a> Mover<'a> {
                     right: grid.width() + rect.right + 2,
                 };
                 if new_rect.bottom > region.bottom || new_rect.right > region.right {
-                    return Err(refuse("the box can't move that far past the end of the sheet"));
+                    let why = "the box can't move that far past the end of the sheet";
+                    return Err(refuse(RefusalKind::Blocked, why));
                 }
                 region
             }
@@ -307,7 +305,8 @@ impl<'a> Mover<'a> {
                 let parent = &diagram.boxes[p];
                 let what = if parent.parent.is_none() { "definition" } else { "switch" };
                 if !parent.rect.encloses(&new_rect) {
-                    return Err(refuse(&format!("the box would leave its {what}")));
+                    let why = format!("the box would leave its {what}");
+                    return Err(refuse(RefusalKind::Blocked, &why));
                 }
                 let r = parent.rect;
                 let above = parent.dividers.iter().map(|d| d.row).filter(|&d| d < rect.top).max();
@@ -316,7 +315,8 @@ impl<'a> Mover<'a> {
                 let top = above.unwrap_or(r.top) + 1;
                 let bottom = below.unwrap_or(r.bottom) - 1;
                 if new_rect.top < top || new_rect.bottom > bottom {
-                    return Err(refuse("the box would cross into another arm of the switch"));
+                    let why = "the box would cross into another arm of the switch";
+                    return Err(refuse(RefusalKind::Blocked, why));
                 }
                 Rect { top, left: r.left + 1, bottom, right: r.right - 1 }
             }
@@ -338,7 +338,8 @@ impl<'a> Mover<'a> {
                 let chain = walk(grid, diagram, &border, &texts, e.pos, e.facing);
                 let new_port = shifted(port).expect("on the moved box");
                 let Some(target) = new_port.step(side) else {
-                    return Err(Refusal::new(port, "the wire at this port would leave the sheet"));
+                    let why = "the wire at this port would leave the sheet";
+                    return Err(Refusal::new(port, RefusalKind::Blocked, why));
                 };
                 ends.push(End {
                     wire: w,
@@ -358,7 +359,8 @@ impl<'a> Mover<'a> {
             if let Some((anchor, _)) = e.chain.anchor
                 && (starts.contains(&anchor) || ports.keys().any(|&p| e.chain.cells.contains(&p)))
             {
-                return Err(Refusal::new(e.port, "this wire loops back into the same box"));
+                let why = "this wire loops back into the same box";
+                return Err(Refusal::new(e.port, RefusalKind::Unsupported, why));
             }
         }
 
@@ -408,7 +410,7 @@ impl<'a> Mover<'a> {
                 } else {
                     "a wire"
                 };
-                return Err(refuse(&format!("the box would land on {what}")));
+                return Err(refuse(RefusalKind::Blocked, &format!("the box would land on {what}")));
             }
             footprint.insert(q);
             if ch != ' ' {
@@ -505,6 +507,7 @@ impl<'a> Mover<'a> {
             let Some((end, miss)) = failure.map(|(i, miss)| (&self.ends[i], miss)) else {
                 return Err(Refusal::new(
                     corner,
+                    RefusalKind::Blocked,
                     "no free path for a wire; make room around the box first",
                 ));
             };
@@ -521,7 +524,7 @@ impl<'a> Mover<'a> {
                         .to_owned()
                 }
             };
-            return Err(Refusal::new(end.port, reason));
+            return Err(Refusal::new(end.port, miss.kind(), reason));
         };
         Ok(work.render())
     }

@@ -15,16 +15,16 @@ use std::collections::HashSet;
 use shawline_doc::Doc;
 use shawline_grid::{Dir, Grid, Pos, Rect};
 use shawline_shape::stroke::Kind;
-use shawline_shape::{BoxStyle, Diagram, EndKind, PortKind, recognize};
+use shawline_shape::{BoxStyle, Diagram, EndKind, PortKind};
 use shawline_vm::bytecode::Prim;
 
-use crate::canon::Sheets;
+use crate::canon::{Sheets, tidy};
 use crate::model::{
     BoxKind, BoxPrint, Model, NIL, Print, Sink, Source, Term, TextPrint, key, no_sink, no_source,
 };
 use crate::router::{self, BEND, BUDGET, CLEARANCE, Cell, Found, Miss, Start, TEE, Terrain, toward};
 use crate::sheet::{glyph, keep_clear};
-use crate::{Candidate, Refusal};
+use crate::{Candidate, Placed, Refusal, RefusalKind};
 
 /// The most ports `place_node` draws on one side.
 const MAX_PORTS: u16 = 16;
@@ -70,42 +70,37 @@ fn here(at: Pos) -> impl Fn(Refusal) -> Refusal {
     move |r| Refusal { at, ..r }
 }
 
-/// Formats `text` and checks it recognizes to `expected`.
-fn finish(text: &str, expected: &Print, at: Pos, what: &str) -> Result<String, Refusal> {
-    let refuse = |why: &str| Refusal::new(at, format!("{what}: {why}"));
-    let grid = Grid::parse(text).map_err(|_| refuse("it would write a stray character"))?;
-    let formatted = shawline_fmt::format(&grid, &recognize(&grid));
-    let grid = Grid::parse(&formatted).map_err(|_| refuse("it would write a stray character"))?;
-    let diagram = recognize(&grid);
-    expected.expect(&Print::of(&Model::new(&grid, &diagram))).map_err(refuse)?;
-    Ok(formatted)
+/// Formats `text` and checks it recognizes to `expected`: the revision
+/// the edit returns, already read.
+fn finish(text: String, expected: &Print, at: Pos, what: &str) -> Result<Doc, Refusal> {
+    let refuse = |why: &str| Refusal::new(at, RefusalKind::Changed, format!("{what}: {why}"));
+    let doc = tidy(Doc::new(text)).map_err(refuse)?;
+    let (grid, diagram) = read(&doc);
+    expected.expect(&Print::of(&Model::new(grid, diagram))).map_err(refuse)?;
+    Ok(doc)
 }
 
-/// Re-reads an intermediate text, for edits made of several steps.
-fn reread(text: &str) -> (Grid, Diagram) {
-    let grid = Grid::parse(text).expect("edits write only repertoire characters");
-    let diagram = recognize(&grid);
-    (grid, diagram)
+/// The grid and diagram of a text an edit wrote.
+fn read(doc: &Doc) -> (&Grid, &Diagram) {
+    let grid = doc.grid().expect("edits write only repertoire characters");
+    (grid, doc.diagram().expect("a sheet on the grid is recognized"))
 }
 
 // ---------------------------------------------------------------------------
 // Removing strokes.
 
 /// Erases wire cell `p`, whose own connections are `mask`. A crossing keeps
-/// the other wire's line.
+/// the axis that isn't `mask`'s, if any: another wire's line, or another
+/// branch of a wire crossing itself.
 fn erase(canvas: &mut Canvas, model: &Model, p: Pos, mask: u8) {
-    let crossing = model.diagram.strokes.get(p).is_some_and(|s| s.kind == Kind::Crossing);
-    let ch = match (crossing, mask & (Dir::E.bit() | Dir::W.bit()) != 0) {
-        (false, _) => ' ',
-        (true, true) => '│',
-        (true, false) => '─',
-    };
-    canvas.set(p, ch);
+    let crossing = model.diagram.strokes.get(p).filter(|s| s.kind == Kind::Crossing);
+    canvas.set(p, crossing.map_or(' ', |s| glyph(s.conn & !mask)));
 }
 
 fn erase_wire(canvas: &mut Canvas, model: &Model, w: usize) {
-    for &p in &model.diagram.wires[w].cells {
-        erase(canvas, model, p, model.own_mask(w, p));
+    let wire = &model.diagram.wires[w];
+    for (&p, &mask) in wire.cells.iter().zip(&wire.links) {
+        erase(canvas, model, p, mask);
     }
 }
 
@@ -176,59 +171,60 @@ fn cut_branch(canvas: &mut Canvas, model: &Model, w: usize, sink: &Sink) {
     }
 }
 
-pub(crate) fn remove_wire(src: &str, at: Pos) -> Result<String, Refusal> {
-    let sheets = Sheets::read(src, at)?;
+pub(crate) fn remove_wire(doc: &Doc, at: Pos) -> Result<Doc, Refusal> {
+    let sheets = Sheets::read(doc, at)?;
     let (g, d) = sheets.given();
     let given = Model::new(g, d);
     let through: Vec<usize> =
         (0..d.wires.len()).filter(|&w| d.wires[w].cells.contains(&at)).collect();
     let Some(&first) = through.first() else {
-        return Err(Refusal::new(at, "no wire passes through this cell"));
+        return Err(Refusal::new(at, RefusalKind::Target, "no wire passes through this cell"));
     };
-    let w = through
-        .iter()
-        .copied()
-        .find(|&w| given.editable(w).is_ok())
-        .ok_or_else(|| Refusal::new(at, given.editable(first).unwrap_err()))?;
+    let w = through.iter().copied().find(|&w| given.editable(w).is_ok()).ok_or_else(|| {
+        Refusal::new(at, RefusalKind::Unsupported, given.editable(first).unwrap_err())
+    })?;
     let (grid, diagram) = sheets.canon();
     let model = Model::new(grid, diagram);
-    let w = sheets.wire(&given, &model, w, at).map_err(|why| Refusal::new(at, why))?;
+    let w = sheets
+        .wire(&given, &model, w, at)
+        .map_err(|why| Refusal::new(at, RefusalKind::Unreadable, why))?;
     let mut canvas = Canvas::new(grid);
     erase_wire(&mut canvas, &model, w);
     let mut expected = Print::of(&model);
     let gone = expected.wires.iter().position(|t| *t == model.terms[w]).expect("printed");
     expected.wires.remove(gone);
-    finish(&canvas.render(), &expected, at, "the wire can't be removed")
+    finish(canvas.render(), &expected, at, "the wire can't be removed")
 }
 
-pub(crate) fn disconnect(src: &str, to: Pos) -> Result<String, Refusal> {
-    let sheets = Sheets::read(src, to)?;
+pub(crate) fn disconnect(doc: &Doc, to: Pos) -> Result<Doc, Refusal> {
+    let sheets = Sheets::read(doc, to)?;
     let sink = sheets.entity(to).ok_or_else(|| no_sink(to))?;
     let (grid, diagram) = sheets.canon();
     let model = Model::new(grid, diagram);
     let sink = model.sink(sink).map_err(here(to))?;
     let w = model
         .wire_of(sink.term())
-        .ok_or_else(|| Refusal::new(to, "no wire reaches this arrowhead"))?;
-    model.editable(w).map_err(|why| Refusal::new(to, why))?;
+        .ok_or_else(|| Refusal::new(to, RefusalKind::Target, "no wire reaches this arrowhead"))?;
+    model.editable(w).map_err(|why| Refusal::new(to, RefusalKind::Unsupported, why))?;
     let mut canvas = Canvas::new(grid);
     cut_branch(&mut canvas, &model, w, &sink);
     let mut expected = Print::of(&model);
     expected.cut(sink.term());
     expected.sort();
-    finish(&canvas.render(), &expected, to, "the wire can't be cut here")
+    finish(canvas.render(), &expected, to, "the wire can't be cut here")
 }
 
-pub(crate) fn remove_node(src: &str, corner: Pos) -> Result<String, Refusal> {
-    let sheets = Sheets::read(src, corner)?;
+pub(crate) fn remove_node(doc: &Doc, corner: Pos) -> Result<Doc, Refusal> {
+    let sheets = Sheets::read(doc, corner)?;
     let (g, d) = sheets.given();
-    let b = Model::new(g, d)
-        .box_at(corner)
-        .ok_or_else(|| Refusal::new(corner, "there is no box with its top-left corner here"))?;
+    let b = Model::new(g, d).box_at(corner).ok_or_else(|| {
+        Refusal::new(corner, RefusalKind::Target, "there is no box with its top-left corner here")
+    })?;
     let (grid, diagram) = sheets.canon();
     let model = Model::new(grid, diagram);
     if model.kind(b) != BoxKind::Node {
-        return Err(Refusal::new(corner, "only a node can be deleted; a definition or switch stays"));
+        let why = "only a node can be deleted; a definition or switch stays";
+        return Err(Refusal::new(corner, RefusalKind::Target, why));
     }
     let shape = &diagram.boxes[b];
     let mut expected = Print::of(&model);
@@ -242,34 +238,34 @@ pub(crate) fn remove_node(src: &str, corner: Pos) -> Result<String, Refusal> {
     for w in inputs.iter().filter_map(|s| model.wire_of(s.term())).chain(
         outputs.iter().filter_map(|&t| model.wire_of(t)),
     ) {
-        model.editable(w).map_err(|why| Refusal::new(corner, why))?;
+        model.editable(w).map_err(|why| Refusal::new(corner, RefusalKind::Unsupported, why))?;
     }
 
     // One wire at a time, reading the sheet again after each: two inputs
     // fed by one fan-out leave the tee a corner, then take it with them.
-    let mut text = Canvas::new(grid).render();
+    // `None` until the first cut: the canonical sheet as read.
+    let mut cut: Option<Doc> = None;
     for sink in &inputs {
-        let (g, d) = reread(&text);
-        let m = Model::new(&g, &d);
+        let (g, d) = cut.as_ref().map_or((grid, diagram), read);
+        let m = Model::new(g, d);
         if let Some(w) = m.wire_of(sink.term()) {
-            let mut canvas = Canvas::new(&g);
+            let mut canvas = Canvas::new(g);
             cut_branch(&mut canvas, &m, w, sink);
-            text = canvas.render();
+            cut = Some(Doc::new(canvas.render()));
         }
         expected.cut(sink.term());
     }
     for &term in &outputs {
-        let (g, d) = reread(&text);
-        let m = Model::new(&g, &d);
+        let (g, d) = cut.as_ref().map_or((grid, diagram), read);
+        let m = Model::new(g, d);
         if let Some(w) = m.wire_of(term) {
-            let mut canvas = Canvas::new(&g);
+            let mut canvas = Canvas::new(g);
             erase_wire(&mut canvas, &m, w);
-            text = canvas.render();
+            cut = Some(Doc::new(canvas.render()));
         }
         expected.drop_wire(term);
     }
-    let (g, _) = reread(&text);
-    let mut canvas = Canvas::new(&g);
+    let mut canvas = Canvas::new(cut.as_ref().map_or(grid, |doc| read(doc).0));
     let r = shape.rect;
     for row in r.top..=r.bottom {
         for col in r.left..=r.right {
@@ -280,7 +276,7 @@ pub(crate) fn remove_node(src: &str, corner: Pos) -> Result<String, Refusal> {
     expected.boxes.retain(|p| p.rect != rect);
     expected.texts.retain(|t| t.owner != Some(rect));
     expected.sort();
-    finish(&canvas.render(), &expected, corner, "the node can't be deleted")
+    finish(canvas.render(), &expected, corner, "the node can't be deleted")
 }
 
 // ---------------------------------------------------------------------------
@@ -300,24 +296,24 @@ fn node_rect(corner: Pos, word: &str, inputs: u16, outputs: u16) -> Rect {
 }
 
 pub(crate) fn place_node(
-    src: &str,
+    doc: &Doc,
     corner: Pos,
     word: &str,
     inputs: u16,
     outputs: u16,
-) -> Result<String, Refusal> {
-    let refuse = |why: &str| Refusal::new(corner, why);
+) -> Result<Placed, Refusal> {
+    let refuse = |kind, why: &str| Refusal::new(corner, kind, why);
     if word.is_empty() || !word.chars().all(|c| matches!(c, '\u{10450}'..='\u{1047F}')) {
-        return Err(refuse("a node's word is written in Shavian letters"));
+        return Err(refuse(RefusalKind::Unsupported, "a node's word is written in Shavian letters"));
     }
     if inputs > MAX_PORTS || outputs > MAX_PORTS {
-        return Err(refuse("that's more ports than a node box can hold"));
+        return Err(refuse(RefusalKind::Unsupported, "that's more ports than a node box can hold"));
     }
-    let sheets = Sheets::read(src, corner)?;
+    let sheets = Sheets::read(doc, corner)?;
     // The corner keeps its place in the box around it, so the node lands
     // where the caller pointed even when formatting shifts the rows.
     let Some(at) = sheets.place(corner) else {
-        return Err(refuse("a node must sit wholly inside a definition"));
+        return Err(refuse(RefusalKind::Target, "a node must sit wholly inside a definition"));
     };
     let (grid, diagram) = sheets.canon();
     let model = Model::new(grid, diagram);
@@ -330,15 +326,20 @@ pub(crate) fn place_node(
             r.top < rect.top && r.left < rect.left && rect.bottom < r.bottom && rect.right < r.right
         })
         .min_by_key(|&i| diagram.boxes[i].rect.area());
+    // The corner is in a box, so the node reaches past a definition's
+    // border.
     let Some(holder) = holder else {
-        return Err(refuse("a node must sit wholly inside a definition"));
+        return Err(refuse(RefusalKind::Blocked, "the node would stick out of its definition"));
     };
     match model.kind(holder) {
-        BoxKind::Node => return Err(refuse("a node can't go inside another node")),
+        BoxKind::Node => {
+            return Err(refuse(RefusalKind::Target, "a node can't go inside another node"));
+        }
         BoxKind::Switch => {
             let dividers = &diagram.boxes[holder].dividers;
             if dividers.iter().any(|d| (rect.top..=rect.bottom).contains(&d.row)) {
-                return Err(refuse("the node would cross from one arm of the switch into another"));
+                let why = "the node would cross from one arm of the switch into another";
+                return Err(refuse(RefusalKind::Blocked, why));
             }
         }
         BoxKind::Definition => {}
@@ -347,7 +348,7 @@ pub(crate) fn place_node(
         && !b.rect.encloses(&rect)
         && b.rect != diagram.boxes[holder].rect)
     {
-        return Err(refuse("the node would overlap another box"));
+        return Err(refuse(RefusalKind::Blocked, "the node would overlap another box"));
     }
     // Clear in the text the caller sees as well as in the canonical one,
     // where formatting may have moved text or wire out of the way.
@@ -356,7 +357,8 @@ pub(crate) fn place_node(
         for row in r.top..=r.bottom {
             for col in r.left..=r.right {
                 if sheet.get(Pos::new(row, col)) != ' ' {
-                    return Err(refuse("the node would land on something; find a clear spot"));
+                    let why = "the node would land on something; find a clear spot";
+                    return Err(refuse(RefusalKind::Blocked, why));
                 }
             }
         }
@@ -382,14 +384,14 @@ pub(crate) fn place_node(
         }
     }
 
+    // The check below holds the box to exactly these cells, so they name
+    // its ports in the result too.
+    let row = |k: usize| rect.top + 1 + k;
+    let arrows: Vec<Pos> = (0..inputs as usize).map(|k| Pos::new(row(k), rect.left)).collect();
+    let tees: Vec<Pos> = (0..outputs as usize).map(|k| Pos::new(row(k), rect.right)).collect();
     let mut expected = Print::of(&model);
-    let mut ports = Vec::new();
-    for k in 0..inputs as usize {
-        ports.push((Pos::new(rect.top + 1 + k, rect.left), Dir::W, true, Dir::E));
-    }
-    for k in 0..outputs as usize {
-        ports.push((Pos::new(rect.top + 1 + k, rect.right), Dir::E, false, Dir::E));
-    }
+    let mut ports: Vec<_> = arrows.iter().map(|&p| (p, Dir::W, true, Dir::E)).collect();
+    ports.extend(tees.iter().map(|&p| (p, Dir::E, false, Dir::E)));
     ports.sort();
     expected.boxes.push(BoxPrint {
         rect: key(rect),
@@ -410,7 +412,8 @@ pub(crate) fn place_node(
         divider: false,
     });
     expected.sort();
-    finish(&canvas.render(), &expected, corner, "the node can't go there")
+    let doc = finish(canvas.render(), &expected, corner, "the node can't go there")?;
+    Ok(Placed { doc, inputs: arrows, outputs: tees })
 }
 
 // ---------------------------------------------------------------------------
@@ -481,7 +484,7 @@ impl<'a> Wiring<'a> {
         }
         let Some(s) = self.model.diagram.strokes.get(p) else { return false };
         let back = heading.opposite().bit();
-        let mask = self.model.own_mask(w, p);
+        let mask = self.model.links(w, p);
         matches!(s.kind, Kind::Line | Kind::Corner { .. })
             && mask & back == 0
             && (mask | back).count_ones() == 3
@@ -544,7 +547,7 @@ fn draw(canvas: &mut Canvas, wiring: &Wiring, path: &[Pos]) {
     }
     if let Some(w) = wiring.wire {
         let goal = path[n - 1];
-        let mask = wiring.model.own_mask(w, goal) | toward(goal, path[n - 2]).bit();
+        let mask = wiring.model.links(w, goal) | toward(goal, path[n - 2]).bit();
         canvas.set(goal, glyph(mask));
     }
 }
@@ -555,8 +558,8 @@ fn search_from_sink(wiring: &Wiring, sink: &Sink) -> Result<Found, Miss> {
     if found.path.len() < 3 { Err(Miss::NoPath) } else { Ok(found) }
 }
 
-pub(crate) fn connect(src: &str, from: Pos, to: Pos) -> Result<String, Refusal> {
-    let sheets = Sheets::read(src, to)?;
+pub(crate) fn connect(doc: &Doc, from: Pos, to: Pos) -> Result<Doc, Refusal> {
+    let sheets = Sheets::read(doc, to)?;
     let source = sheets.entity(from).ok_or_else(|| no_source(from))?;
     let sink = sheets.entity(to).ok_or_else(|| no_sink(to))?;
     let (grid, diagram) = sheets.canon();
@@ -564,19 +567,22 @@ pub(crate) fn connect(src: &str, from: Pos, to: Pos) -> Result<String, Refusal> 
     let source = model.source(source).map_err(here(from))?;
     let sink = model.sink(sink).map_err(here(to))?;
     if model.wire_of(sink.term()).is_some() {
-        return Err(Refusal::new(to, "this arrowhead already has a wire; disconnect it first"));
+        let why = "this arrowhead already has a wire; disconnect it first";
+        return Err(Refusal::new(to, RefusalKind::Target, why));
     }
     if source.scope != sink.scope {
         return Err(Refusal::new(
             to,
+            RefusalKind::Target,
             format!("{} can't reach this arrowhead: they're in different boxes or arms", source.name),
         ));
     }
     if let Some(w) = model.wire_of(source.term) {
-        model.editable(w).map_err(|why| Refusal::new(from, why))?;
+        model.editable(w).map_err(|why| Refusal::new(from, RefusalKind::Unsupported, why))?;
     }
     if sink.target().is_none_or(|t| grid.get(t) != ' ') {
-        return Err(Refusal::new(to, "the cell before this arrowhead is taken"));
+        let why = "the cell before this arrowhead is taken";
+        return Err(Refusal::new(to, RefusalKind::Blocked, why));
     }
     let wiring = Wiring::new(&model, &source, Some(&sink));
     let found = search_from_sink(&wiring, &sink).map_err(|miss| {
@@ -587,7 +593,7 @@ pub(crate) fn connect(src: &str, from: Pos, to: Pos) -> Result<String, Refusal> 
                 format!("the search for a wire from {name} gave up; make room or bring them closer")
             }
         };
-        Refusal::new(to, why)
+        Refusal::new(to, miss.kind(), why)
     })?;
     let mut canvas = Canvas::new(grid);
     draw(&mut canvas, &wiring, &found.path);
@@ -598,7 +604,7 @@ pub(crate) fn connect(src: &str, from: Pos, to: Pos) -> Result<String, Refusal> 
         None => expected.wires.push(vec![source.term, sink.term()]),
     }
     expected.sort();
-    finish(&canvas.render(), &expected, to, "the wire can't go there")
+    finish(canvas.render(), &expected, to, "the wire can't go there")
 }
 
 /// The cells a wire from `from` would take if released at `to`: exactly
@@ -607,8 +613,8 @@ pub(crate) fn connect(src: &str, from: Pos, to: Pos) -> Result<String, Refusal> 
 ///
 /// The route is found on the canonical sheet and given back as cells of the
 /// text as given, by their place in the source's box.
-pub(crate) fn preview(src: &str, from: Pos, to: Pos) -> Option<Vec<Pos>> {
-    let sheets = Sheets::read(src, from).ok()?;
+pub(crate) fn preview(doc: &Doc, from: Pos, to: Pos) -> Option<Vec<Pos>> {
+    let sheets = Sheets::read(doc, from).ok()?;
     let (grid, diagram) = sheets.canon();
     let model = Model::new(grid, diagram);
     let source = model.source(sheets.entity(from)?).ok()?;
@@ -723,10 +729,9 @@ pub(crate) fn palette(doc: &Doc, from: Option<Pos>) -> Vec<Candidate> {
     out
 }
 
-pub(crate) fn wire_sources(src: &str) -> Vec<Option<Pos>> {
-    let Ok(grid) = Grid::parse(src) else { return Vec::new() };
-    let diagram = recognize(&grid);
-    let model = Model::new(&grid, &diagram);
+pub(crate) fn wire_sources(doc: &Doc) -> Vec<Option<Pos>> {
+    let (Ok(grid), Some(diagram)) = (doc.grid(), doc.diagram()) else { return Vec::new() };
+    let model = Model::new(grid, diagram);
     (0..diagram.wires.len())
         .map(|w| {
             model.editable(w).ok()?;

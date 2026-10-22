@@ -10,6 +10,8 @@ use std::collections::{BinaryHeap, HashMap};
 
 use shawline_grid::{Dir, Pos};
 
+use crate::RefusalKind;
+
 /// Every cost is in half cells, so clearance can cost less than a cell.
 ///
 /// Each cell a wire takes.
@@ -73,6 +75,16 @@ pub(crate) enum Miss {
     NoPath,
     /// The budget ran out first: a route may exist.
     GaveUp,
+}
+
+impl Miss {
+    /// The kind of refusal a miss makes: no path means no room.
+    pub(crate) fn kind(self) -> RefusalKind {
+        match self {
+            Miss::NoPath => RefusalKind::Blocked,
+            Miss::GaveUp => RefusalKind::GaveUp,
+        }
+    }
 }
 
 /// A route the search found.
