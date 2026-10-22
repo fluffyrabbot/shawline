@@ -535,6 +535,9 @@ test("the tour walks 03-double to the end", () => {
   };
   tour.start(view(src));
   assert.equal(tour.step, 0);
+  assert.ok(tour.rings().length > 0, "step 1 rings what to read");
+  tour.looked(view(src));
+  assert.equal(tour.step, 1, "a look at the layer is step 1");
   step(({ outWire }) => edits.remove_wire(src, outWire.cells[0].row, outWire.cells[0].col));
   step(({ tee, sink }) => edits.connect(src, tee.row, tee.col, sink.row, sink.col));
   step(({ node }) => edits.remove_node(src, node.top, node.left));
@@ -556,6 +559,237 @@ test("the tour finds main's constant wherever main is moved", () => {
   const tour = new Tour(fakeHost(), () => {});
   tour.start(view(moved.text));
   assert.deepEqual([tour.parts.constant?.row, tour.parts.constant?.col], [14, 10]);
+});
+
+test("the tour's first step rings ·𐑥𐑱𐑯 with its strip and the 𐑐 node, and waits for a look", () => {
+  const host = fakeHost();
+  const tour = new Tour(host, () => {}, (text) => `${text} [read]`);
+  tour.start(view(double));
+  const [title, primitive] = tour.rings();
+  assert.deepEqual({ ...title }, { top: 11, left: 3, bottom: 11, right: 6, under: true });
+  assert.deepEqual([primitive.top, primitive.left, primitive.bottom, primitive.right], [4, 10, 7, 14]);
+  const text = () => host.querySelector(".tour-text").textContent;
+  assert.match(text(), /·𐑥𐑱𐑯 reads =mayn/);
+  assert.doesNotMatch(text(), /\[read\]/, "it writes its readings itself");
+  tour.update(view(edits.remove_wire(double, 14, 18).text));
+  assert.equal(tour.step, 0, "an edit isn't a look");
+  tour.looked(view(double));
+  assert.equal(tour.step, 1);
+  assert.match(text(), /\[read\]$/, "the steps after it are shown through the layer");
+});
+
+// The gloss layer (PLAN P9): the Readings switch, the lone-Alt peek, and
+// the drawing's geometry at either row pitch.
+
+const { Layer, CELL_W } = await import("./layer.js");
+
+function fakeLayer({ on = true, annotate = shawline.annotate } = {}) {
+  const timers = new Map();
+  let ids = 0;
+  const flips = [];
+  const layer = new Layer({
+    on,
+    rowPitch: shawline.row_pitch,
+    annotate,
+    changed: () => flips.push(layer.shown),
+    timers: { setTimeout: (fn) => (timers.set(++ids, fn), ids), clearTimeout: (id) => timers.delete(id) },
+  });
+  /** Lets the peek's beat pass, as if Alt were held on. */
+  const wait = () => [...timers].forEach(([id, fn]) => (timers.delete(id), fn()));
+  return { layer, flips, timers, wait };
+}
+
+/** A key event as the window's listener sees it, noting a preventDefault. */
+const key = (name, more = {}) => ({
+  key: name, repeat: false, altKey: name === "Alt", shiftKey: false, ctrlKey: false, metaKey: false,
+  prevented: false,
+  preventDefault() {
+    this.prevented = true;
+  },
+  ...more,
+});
+
+/** A textarea behind the layer: each key the layer lets through types itself. */
+function typist(layer, text) {
+  return {
+    text,
+    down(name, more) {
+      const e = key(name, more);
+      layer.keydown(e);
+      if (!e.prevented && [...name].length === 1) this.text += name;
+      return e;
+    },
+    up(name, more) {
+      const e = key(name, more);
+      layer.keyup(e);
+      return e;
+    },
+  };
+}
+
+const desc = (svg) => svg.match(/<desc>([\s\S]*)<\/desc>/)[1];
+
+test("toggling Readings and peeking leave the editor text unchanged", () => {
+  const { layer, flips, wait } = fakeLayer();
+  const editor = typist(layer, double);
+  const doc = sheet(double);
+  const drawn = [];
+  const draw = () => drawn.push(doc.render(false, layer.shown));
+  draw();
+  layer.set(false);
+  draw();
+  layer.set(true);
+  draw();
+  for (const on of [true, false]) {
+    layer.set(on);
+    editor.down("Alt");
+    wait();
+    draw();
+    editor.up("Alt");
+    draw();
+  }
+  assert.deepEqual(flips, [false, true, false, true, false, true, false]);
+  assert.deepEqual([editor.text, doc.text], [double, double]);
+  assert.equal(new Set(drawn.map(desc)).size, 1, "every drawing carries the same source");
+  assert.equal(new Set(drawn).size, 2, "the layer alone decides the drawing: glossed or plain");
+  assert.equal(sheet(double).formatted(), double);
+});
+
+test("a lone Alt peeks after a beat; another key cancels it, so Option-typing never flashes", () => {
+  const { layer, flips, timers, wait } = fakeLayer();
+  const editor = typist(layer, "");
+  editor.down("Alt");
+  assert.equal(timers.size, 1, "a lone Alt waits a beat");
+  const typed = editor.down("e", { altKey: true });
+  assert.equal(timers.size, 0, "the next key cancels the peek before it shows");
+  wait();
+  editor.up("Alt");
+  assert.deepEqual([flips, layer.shown, typed.prevented, editor.text], [[], true, false, "e"]);
+  // Held past the beat, the peek shows; another key ends it at once, and
+  // the key still types. Alt's release then changes nothing.
+  editor.down("Alt");
+  wait();
+  assert.equal(layer.shown, false);
+  editor.down("x", { altKey: true });
+  assert.equal(layer.shown, true);
+  editor.up("Alt");
+  assert.deepEqual([flips, editor.text], [[false, true], "ex"]);
+  // Alt with another modifier isn't alone, and a held Alt's repeats keep its beat.
+  editor.down("Shift", { shiftKey: true });
+  editor.down("Alt", { shiftKey: true });
+  assert.equal(timers.size, 0);
+  editor.up("Alt");
+  editor.down("Alt");
+  const beat = [...timers.keys()];
+  editor.down("Alt", { repeat: true });
+  assert.deepEqual([...timers.keys()], beat);
+  // Losing focus ends a peek, and so does a pointer that says Alt is up.
+  wait();
+  assert.equal(layer.shown, false);
+  layer.cancel();
+  assert.equal(layer.shown, true);
+  editor.down("Alt");
+  wait();
+  layer.pointer({ altKey: true });
+  assert.equal(layer.shown, false);
+  layer.pointer({ altKey: false });
+  assert.equal(layer.shown, true);
+  // Turning the switch mid-peek shows what the switch says.
+  editor.down("Alt");
+  wait();
+  layer.set(false);
+  assert.deepEqual([layer.on, layer.peeking, layer.shown], [false, false, false]);
+  assert.equal(editor.text, "ex");
+});
+
+test("the hit test puts a strip's y in the row above it, with the layer on and off", () => {
+  const { layer } = fakeLayer();
+  const on = layer.geometry;
+  layer.set(false);
+  const off = layer.geometry;
+  const cell = shawline.row_pitch(false);
+  const pitch = shawline.row_pitch(true);
+  assert.deepEqual([off.pitch, off.cell, on.pitch, on.cell], [cell, cell, pitch, cell]);
+  assert.ok(pitch > cell, "a strip opens under every row");
+  for (const row of [0, 1, 5, 14]) {
+    const strip = row * pitch + (cell + pitch) / 2;
+    assert.deepEqual(on.cellAt(3.5 * CELL_W, strip), { row, col: 3 }, "the middle of the strip");
+    assert.deepEqual(on.cellAt(0, row * pitch + cell), { row, col: 0 }, "the strip's top");
+    assert.deepEqual(on.cellAt(0, (row + 1) * pitch - 0.5), { row, col: 0 }, "the strip's bottom");
+    assert.deepEqual(on.cellAt(0, (row + 1) * pitch), { row: row + 1, col: 0 }, "the next row's top");
+    assert.deepEqual(off.cellAt(0, (row + 1) * cell - 0.5), { row, col: 0 });
+    assert.deepEqual(off.cellAt(0, strip), { row: Math.floor(strip / cell), col: 0 }, "plain, that y is rows further down");
+    for (const g of [on, off]) {
+      const { x, y } = g.centre({ row, col: 2 });
+      assert.deepEqual(g.cellAt(x, y), { row, col: 2 });
+      const r = g.rect({ top: row, left: 2, bottom: row + 1, right: 4 }, { under: true, over: row > 0 });
+      const above = g === on && row > 0 ? row - 1 : row;
+      assert.deepEqual(g.cellAt(r.x, r.y), { row: above, col: 2 }, "over starts in the strip above, if there is one");
+      assert.deepEqual(g.cellAt(r.x + r.width - 0.5, r.y + r.height - 0.5), { row: row + 1, col: 4 });
+      assert.deepEqual(g.cellAt(r.x, r.y + r.height), { row: row + 2, col: 2 }, "under ends with the strip");
+    }
+  }
+  assert.deepEqual([on.cellAt(-1, 0), on.cellAt(0, -1)], [null, null]);
+});
+
+test("the drawing's rows are row_pitch apart, glossed or plain", () => {
+  const doc = sheet(double);
+  const view = (svg) => svg.match(/viewBox="([^"]+)"/)[1].split(" ").map(Number);
+  const [x0, y0, w0, plain] = view(doc.render(false, false));
+  const [x1, y1, w1, glossed] = view(doc.render(true, true));
+  assert.deepEqual([x1, y1, w1], [x0, y0, w0], "the same margin and width");
+  const rows = (plain + 2 * y0) / shawline.row_pitch(false);
+  assert.equal(rows, double.split("\n").length - 1);
+  assert.equal(glossed + 2 * y1, rows * shawline.row_pitch(true));
+});
+
+test("messages are plain with the layer off, annotated while it shows, and flip with a peek", () => {
+  const message = "unknown name 𐑓𐑵";
+  const { layer, wait } = fakeLayer({ annotate: (text) => `${text} [read]` });
+  assert.equal(layer.message(message), `${message} [read]`);
+  const node = { dataset: {}, textContent: "", title: "" };
+  const tip = { dataset: {}, textContent: "", title: "" };
+  const root = { querySelectorAll: (sel) => ({ "[data-plain]": [node], "[data-plain-title]": [tip] })[sel] };
+  layer.say(node, message);
+  layer.say(tip, message, { title: true });
+  layer.set(false);
+  assert.equal(layer.message(message), message);
+  layer.resay(root);
+  assert.deepEqual([node.textContent, tip.title, tip.textContent], [message, message, ""]);
+  layer.keydown(key("Alt"));
+  wait();
+  layer.resay(root);
+  assert.deepEqual([node.textContent, tip.title], [`${message} [read]`, `${message} [read]`], "a peek shows readings");
+  layer.keyup(key("Alt"));
+  layer.resay(root);
+  assert.equal(node.textContent, message);
+  // wasm hands messages over as written, and its annotate only adds
+  // readings: take each bracket after a Shavian word away and the message
+  // is back.
+  const [unknown] = sheet(corpus("95-unknown.shaw")).diagnostics();
+  assert.equal(unknown.message, message);
+  const { at, error } = shawline.run(corpus("80-div-zero.shaw"));
+  for (const text of [message, at.message, error, "·𐑥𐑱𐑯 has no outputs."]) {
+    const read = shawline.annotate(text);
+    assert.equal(read.replace(/(?<=[\u{10450}-\u{1047F}]) \([^()]*\)/gu, ""), text);
+  }
+});
+
+test("glosses give each word its reading and each primitive node its name", () => {
+  const words = sheet(double).glosses();
+  const at = (row, col) => words.find((g) => g.row === row && g.col === col);
+  assert.deepEqual([at(11, 3).word, at(11, 3).reading, at(11, 3).span, at(11, 3).gloss], ["·𐑥𐑱𐑯", "=mayn", 4, null]);
+  assert.deepEqual([at(5, 12).word, at(5, 12).reading, at(5, 12).gloss], ["𐑐", "p", "add"]);
+  assert.ok(words.every((g) => typeof g.shown === "boolean"));
+  assert.ok(!words.some((g) => /^\d+$/.test(g.word)), "numbers have no reading");
+  assert.deepEqual(sheet("\t").glosses(), []);
+  assert.deepEqual([shawline.reading("·𐑥𐑱𐑯"), shawline.reading("𐑣𐑧𐑤𐑴")], ["=mayn", "heloh"]);
+});
+
+test("a wire's cells say which join it southward, through the strip", () => {
+  const input = sheet(double).wires().find((w) => w.cells.some((c) => c.row === 5 && c.col === 4));
+  const down = (row, col) => input.cells.find((c) => c.row === row && c.col === col)?.down;
+  assert.deepEqual([down(5, 4), down(5, 6), down(6, 6), down(6, 7)], [false, true, false, false]);
 });
 
 process.exit(failed ? 1 : 0);

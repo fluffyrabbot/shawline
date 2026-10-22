@@ -252,7 +252,8 @@ main {
 /* The drawing */
 
 /* Drawn at the editor's scale and pulled up and left by the renderer's
-   margin, so each row of the drawing sits level with its source row. */
+   margin, so each column of the drawing sits under its source column, and
+   with the gloss layer off each row sits level with its source row. */
 #drawing { position: relative; overflow: auto; font: var(--cell)/0 var(--mono); }
 #drawing svg { display: block; margin: -0.5em 0 0 -1ch; max-width: calc(100% + 1ch); height: auto; cursor: text; }
 #drawing svg.stale { opacity: 0.35; transition: opacity 0.2s; }
@@ -361,6 +362,8 @@ main {
   stroke-width: 130;
   stroke-dasharray: none;
 }
+/* Hover targets over each word and its strip, for its reading's tooltip. */
+#drawing .words rect { fill: transparent; }
 #drawing .badge { pointer-events: auto; }
 #drawing .badge rect {
   fill: var(--background);
@@ -418,6 +421,7 @@ main {
 }
 .palette li:hover, .palette li.first { background: var(--wash); }
 .palette .word { font: 20px/1.2 var(--mono); color: var(--text); }
+.palette .reading { display: block; font: 11px/1.3 var(--sans); color: var(--comment); }
 .palette .gloss { color: var(--text); }
 .palette .arity, .palette .mirror { color: var(--comment); font-size: 12px; font-variant-numeric: tabular-nums; }
 

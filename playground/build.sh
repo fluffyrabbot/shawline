@@ -41,6 +41,6 @@ done
 (IFS=,; echo "[${names[*]}]") > "$dist/examples/index.json"
 
 cp "$here"/index.html "$here"/style.css "$here"/app.js "$here"/tour.js "$here"/drafts.js "$here"/docs.js \
-  "$here"/flight.js "$here"/worker.js "$dist/"
+  "$here"/flight.js "$here"/layer.js "$here"/worker.js "$dist/"
 
 echo "built $dist ($(wc -c < "$dist/pkg/shawline_wasm_bg.wasm" | tr -d ' ') byte wasm)"

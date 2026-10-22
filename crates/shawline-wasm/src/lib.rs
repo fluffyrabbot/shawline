@@ -9,12 +9,16 @@
 //! The workers can't share that memory, so `run` and `trace` take text.
 //!
 //! Positions are zero-based `row`/`col` in code points, as in every dump.
+//!
+//! Messages cross into JS as written. The page shows them through
+//! [`annotate`] while its Readings layer is on (PLAN P9), so turning the
+//! layer off, or peeking, needs no second reading and no second run.
 
 use js_sys::{Array, Object, Reflect};
 use shawline_doc::TRACE_STEPS;
 use shawline_edit::{Refusal, RefusalKind};
 use shawline_grid::{Diagnostic, Dir, Pos};
-use shawline_render::Theme;
+use shawline_render::{Options, Theme};
 use wasm_bindgen::prelude::*;
 
 #[wasm_bindgen]
@@ -64,10 +68,35 @@ impl Doc {
     }
 
     /// The sheet drawn as a standalone SVG in the light or dark theme, or
-    /// `undefined` when the text has grid errors.
-    pub fn render(&self, dark: bool) -> Option<String> {
+    /// `undefined` when the text has grid errors. With `gloss`, a strip
+    /// under every row shows each word's reading or primitive name, and rows
+    /// sit [`row_pitch`]`(true)` apart; without it the drawing is plain.
+    pub fn render(&self, dark: bool, gloss: bool) -> Option<String> {
         let theme = if dark { Theme::DARK } else { Theme::LIGHT };
-        Some(shawline_render::render(self.0.grid().ok()?, theme))
+        Some(shawline_render::render_with(self.0.grid().ok()?, Options { theme, gloss }))
+    }
+
+    /// Every Shavian word on the sheet in row-major order, for hover: an
+    /// array of `{ row, col, span, word, reading, gloss, shown }`, where
+    /// `span` is the word's length in cells, `gloss` a primitive's short
+    /// name (`null` for any other word), and `shown` whether the strip has
+    /// room to show it. Empty when the text has grid errors.
+    pub fn glosses(&self) -> Array {
+        let Ok(grid) = self.0.grid() else { return Array::new() };
+        shawline_render::glosses(grid)
+            .into_iter()
+            .map(|g| {
+                let o = Object::new();
+                set(&o, "row", &(g.at.row as u32).into());
+                set(&o, "col", &(g.at.col as u32).into());
+                set(&o, "span", &(g.word.chars().count() as u32).into());
+                set(&o, "shown", &g.shown().into());
+                set(&o, "gloss", &g.gloss.map_or(JsValue::NULL, JsValue::from));
+                set(&o, "reading", &g.reading.into());
+                set(&o, "word", &g.word.into());
+                JsValue::from(o)
+            })
+            .collect()
     }
 
     /// The node and definition boxes, for hit-testing: an array of `{ top,
@@ -128,9 +157,10 @@ impl Doc {
 
     /// Every wire, for hit-testing and value badges: an array of `{ wire,
     /// cells, source }`, where `wire` is the index `trace` reports, `cells`
-    /// its `{ row, col }` cells in row-major order, and `source` the cell
-    /// naming its source for `connect` (`null` when the wire isn't editable
-    /// by mouse).
+    /// its `{ row, col, down }` cells in row-major order (`down` says the
+    /// cell joins the wire southward, so a highlight runs on through the
+    /// gloss strip below it), and `source` the cell naming its source for
+    /// `connect` (`null` when the wire isn't editable by mouse).
     pub fn wires(&self) -> Array {
         let Some(diagram) = self.0.diagram() else { return Array::new() };
         let sources = shawline_edit::wire_sources(&self.0);
@@ -141,7 +171,12 @@ impl Doc {
             .map(|(i, w)| {
                 let o = Object::new();
                 set(&o, "wire", &(i as u32).into());
-                set(&o, "cells", &w.cells.iter().copied().map(cell).collect::<Array>());
+                let cells = w.cells.iter().zip(&w.links).map(|(&p, &links)| {
+                    let o = cell_object(p);
+                    set(&o, "down", &(links & Dir::S.bit() != 0).into());
+                    JsValue::from(o)
+                });
+                set(&o, "cells", &cells.collect::<Array>());
                 let source = sources.get(i).copied().flatten();
                 set(&o, "source", &source.map_or(JsValue::NULL, cell));
                 JsValue::from(o)
@@ -364,10 +399,37 @@ fn at(row: u32, col: u32) -> Pos {
 }
 
 fn cell(p: Pos) -> JsValue {
+    cell_object(p).into()
+}
+
+fn cell_object(p: Pos) -> Object {
     let o = Object::new();
     set(&o, "row", &(p.row as u32).into());
     set(&o, "col", &(p.col as u32).into());
-    o.into()
+    o
+}
+
+/// The distance from one row's top to the next in [`Doc::render`]'s SVG
+/// units, with or without the gloss strip (`shawline_render::row_pitch`).
+/// A row's cell sits at the top of its pitch, and the strip, if any, under
+/// it; `row_pitch(false)` is the cell's own height.
+#[wasm_bindgen]
+pub fn row_pitch(gloss: bool) -> f64 {
+    shawline_render::row_pitch(gloss)
+}
+
+/// `message` with each Shavian word's reading after it in parentheses, as
+/// in `𐑥𐑱𐑯 (mayn)` (`shawline_word::annotate`): how the page shows a
+/// diagnostic, a runtime error or a refusal while Readings is on.
+#[wasm_bindgen]
+pub fn annotate(message: &str) -> String {
+    shawline_word::annotate(message)
+}
+
+/// The keys that type `word` (SPEC §13, Reading): `·𐑥𐑱𐑯` reads `=mayn`.
+#[wasm_bindgen]
+pub fn reading(word: &str) -> String {
+    shawline_word::reading(word)
 }
 
 /// The transliteration table (SPEC §13) as an array of `[keys, letter]`.
