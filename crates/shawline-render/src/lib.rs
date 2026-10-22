@@ -8,9 +8,15 @@
 //!
 //! Colour follows meaning, quietly: box borders, wires, text and comments
 //! each get one ink from the [`Theme`].
+//!
+//! The gloss layer (PLAN P9) is drawn only on request ([`render_with`]): a
+//! strip under every row holding each word's reading, or a primitive's short
+//! name, in the comment ink.
 
 mod cells;
 mod chain;
+mod gloss;
+mod strip;
 
 use std::fmt::{self, Write};
 
@@ -21,11 +27,15 @@ use shawline_grid::Grid;
 use cells::{Fill, Ink};
 use chain::Chain;
 
+pub use gloss::{Gloss, Options};
+
 /// Output pixels per glyph unit: a cell is 15 × 30 px.
 pub const SCALE: f64 = 0.025;
 /// Blank space around the drawing on every side, in glyph units (one cell
 /// width, half a cell height).
 pub const MARGIN: f64 = 600.0;
+/// Height of the gloss strip under each row, in glyph units.
+const STRIP: f64 = CELL_HEIGHT / 2.0;
 
 /// An sRGB colour.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -87,15 +97,25 @@ impl Default for Theme {
 }
 
 /// A standalone SVG of the whole grid, [`SCALE`] pixels per glyph unit with
-/// [`MARGIN`] around it. The source text rides along in `<desc>`.
+/// [`MARGIN`] around it. The source text rides along in `<desc>`. Plain: no
+/// gloss layer.
 pub fn render(grid: &Grid, theme: Theme) -> String {
+    render_with(grid, Options { theme, gloss: false })
+}
+
+/// [`render`] with options. With `gloss`, a strip opens under every row, so
+/// rows sit [`row_pitch`] apart, and each shown [`Gloss`] is drawn in it.
+/// Without it, the output is exactly [`render`]'s.
+pub fn render_with(grid: &Grid, options: Options) -> String {
+    let theme = options.theme;
+    let pitch = row_pitch(options.gloss);
     let diagram = shawline_shape::recognize(grid);
-    let (strokes, fills) = cells::pieces(grid, &diagram);
+    let (strokes, fills) = cells::pieces(grid, &diagram, pitch);
     let chains = chain::merge(&strokes);
 
     let (w, h) = (
         grid.width() as f64 * CELL_WIDTH + 2.0 * MARGIN,
-        grid.height() as f64 * CELL_HEIGHT + 2.0 * MARGIN,
+        grid.height() as f64 * pitch + 2.0 * MARGIN,
     );
     let mut out = format!(
         r#"<svg xmlns="http://www.w3.org/2000/svg" width="{}" height="{}" viewBox="{} {} {} {}" role="img">"#,
@@ -135,6 +155,19 @@ pub fn render(grid: &Grid, theme: Theme) -> String {
     }
     out.push_str("</g>\n</svg>\n");
     out
+}
+
+/// Every Shavian word on the sheet in row-major order, with its reading, a
+/// primitive's short name, and where the gloss strip shows it.
+pub fn glosses(grid: &Grid) -> Vec<Gloss> {
+    strip::glosses(grid)
+}
+
+/// The distance from one row's top to the next, in glyph units:
+/// [`CELL_HEIGHT`] plain, plus the strip with the gloss layer. Hit-testing a
+/// drawing divides by this.
+pub fn row_pitch(gloss: bool) -> f64 {
+    if gloss { CELL_HEIGHT + STRIP } else { CELL_HEIGHT }
 }
 
 /// All chains of one ink as a single element, so it is rasterized as one

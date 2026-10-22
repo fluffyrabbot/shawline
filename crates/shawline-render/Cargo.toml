@@ -11,6 +11,9 @@ kurbo = "=0.13.1"
 shawline-glyph.workspace = true
 shawline-grid.workspace = true
 shawline-shape.workspace = true
+shawline-syntax.workspace = true
+shawline-vm.workspace = true
+shawline-word.workspace = true
 
 [dev-dependencies]
 resvg = "0.48.1"

@@ -14,6 +14,7 @@ shawline-grid.workspace = true
 shawline-doc.workspace = true
 shawline-vm.workspace = true
 shawline-render.workspace = true
+shawline-word.workspace = true
 
 [lints]
 workspace = true

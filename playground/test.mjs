@@ -141,7 +141,7 @@ test("remove_node and place_node take a node out and put it back", () => {
 
 test("palette lists primitives, nil, then definitions", () => {
   const all = sheet(double).palette();
-  assert.deepEqual(all.slice(0, 2).map((c) => [c.word, c.gloss, c.mirror]), [["𐑐", "add", "𐑚"], ["𐑚", "subtract", "𐑐"]]);
+  assert.deepEqual(all.slice(0, 2).map((c) => [c.word, c.gloss, c.mirror]), [["𐑐", "add", "𐑚"], ["𐑚", "sub", "𐑐"]]);
   assert.deepEqual({ ...all[16] }, { word: "𐑯𐑦𐑤", inputs: 0, outputs: 1, gloss: "empty list", mirror: null });
   assert.deepEqual([all[17].word, all[17].gloss], ["𐑛𐑳𐑚𐑩𐑤", "𐑯 → 𐑬"]);
   const dragging = sheet(double).palette(5, 0);

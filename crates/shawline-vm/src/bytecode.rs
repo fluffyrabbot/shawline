@@ -155,6 +155,51 @@ impl Prim {
         Prim::ALL.into_iter().find(|p| p.letter() == ch)
     }
 
+    /// The short English name the gloss strip and the palette show (SPEC §9):
+    /// at most 6 lowercase letters, and each pair of duals named as a pair.
+    pub const fn gloss(self) -> &'static str {
+        match self {
+            Prim::Add => "add",
+            Prim::Sub => "sub",
+            Prim::Mul => "mul",
+            Prim::Div => "div",
+            Prim::Pair => "pair",
+            Prim::Unpair => "unpair",
+            Prim::Prepend => "cons",
+            Prim::Split => "uncons",
+            Prim::Less => "less",
+            Prim::Greater => "more",
+            Prim::Equal => "same",
+            Prim::NotEqual => "differ",
+            Prim::Min => "min",
+            Prim::Max => "max",
+            Prim::Show => "show",
+            Prim::Read => "read",
+        }
+    }
+
+    /// SPEC §9's description, for hover.
+    pub const fn meaning(self) -> &'static str {
+        match self {
+            Prim::Add => "add",
+            Prim::Sub => "subtract",
+            Prim::Mul => "multiply",
+            Prim::Div => "divide (truncating; ÷0 is an error)",
+            Prim::Pair => "pair",
+            Prim::Unpair => "unpair",
+            Prim::Prepend => "prepend (head, tail → list)",
+            Prim::Split => "split (list → head, tail; empty is an error)",
+            Prim::Less => "less than",
+            Prim::Greater => "greater than",
+            Prim::Equal => "equal",
+            Prim::NotEqual => "not equal",
+            Prim::Min => "minimum",
+            Prim::Max => "maximum",
+            Prim::Show => "show (Int → Text)",
+            Prim::Read => "read (Text → Int)",
+        }
+    }
+
     /// `(inputs, outputs)`.
     pub const fn arity(self) -> (u8, u8) {
         match self {
@@ -242,6 +287,46 @@ mod tests {
         }
         assert_eq!(Prim::Add.mirror(), Prim::Sub);
         assert_eq!(Prim::Split.mirror(), Prim::Prepend);
+    }
+
+    #[test]
+    fn short_names_fit_a_node_box() {
+        let mut seen = std::collections::HashSet::new();
+        for p in Prim::ALL {
+            let g = p.gloss();
+            assert!(g.len() <= 6 && g.chars().all(|c| c.is_ascii_lowercase()), "{g:?}");
+            assert!(seen.insert(g), "{g:?} names two primitives");
+        }
+    }
+
+    /// SPEC §9's primitive table, row by row: letter, short name, meaning,
+    /// ports, then the same for its mirror.
+    #[test]
+    fn spec_table_matches() {
+        let spec = include_str!("../../../docs/SPEC.md");
+        let rows = spec
+            .lines()
+            .skip_while(|l| !l.starts_with("| Letter | Short name |"))
+            .skip(2)
+            .take_while(|l| l.starts_with('|'));
+        let mut documented = Vec::new();
+        for line in rows {
+            let cells: Vec<&str> = line.trim_matches('|').split('|').map(str::trim).collect();
+            for half in cells.chunks(4) {
+                let [letter, short, meaning, ports] = half else { panic!("{line}") };
+                documented.push((letter.chars().next().unwrap(), *short, *meaning, ports.to_string()));
+            }
+        }
+        let mut table: Vec<_> = Prim::ALL
+            .into_iter()
+            .map(|p| {
+                let (i, o) = p.arity();
+                (p.letter(), p.gloss(), p.meaning(), format!("{i}→{o}"))
+            })
+            .collect();
+        table.sort();
+        documented.sort();
+        assert_eq!(documented, table);
     }
 
     #[test]

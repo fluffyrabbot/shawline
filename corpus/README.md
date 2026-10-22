@@ -11,10 +11,11 @@ The single oracle for every pipeline stage. Each `*.shaw` program may have expec
 | `.out` | Program stdout, or `error ROW:COL CODE` | Gate B |
 | `.fmt.shaw` | Formatter output for a non-canonical input | Gate B |
 | `.studio` | How each Studio edit ends: `ok` with a hash of the result, or `refused` with the refusal's kind and cell (`shawline_corpus::studio`) | P8 |
+| `.gloss` | The gloss layer: one line per Shavian word in row-major order, `ROW:COL WORD READING [GLOSS] shown\|dropped`, where `GLOSS` is a primitive's short name and the last field says whether the strip shows it (`shawline_render::glosses`) | P9 |
 
 A program with an empty `.check` and no `.fmt.shaw` is canonical: it must format to itself.
 
-`.fmt.shaw`, `.svg` and `.studio` are selective; `.studio` is kept for every valid program. Blessing only rewrites the files that exist; to add one, create it empty, then bless.
+`.fmt.shaw`, `.svg`, `.studio` and `.gloss` are selective; `.studio` and `.gloss` are kept for every valid program. Blessing only rewrites the files that exist; to add one, create it empty, then bless.
 
 Numbering: `01`–`79` are valid programs, `80`–`89` fail at runtime, and `90`–`99` must be rejected statically. An ASCII twin of a canonical program has the same number and the suffix `-ascii`; its `.wires` and `.out` match the canonical program's, and its `.fmt.shaw` is the canonical program.
 

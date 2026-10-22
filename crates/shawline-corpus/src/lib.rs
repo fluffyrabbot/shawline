@@ -78,6 +78,17 @@ pub const STAGES: &[Stage] = &[
     },
     // Kept for every valid program (01–79): how each Studio edit ends.
     Stage { name: "studio", run: studio::dump, fallback: None, selective: true },
+    // Kept for every valid program (01–79): each word's reading, a
+    // primitive's short name, and whether the gloss strip shows it.
+    Stage {
+        name: "gloss",
+        run: |src| match Doc::new(src).grid() {
+            Ok(grid) => shawline_render::glosses(grid).iter().map(|g| format!("{g}\n")).collect(),
+            Err(errors) => lines(errors),
+        },
+        fallback: None,
+        selective: true,
+    },
 ];
 
 /// Program stdout, or `error ROW:COL CODE` (SPEC §9).

@@ -45,12 +45,12 @@ Grid ──► shawline-render (SVG) ◄── shawline-glyph (stroke skeletons)
 |---|---|---|---|
 | `shawline-grid` | Repertoire, Grid, Pos/Dir/Rect, Diagnostic | P0 ✅ | the whole crate |
 | `shawline-shape` | Stroke recognition | P0 seed ✅ → A1 | `src/wire.rs` (P1), `src/structure.rs` (P8) |
-| `shawline-word` | Letter classes, mirrors, primitive table, transliteration | A2 | — |
-| `shawline-glyph` | Stroke skeletons, SVG paths, specimen sheet | A3 | — |
+| `shawline-word` | Letter classes, mirrors, transliteration, readings | A2 → P9 | the signatures in `src/reading.rs` (P9) |
+| `shawline-glyph` | Stroke skeletons, SVG paths, specimen sheet, gloss skeletons | A3 → P9 | the signatures in `src/gloss.rs` (P9) |
 | `shawline-vm` | Bytecode VM and assembler | A4 | `src/bytecode.rs` (P1) |
 | `shawline-syntax` | Diagram → AST | B1 | `src/ast.rs` (P1) |
 | `shawline-fmt` | Formatter and aesthetic lints | B2 | — |
-| `shawline-render` | Grid → SVG | B3 | — |
+| `shawline-render` | Grid → SVG, the gloss strip | B3 → P9 | `src/gloss.rs`, and the signatures of `render_with`, `glosses` and `row_pitch` in `src/lib.rs` (P9) |
 | `shawline-font` | Shawline Mono TTF | B4 | — |
 | `shawline-ir` | AST → IR → bytecode, checker | B5 | `src/ir.rs` (P1) |
 | `shawline-lsp` | Language server | C2 | — |
@@ -65,13 +65,13 @@ These signatures are fixed so Gate B can wire the pipeline without negotiation. 
 
 | Crate | Entry points |
 |---|---|
-| `shawline-word` | `class(char) -> Option<LetterClass>`, `mirror(char) -> Option<char>`, `Transliterator` (incremental: `push(&mut self, key: char) -> Edit`) |
-| `shawline-glyph` | `skeleton(char) -> Option<Skeleton>`, `specimen() -> String` (SVG) |
+| `shawline-word` | `class(char) -> Option<LetterClass>`, `mirror(char) -> Option<char>`, `Transliterator` (incremental: `push(&mut self, key: char) -> Edit`); P9: `reading(&str) -> String`, `annotate(&str) -> String` |
+| `shawline-glyph` | `skeleton(char) -> Option<Skeleton>`, `specimen() -> String` (SVG); P9: `gloss_skeleton(char) -> Option<Skeleton>` |
 | `shawline-vm` | `run(&Module) -> Result<Vec<Value>, Diagnostic>`, `assemble(&str) -> Result<Module, Diagnostic>`, `disassemble(&Module) -> String` |
 | `shawline-syntax` | `parse(&Grid, &Diagram) -> (Sheet, Vec<Diagnostic>)`, and `impl Display for Sheet` (the `.ast` dump: one fact per line) |
 | `shawline-ir` | `lower(&Sheet) -> (Option<Program>, Vec<Diagnostic>)`, `compile(&Program) -> Module` |
 | `shawline-fmt` | `format(&Grid, &Diagram) -> String`, `fix(&Grid, &Diagram) -> String` (P5: also moves slipped cells), `lint(&Grid, &Diagram) -> Vec<Diagnostic>` |
-| `shawline-render` | `render(&Grid, Theme) -> String` (SVG) |
+| `shawline-render` | `render(&Grid, Theme) -> String` (SVG); P9: `render_with(&Grid, Options) -> String`, `glosses(&Grid) -> Vec<Gloss>`, `row_pitch(bool) -> f64` |
 | `shawline-font` | `build() -> Vec<u8>` (TTF) |
 
 ## Orchestration
@@ -669,6 +669,43 @@ Wave 2 gate (done). F (`2c23150`) and E (`d1d09ad`) merged without conflicts.
 - Corpus stage `gloss` (`glosses` behind the `Display` impl of `Gloss`), and gate `gloss_clear`: for each valid program, no shown gloss overlaps a stroke, its strip's bounds, or another gloss.
 - SPEC §13 gains a "Reading" paragraph, and §9's primitive table gains the short-name column.
 - The CLI's `--plain` flag, its annotated diagnostics, and its glossed `render`.
+
+Contracts (done):
+- **`Prim::gloss()` and `Prim::meaning()`** are in `bytecode.rs`, and the palette's and hover's private copies are gone. Hover reads exactly as before. The palette shows the short names, and one Node check that pinned "subtract" now reads `sub`. A new `shawline-vm` test keeps SPEC §9's table, which gains the short-name column, in step with both methods.
+- **Signatures, each with a thin first body:**
+  - `shawline_word::{reading, annotate}` in `src/reading.rs`. `reading` joins each letter's key and never inserts `/`; `annotate` returns its input.
+  - `shawline_glyph::{gloss_skeleton, GLOSS_WIDTH, GLOSS_HEIGHT, GLOSS_CHARS}` in `src/gloss.rs`, where every character is drawn as an x-height box.
+  - `shawline_render::{Options, Gloss, render_with, glosses, row_pitch}`. `Options` and `Gloss` (with its `Display`) are in `src/gloss.rs`.
+    - `render(grid, theme)` is now `render_with(grid, Options { theme, gloss: false })`.
+    - With `gloss`, rows sit `row_pitch(true)` = 1800 glyph units apart, so W works against the real pitch from the start. Vertical strokes still break at the strip and no gloss is drawn yet.
+    - `glosses` finds the words, readings and short names, and drops every gloss.
+- **Corpus:**
+  - the selective stage `gloss`, which has no files until the gate;
+  - the gate `gloss_clear`, with a bite test on `03-double` that breaks each rule once;
+  - the `.gloss` row in `corpus/README.md`.
+- **SPEC:** §13 gains "Reading", and §9 gains the short-name column.
+- **CLI:**
+  - `render` is glossed by default;
+  - every printed diagnostic and runtime error message goes through `annotate`;
+  - `--plain` turns both off.
+- **Decisions taken while writing the contracts:**
+
+  | Decision | Choice | Rationale |
+  |---|---|---|
+  | Coverage of the short names | PLAN's 16 names cover the 16 `Prim` variants exactly. `𐑯𐑦𐑤` gets none | It is a literal (`Literal::Nil`), not a `Prim`, and its reading `nil` already names it. The palette keeps "empty list". |
+  | What counts as a word | A maximal run of Shavian letters, namer dots and digits that isn't all digits, found by scanning rows | This is SPEC §4's word, read inside `«»` and comments as well, with numbers left out as decided. |
+  | Which word is a primitive's | A boxed or inline call whose name is one primitive letter, read from the syntax tree | A port named `𐑯` is not the primitive `𐑯` (SPEC §4), and only the parser knows inline nodes. `shawline-render` now depends on `shawline-syntax`, `shawline-vm` and `shawline-word`. |
+  | Units of `Gloss::span` | Columns from the grid's left edge, as `(left, right)` | This is how the gate checks placement. The dump says only `shown` or `dropped`, so tuning the scale changes no line unless a gloss drops. |
+  | Blocked column | A box's side running through the strip, or the cell above connecting south or the cell below connecting north | A border runs through stacked port arrowheads, which connect only westward in the stroke table, so the cells alone would miss it (`03-double`'s 𐑐 node). |
+  | What `gloss_clear` checks | Shown glosses are centred on their word, lie within `0..width`, cover no blocked column, and keep one advance apart in each strip. The advance is read from each span | It reads strokes from the diagram rather than the renderer, and it still holds if the gloss scale is tuned. |
+  | Strip under the last row | Yes. A glossed drawing is `rows × pitch` tall plus its margins | Every row gets a strip, so the pitch is uniform and hit-testing is a single division. |
+  | `--plain` scope | Accepted by every command | Every command can print a diagnostic. PLAN named the three where English shows most. |
+
+- **Proof the contracts change nothing:**
+  - 288 tests pass (284, plus two in `shawline-vm` and two in `gloss_clear`), and no corpus file was re-blessed;
+  - `shawline render --plain` is byte-identical to `38862bf`'s `render` on all 37 corpus programs, the three blessed `.svg` files included;
+  - clippy is clean on host and wasm;
+  - the playground build (535,273-byte wasm) and its 37 Node checks are green.
 
 **Construction.** Four agents, with disjoint files:
 - **K** owns `shawline-word`: `reading` and `annotate`, plus the round-trip test over every pair of letters and a finite set of seeded random words (run under `scripts/capped`).

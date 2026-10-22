@@ -156,8 +156,9 @@ pub struct Candidate {
     pub word: String,
     pub inputs: u16,
     pub outputs: u16,
-    /// What it does in plain English: the SPEC §9 meaning for a primitive
-    /// ("add"), the port names for a definition ("𐑯 → 𐑬").
+    /// What it does in plain English: a primitive's short name
+    /// ([`Prim::gloss`](shawline_vm::bytecode::Prim::gloss): "add", "sub"),
+    /// "empty list" for `𐑯𐑦𐑤`, the port names for a definition ("𐑯 → 𐑬").
     pub gloss: String,
     /// A primitive's mirrored partner, as its word.
     pub mirror: Option<String>,

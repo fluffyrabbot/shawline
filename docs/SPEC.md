@@ -219,18 +219,18 @@ Checking is dynamic in v1, so a type mismatch is a runtime error.
 
 A runtime error prints nothing on stdout. It prints `error ROW:COL CODE: message` on stderr and exits with status 1. The position is the failing node's word (or the switch's selector), zero-based as in every dump. The corpus `.out` files hold stdout, or, for a program that fails, the single line `error ROW:COL CODE`.
 
-**Primitives.** Each mirrored pair names a pair of duals.
+**Primitives.** Each mirrored pair names a pair of duals. The short name is the primitive's English gloss (§13, Reading): the drawing's gloss strip and the Studio palette show it, and each pair of duals is named as a pair.
 
-| Letter | Meaning | Ports in→out | Its mirror | Meaning | Ports in→out |
-|---|---|---|---|---|---|
-| 𐑐 | add | 2→1 | 𐑚 | subtract | 2→1 |
-| 𐑑 | multiply | 2→1 | 𐑛 | divide (truncating; ÷0 is an error) | 2→1 |
-| 𐑒 | pair | 2→1 | 𐑜 | unpair | 1→2 |
-| 𐑟 | prepend (head, tail → list) | 2→1 | 𐑕 | split (list → head, tail; empty is an error) | 1→2 |
-| 𐑤 | less than | 2→1 | 𐑮 | greater than | 2→1 |
-| 𐑦 | equal | 2→1 | 𐑰 | not equal | 2→1 |
-| 𐑥 | minimum | 2→1 | 𐑯 | maximum | 2→1 |
-| 𐑖 | show (Int → Text) | 1→1 | 𐑠 | read (Text → Int) | 1→1 |
+| Letter | Short name | Meaning | Ports in→out | Its mirror | Short name | Meaning | Ports in→out |
+|---|---|---|---|---|---|---|---|
+| 𐑐 | add | add | 2→1 | 𐑚 | sub | subtract | 2→1 |
+| 𐑑 | mul | multiply | 2→1 | 𐑛 | div | divide (truncating; ÷0 is an error) | 2→1 |
+| 𐑒 | pair | pair | 2→1 | 𐑜 | unpair | unpair | 1→2 |
+| 𐑟 | cons | prepend (head, tail → list) | 2→1 | 𐑕 | uncons | split (list → head, tail; empty is an error) | 1→2 |
+| 𐑤 | less | less than | 2→1 | 𐑮 | more | greater than | 2→1 |
+| 𐑦 | same | equal | 2→1 | 𐑰 | differ | not equal | 2→1 |
+| 𐑥 | min | minimum | 2→1 | 𐑯 | max | maximum | 2→1 |
+| 𐑖 | show | show (Int → Text) | 1→1 | 𐑠 | read | read (Text → Int) | 1→1 |
 
 `𐑯𐑦𐑤` is the empty list (0→1), whether written as a constant (`𐑯𐑦𐑤 ──▶`) or boxed. The other single letters are reserved for future primitives, and each pair is still to be assigned as a pair.
 
@@ -312,7 +312,9 @@ Shawline is typed through **phonemic ASCII transliteration**. Each Shavian lette
 - **The namer dot is `=`,** because `.` is a stroke.
 - **Only word runs are transliterated.** Inside a word run, `v` is 𐑝. Anywhere else `v` is left alone, so it stays the `▼` arrowhead fallback. To start a word with 𐑝, type `/v`. Other characters (digits, spaces, marks, strokes) always pass through unchanged.
 
-`shawline-word` owns the table (`TABLE`), and a test keeps this copy in step with it. The language server may also offer whole-word suggestions from the ReadLex lexicon (MIT-licensed; only its Latin→Shavian columns are bundled), but source text never depends on it.
+**Reading.** A word's reading is the keys that type it: `·𐑥𐑱𐑯` reads `=mayn` and `𐑣𐑧𐑤𐑴` reads `heloh`. The reading puts `/` between two keys only where the longest match would otherwise read them as one letter (`𐑑𐑣` reads `t/h`), and a word that starts with 𐑝 reads `/v`. Transliterating a reading gives back its word. Readings, and the primitives' short names (§9), appear only in views of a sheet: the drawing's gloss strip, editor hover, the Studio palette and diagnostic messages. They are never source text, and no dump the corpus checks contains them except `.gloss`. User-defined words get a reading and nothing more; there is no bundled lexicon of meanings.
+
+`shawline-word` owns the table (`TABLE`) and readings (`reading`, `annotate`), and a test keeps this copy in step with the table. The language server may also offer whole-word suggestions from the ReadLex lexicon (MIT-licensed; only its Latin→Shavian columns are bundled), but source text never depends on it.
 
 ## 14. Diagnostics
 

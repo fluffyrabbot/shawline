@@ -51,8 +51,10 @@
 //! for an arrowhead while transliterating. The namer dot is `=` rather than
 //! `.` because `.` is a stroke.
 
+mod reading;
 mod translit;
 
+pub use reading::{annotate, reading};
 pub use translit::{Edit, SEPARATOR, TABLE, Transliterator, transliterate};
 
 /// The four shape classes of the Shavian letters (SPEC §4).

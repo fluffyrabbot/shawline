@@ -245,31 +245,9 @@ fn graph_hover(
     None
 }
 
-/// SPEC §9's description of a primitive.
-pub fn meaning(p: Prim) -> &'static str {
-    match p {
-        Prim::Add => "add",
-        Prim::Sub => "subtract",
-        Prim::Mul => "multiply",
-        Prim::Div => "divide (truncating; ÷0 is an error)",
-        Prim::Pair => "pair",
-        Prim::Unpair => "unpair",
-        Prim::Prepend => "prepend (head, tail → list)",
-        Prim::Split => "split (list → head, tail; empty is an error)",
-        Prim::Less => "less than",
-        Prim::Greater => "greater than",
-        Prim::Equal => "equal",
-        Prim::NotEqual => "not equal",
-        Prim::Min => "minimum",
-        Prim::Max => "maximum",
-        Prim::Show => "show (Int → Text)",
-        Prim::Read => "read (Text → Int)",
-    }
-}
-
 fn primitive_line(p: Prim) -> String {
     let (ins, outs) = p.arity();
-    format!("**{}** {} · {ins}→{outs}", p.letter(), meaning(p))
+    format!("**{}** {} · {ins}→{outs}", p.letter(), p.meaning())
 }
 
 fn primitive_hover(p: Prim) -> String {

@@ -561,6 +561,7 @@ dependencies = [
  "shawline-grid",
  "shawline-render",
  "shawline-vm",
+ "shawline-word",
 ]
 
 [[package]]
@@ -666,6 +667,9 @@ dependencies = [
  "shawline-glyph",
  "shawline-grid",
  "shawline-shape",
+ "shawline-syntax",
+ "shawline-vm",
+ "shawline-word",
 ]
 
 [[package]]

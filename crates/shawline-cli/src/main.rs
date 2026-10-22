@@ -5,7 +5,7 @@ use std::{env, fs};
 
 use shawline_doc::Doc;
 use shawline_grid::Diagnostic;
-use shawline_render::Theme;
+use shawline_render::{Options, Theme};
 
 const USAGE: &str = "usage: shawline <command> [flags] <file.shaw>
 
@@ -14,10 +14,14 @@ commands:
   run       check, then run ·𐑥𐑱𐑯 and print its outputs
   fmt       print the canonical form (--fix: also move slipped border cells
             home; --write: rewrite the file in place)
-  render    print an SVG drawing (--dark: the dark theme)
+  render    print an SVG drawing with each word's reading in a strip under
+            its row (--dark: the dark theme)
   diagram   print the recognized diagram
   ast       print the syntax tree
   asm       print the compiled bytecode as .shawasm
+
+Messages follow each Shavian word with its reading, as in 𐑥𐑱𐑯 (mayn).
+--plain turns the readings off, in messages and in the drawing.
 ";
 
 const COMMANDS: [&str; 7] = ["check", "run", "fmt", "render", "diagram", "ast", "asm"];
@@ -30,11 +34,12 @@ fn main() -> ExitCode {
         eprint!("{USAGE}");
         return ExitCode::from(2);
     };
-    let known = match command.as_str() {
-        "fmt" => flags.iter().all(|f| *f == "--write" || *f == "--fix"),
-        "render" => flags.iter().all(|f| *f == "--dark"),
-        c => COMMANDS.contains(&c) && flags.is_empty(),
+    let allowed: &[&str] = match command.as_str() {
+        "fmt" => &["--write", "--fix", "--plain"],
+        "render" => &["--dark", "--plain"],
+        _ => &["--plain"],
     };
+    let known = COMMANDS.contains(&command.as_str()) && flags.iter().all(|f| allowed.contains(&f.as_str()));
     if !known {
         eprint!("{USAGE}");
         return ExitCode::from(2);
@@ -46,9 +51,11 @@ fn main() -> ExitCode {
             return ExitCode::from(2);
         }
     };
+    let plain = flag("--plain");
+    let message = |m: &str| if plain { m.to_owned() } else { shawline_word::annotate(m) };
     let report_all = |diagnostics: &[Diagnostic]| {
         for d in diagnostics {
-            report(path, &src, d);
+            report(path, &src, d, &message(&d.message));
         }
         ExitCode::FAILURE
     };
@@ -74,7 +81,7 @@ fn main() -> ExitCode {
         }
         "render" => {
             let theme = if flag("--dark") { Theme::DARK } else { Theme::LIGHT };
-            print!("{}", shawline_render::render(grid, theme));
+            print!("{}", shawline_render::render_with(grid, Options { theme, gloss: !plain }));
         }
         _ => {
             match command.as_str() {
@@ -95,7 +102,7 @@ fn main() -> ExitCode {
                     Ok(values) => values.iter().for_each(|v| println!("{v}")),
                     Err(e) => {
                         // SPEC §9: zero-based position, nothing on stdout.
-                        eprintln!("error {} {}: {}", e.at, e.code, e.message);
+                        eprintln!("error {} {}: {}", e.at, e.code, message(&e.message));
                         return ExitCode::FAILURE;
                     }
                 }
@@ -117,10 +124,10 @@ fn replace(path: &str, text: &str) -> std::io::Result<()> {
     })
 }
 
-/// Prints `d` with its source line and a caret. Every repertoire character is
-/// one cell wide, so the caret lines up in Shawline Mono.
-fn report(path: &str, src: &str, d: &Diagnostic) {
-    eprintln!("{path}:{}:{}: {} {}", d.at.row + 1, d.at.col + 1, d.code, d.message);
+/// Prints `d` with `message`, its source line and a caret. Every repertoire
+/// character is one cell wide, so the caret lines up in Shawline Mono.
+fn report(path: &str, src: &str, d: &Diagnostic, message: &str) {
+    eprintln!("{path}:{}:{}: {} {message}", d.at.row + 1, d.at.col + 1, d.code);
     if let Some(line) = src.lines().nth(d.at.row) {
         eprintln!("  {line}\n  {}^", " ".repeat(d.at.col));
     }

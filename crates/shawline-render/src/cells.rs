@@ -39,8 +39,9 @@ pub(crate) struct Fill {
     pub ink: Ink,
 }
 
-/// Every stroke and fill of the grid, cell by cell in row-major order.
-pub(crate) fn pieces(grid: &Grid, diagram: &Diagram) -> (Vec<Stroke>, Vec<Fill>) {
+/// Every stroke and fill of the grid, cell by cell in row-major order, with
+/// rows `pitch` apart.
+pub(crate) fn pieces(grid: &Grid, diagram: &Diagram, pitch: f64) -> (Vec<Stroke>, Vec<Fill>) {
     let inks = inks(grid, diagram);
     let ports: HashMap<Pos, Port> = diagram
         .boxes
@@ -57,7 +58,7 @@ pub(crate) fn pieces(grid: &Grid, diagram: &Diagram) -> (Vec<Stroke>, Vec<Fill>)
                 Some(port) if CANONICAL.contains(ch) => port_parts(grid, *port, ch),
                 _ => skeleton(ch).map(|s| vec![(s, ink)]).unwrap_or_default(),
             };
-            let at = Affine::translate((col as f64 * CELL_WIDTH, row as f64 * CELL_HEIGHT));
+            let at = Affine::translate((col as f64 * CELL_WIDTH, row as f64 * pitch));
             for (s, ink) in parts {
                 for path in s.strokes {
                     let (a, b) = ends(&path);

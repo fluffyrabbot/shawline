@@ -688,28 +688,6 @@ pub(crate) fn preview(doc: &Doc, from: Pos, to: Pos) -> Option<Vec<Pos>> {
 // ---------------------------------------------------------------------------
 // The palette.
 
-/// SPEC §9's meaning for each primitive.
-fn gloss(p: Prim) -> &'static str {
-    match p {
-        Prim::Add => "add",
-        Prim::Sub => "subtract",
-        Prim::Mul => "multiply",
-        Prim::Div => "divide",
-        Prim::Pair => "pair",
-        Prim::Unpair => "unpair",
-        Prim::Prepend => "prepend",
-        Prim::Split => "split",
-        Prim::Less => "less than",
-        Prim::Greater => "greater than",
-        Prim::Equal => "equal",
-        Prim::NotEqual => "not equal",
-        Prim::Min => "minimum",
-        Prim::Max => "maximum",
-        Prim::Show => "show",
-        Prim::Read => "read",
-    }
-}
-
 pub(crate) fn palette(doc: &Doc, from: Option<Pos>) -> Vec<Candidate> {
     // SPEC §9's table, row by row: each letter, then its mirror.
     let mut order: Vec<Prim> = Vec::new();
@@ -727,7 +705,7 @@ pub(crate) fn palette(doc: &Doc, from: Option<Pos>) -> Vec<Candidate> {
                 word: p.letter().to_string(),
                 inputs: inputs.into(),
                 outputs: outputs.into(),
-                gloss: gloss(p).to_owned(),
+                gloss: p.gloss().to_owned(),
                 mirror: Some(p.mirror().letter().to_string()),
             }
         })

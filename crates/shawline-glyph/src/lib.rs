@@ -7,6 +7,7 @@
 //! cell's top-left corner, y growing downward (as in SVG). A font builder
 //! flips y about [`metrics::BASELINE`].
 
+mod gloss;
 mod letters;
 mod marks;
 mod specimen;
@@ -15,6 +16,7 @@ mod strokes;
 use kurbo::{Affine, BezPath, Cap, Ellipse, Join, PathEl, Point, Rect, Shape, Stroke};
 use shawline_grid::{Class, classify};
 
+pub use gloss::{GLOSS_CHARS, GLOSS_HEIGHT, GLOSS_WIDTH, gloss_skeleton};
 pub use specimen::specimen;
 pub use strokes::arrowhead;
 
