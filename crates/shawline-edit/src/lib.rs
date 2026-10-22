@@ -33,8 +33,8 @@ use std::collections::HashSet;
 use std::fmt;
 
 use shawline_doc::Doc;
-use shawline_grid::{Dir, Grid, Pos, Rect};
-use shawline_shape::{Diagram, PortKind};
+use shawline_grid::{Dir, Grid, Pos};
+use shawline_shape::Diagram;
 
 use router::{BUDGET, CELL, CLEARANCE, Cell, Start, Terrain};
 
@@ -95,10 +95,8 @@ impl fmt::Display for RefusalKind {
 }
 
 impl Refusal {
-    /// Temporary (P8 wave 1): every refusal is `Changed` until agent E sets
-    /// the kind at each site and removes this constructor.
-    pub(crate) fn new(at: Pos, reason: impl Into<String>) -> Self {
-        Self { at, kind: RefusalKind::Changed, reason: reason.into() }
+    pub(crate) fn new(at: Pos, kind: RefusalKind, reason: impl Into<String>) -> Self {
+        Self { at, kind, reason: reason.into() }
     }
 }
 
@@ -116,7 +114,7 @@ impl Refusal {
 ///   another box or leave its parent, or a wire can't be re-routed within the
 ///   search budget.
 pub fn move_box(doc: &Doc, corner: Pos, dr: isize, dc: isize) -> Result<Doc, Refusal> {
-    mover::move_box(doc.text(), corner, dr, dc).map(Doc::new)
+    mover::move_box(doc, corner, dr, dc)
 }
 
 /// The cheapest orthogonal path for a wire from cell `from` to cell `to`,
@@ -173,20 +171,20 @@ pub struct Candidate {
 /// Refused when `to` already has a wire, the cells aren't a source and a sink,
 /// or no route fits within the router's budget.
 pub fn connect(doc: &Doc, from: Pos, to: Pos) -> Result<Doc, Refusal> {
-    wiring::connect(doc.text(), from, to).map(Doc::new)
+    wiring::connect(doc, from, to)
 }
 
 /// Removes the whole wire that passes through cell `at`, with every branch.
 /// Refused when no editable wire passes through `at`.
 pub fn remove_wire(doc: &Doc, at: Pos) -> Result<Doc, Refusal> {
-    wiring::remove_wire(doc.text(), at).map(Doc::new)
+    wiring::remove_wire(doc, at)
 }
 
 /// Removes only the branch of a wire that reaches sink `to`, back to the tee
 /// it leaves from. A tee left with two arms becomes a plain stroke. When the
 /// wire has no other sink, the whole wire goes, as with [`remove_wire`].
 pub fn disconnect(doc: &Doc, to: Pos) -> Result<Doc, Refusal> {
-    wiring::disconnect(doc.text(), to).map(Doc::new)
+    wiring::disconnect(doc, to)
 }
 
 /// Places a canonical node box for `word` with its top-left corner at
@@ -203,11 +201,7 @@ pub fn place_node(
     inputs: u16,
     outputs: u16,
 ) -> Result<Placed, Refusal> {
-    let placed = Doc::new(wiring::place_node(doc.text(), corner, word, inputs, outputs)?);
-    let Some((inputs, outputs)) = new_ports(doc, &placed) else {
-        return Err(Refusal::new(corner, "the placed node can't be found again; please report it"));
-    };
-    Ok(Placed { doc: placed, inputs, outputs })
+    wiring::place_node(doc, corner, word, inputs, outputs)
 }
 
 /// A node [`place_node`] placed.
@@ -221,24 +215,11 @@ pub struct Placed {
     pub outputs: Vec<Pos>,
 }
 
-/// Temporary (P8 wave 1, until agent E reports ports from the placement
-/// itself): the ports of the one box in `after` that the canonical form of
-/// `before` lacks.
-fn new_ports(before: &Doc, after: &Doc) -> Option<(Vec<Pos>, Vec<Pos>)> {
-    let old: HashSet<Rect> = before.canonical()?.diagram()?.boxes.iter().map(|b| b.rect).collect();
-    let new = after.diagram()?.boxes.iter().find(|b| !old.contains(&b.rect))?;
-    let ports = |side: Dir, kind: PortKind| -> Vec<Pos> {
-        let found = new.ports.iter().filter(|p| p.side == side && p.kind == kind && p.dir == Dir::E);
-        found.map(|p| p.pos).collect()
-    };
-    Some((ports(Dir::W, PortKind::Arrow), ports(Dir::E, PortKind::Tee)))
-}
-
 /// Removes the node box whose top-left corner is `corner`. Every wire it
 /// sources goes too, and only the branches that reach its inputs
 /// ([`disconnect`]).
 pub fn remove_node(doc: &Doc, corner: Pos) -> Result<Doc, Refusal> {
-    wiring::remove_node(doc.text(), corner).map(Doc::new)
+    wiring::remove_node(doc, corner)
 }
 
 /// What the context palette offers, in a fixed order: primitives first in
@@ -296,14 +277,14 @@ pub fn endpoints(doc: &Doc) -> (Vec<Endpoint>, Vec<Endpoint>) {
 /// a route to the blank cell `to`. `None` when nothing fits. For a live
 /// preview; nothing is edited.
 pub fn preview(doc: &Doc, from: Pos, to: Pos) -> Option<Vec<Pos>> {
-    wiring::preview(doc.text(), from, to)
+    wiring::preview(doc, from, to)
 }
 
 /// For each wire of the recognized diagram (`Diagram::wires` order), the
 /// cell naming its source as [`connect`] takes it, when the wire is
 /// editable: so a drag may start on a wire to fan it out.
 pub fn wire_sources(doc: &Doc) -> Vec<Option<Pos>> {
-    wiring::wire_sources(doc.text())
+    wiring::wire_sources(doc)
 }
 
 /// A sheet as [`route`] sees it: blank cells are free except where a new

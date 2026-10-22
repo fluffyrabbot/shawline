@@ -592,7 +592,6 @@ name = "shawline-edit"
 version = "0.0.1"
 dependencies = [
  "shawline-doc",
- "shawline-fmt",
  "shawline-grid",
  "shawline-shape",
  "shawline-syntax",

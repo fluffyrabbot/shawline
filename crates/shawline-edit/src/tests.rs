@@ -695,10 +695,11 @@ fn a_move_far_past_the_sheet_is_refused_before_the_sheet_grows() {
 
 #[test]
 fn a_move_that_runs_out_of_search_says_it_gave_up() {
-    let starved = crate::mover::move_within(DOUBLE, Pos::new(4, 10), 1, 0, 0).unwrap_err();
+    let doc = Doc::new(DOUBLE);
+    let starved = crate::mover::move_within(&doc, Pos::new(4, 10), 1, 0, 0).unwrap_err();
     assert!(starved.reason.contains("gave up"), "{starved:?}");
     assert!(!starved.reason.contains("no free path"), "{starved:?}");
-    assert!(crate::mover::move_within(DOUBLE, Pos::new(4, 10), 1, 0, BUDGET).is_ok());
+    assert!(crate::mover::move_within(&doc, Pos::new(4, 10), 1, 0, BUDGET).is_ok());
 }
 
 /// A definition `width` by `height` inside, where nothing can reach the
@@ -729,4 +730,82 @@ fn a_search_that_gives_up_is_not_a_missing_path() {
     let large = connect(&unreachable(250, 60), five, input).unwrap_err();
     assert!(large.reason.contains("gave up"), "{large:?}");
     assert_eq!(large.at, input);
+}
+
+// ---------------------------------------------------------------------------
+// P8: what an edit returns, and what kind of refusal stops it.
+
+use crate::RefusalKind;
+
+#[test]
+fn a_placed_node_names_its_ports_in_the_result() {
+    let gone = crate::remove_node(&Doc::new(DOUBLE), Pos::new(4, 10)).unwrap();
+    // The corner names the text as shown, one row down; the ports name the
+    // canonical result.
+    let shown = Doc::new(format!("\n{}", gone.text()));
+    let placed = crate::place_node(&shown, Pos::new(5, 10), "𐑐", 2, 1).unwrap();
+    assert_eq!(placed.inputs, [Pos::new(5, 10), Pos::new(6, 10)]);
+    assert_eq!(placed.outputs, [Pos::new(5, 14)]);
+    let (sources, sinks) = crate::endpoints(&placed.doc);
+    assert!(placed.inputs.iter().all(|&p| sinks.iter().any(|s| s.at == p && !s.wired)));
+    assert!(placed.outputs.iter().all(|&p| sources.iter().any(|s| s.at == p && !s.wired)));
+    let input = Pos::new(5, 0);
+    let output = Pos::new(5, 22);
+    let wires = [(input, placed.inputs[0]), (input, placed.inputs[1]), (placed.outputs[0], output)];
+    let mut doc = placed.doc;
+    for (from, to) in wires {
+        doc = crate::connect(&doc, from, to).unwrap();
+    }
+    assert_eq!(outputs(doc.text()), outputs(DOUBLE));
+}
+
+#[test]
+fn a_wire_crossing_itself_goes_with_both_axes() {
+    // One fan-out whose branches cross: the wire owns both axes of 4:6.
+    let src = include_str!("../../../corpus/15-fanout-cross.shaw");
+    let gone = crate::remove_wire(&Doc::new(src), Pos::new(2, 4)).unwrap();
+    assert!(gone.diagram().unwrap().wires.is_empty(), "{}", gone.text());
+    let mut doc = gone;
+    for to in [Pos::new(6, 22), Pos::new(7, 22)] {
+        doc = crate::connect(&doc, Pos::new(2, 2), to).unwrap();
+    }
+    assert_eq!(outputs(doc.text()), outputs(src));
+    // One branch alone takes only its own axis, and the crossing goes.
+    let one = crate::disconnect(&Doc::new(src), Pos::new(6, 22)).unwrap();
+    let wires = &one.diagram().unwrap().wires;
+    assert!(wires.len() == 1 && wires[0].crossings.is_empty(), "{}", one.text());
+}
+
+#[test]
+fn refusals_say_what_kind_of_obstacle_they_are() {
+    let kind = |r: Result<Doc, Refusal>| r.unwrap_err().kind;
+    let double = Doc::new(DOUBLE);
+
+    let unreadable = crate::remove_wire(&Doc::new("\t·𐑛\n"), Pos::new(0, 1)).unwrap_err();
+    assert_eq!((unreadable.kind, unreadable.at), (RefusalKind::Unreadable, Pos::new(0, 0)));
+
+    assert_eq!(kind(crate::remove_wire(&double, Pos::new(3, 3))), RefusalKind::Target);
+    assert_eq!(kind(crate::connect(&double, Pos::new(5, 0), Pos::new(5, 10))), RefusalKind::Target);
+    assert_eq!(kind(crate::remove_node(&double, Pos::new(2, 0))), RefusalKind::Target);
+    let outside = crate::place_node(&double, Pos::new(20, 30), "𐑐", 2, 1).unwrap_err();
+    assert_eq!(outside.kind, RefusalKind::Target);
+
+    let fanout = Doc::new(include_str!("../../../corpus/13-fanout.shaw"));
+    assert_eq!(kind(crate::remove_wire(&fanout, Pos::new(5, 4))), RefusalKind::Unsupported);
+    let merged = crate::remove_wire(&Doc::new(ABS), Pos::new(13, 28));
+    assert_eq!(kind(merged), RefusalKind::Unsupported);
+    let latin = crate::place_node(&double, Pos::new(8, 3), "x", 1, 1).unwrap_err();
+    assert_eq!(latin.kind, RefusalKind::Unsupported);
+
+    assert_eq!(kind(crate::move_box(&double, Pos::new(4, 10), 0, 9)), RefusalKind::Blocked);
+    let onto = crate::place_node(&double, Pos::new(4, 3), "𐑐", 2, 1).unwrap_err();
+    assert_eq!(onto.kind, RefusalKind::Blocked);
+    let (five, input) = (Pos::new(2, 3), Pos::new(3, 13));
+    let small = crate::connect(&Doc::new(unreachable(30, 6)), five, input);
+    assert_eq!(kind(small), RefusalKind::Blocked);
+
+    let large = crate::connect(&Doc::new(unreachable(250, 60)), five, input);
+    assert_eq!(kind(large), RefusalKind::GaveUp);
+    let starved = crate::mover::move_within(&double, Pos::new(4, 10), 1, 0, 0);
+    assert_eq!(kind(starved), RefusalKind::GaveUp);
 }

@@ -14,37 +14,42 @@
 //! - a cell inside a box keeps its place relative to the box, because no
 //!   row inside a box is dropped or inserted and no box moves sideways.
 
+use shawline_doc::Doc;
 use shawline_grid::{Grid, Pos};
-use shawline_shape::{Diagram, recognize};
+use shawline_shape::Diagram;
 
-use crate::Refusal;
 use crate::model::{Model, Term};
+use crate::{Refusal, RefusalKind};
 
-/// A sheet read for editing: as given, and in canonical form.
-pub(crate) struct Sheets {
-    given: (Grid, Diagram),
+/// A sheet read for editing: as given, and in canonical form. Both are
+/// borrowed from the given [`Doc`], which keeps its canonical revision
+/// too, so every edit and preview of one revision shares one reading.
+pub(crate) struct Sheets<'a> {
+    given: (&'a Grid, &'a Diagram),
     /// `None` when the given text is already canonical.
-    canon: Option<(Grid, Diagram)>,
-    /// The canonical text.
-    text: String,
+    canon: Option<(&'a Grid, &'a Diagram)>,
+    /// The canonical revision.
+    doc: &'a Doc,
 }
 
-impl Sheets {
-    /// Reads `src` and formats it. A refusal about the whole sheet points
-    /// at `at`.
-    pub(crate) fn read(src: &str, at: Pos) -> Result<Self, Refusal> {
-        let grid = Grid::parse(src).map_err(|errors| {
+impl<'a> Sheets<'a> {
+    /// Reads `doc` and its canonical revision. A refusal about the whole
+    /// sheet points at `at`.
+    pub(crate) fn read(doc: &'a Doc, at: Pos) -> Result<Self, Refusal> {
+        let grid = doc.grid().map_err(|errors| {
             let why = "the sheet has a character Shawline can't read; fix it first";
-            Refusal::new(errors[0].pos, why)
+            Refusal::new(errors.first().map_or(at, |e| e.at), RefusalKind::Unreadable, why)
         })?;
-        let diagram = recognize(&grid);
-        let text = shawline_fmt::format(&grid, &diagram);
-        if text == src {
-            return Ok(Self { given: (grid, diagram), canon: None, text });
+        let diagram = doc.diagram().expect("a sheet on the grid is recognized");
+        let untidy = || {
+            Refusal::new(at, RefusalKind::Unreadable, "the sheet can't be tidied for editing")
+        };
+        let canonical = doc.canonical().ok_or_else(untidy)?;
+        if std::ptr::eq(canonical, doc) {
+            return Ok(Self { given: (grid, diagram), canon: None, doc });
         }
-        let untidy = || Refusal::new(at, "the sheet can't be tidied for editing");
-        let canon_grid = Grid::parse(&text).map_err(|_| untidy())?;
-        let canon = recognize(&canon_grid);
+        let canon_grid = canonical.grid().map_err(|_| untidy())?;
+        let canon = canonical.diagram().expect("a sheet on the grid is recognized");
         // What the identities rest on. The formatter keeps all of it.
         let size = |b: &shawline_shape::BoxShape| {
             (b.rect.bottom - b.rect.top, b.rect.right - b.rect.left, b.ports.len())
@@ -55,23 +60,22 @@ impl Sheets {
         if !kept {
             return Err(untidy());
         }
-        Ok(Self { given: (grid, diagram), canon: Some((canon_grid, canon)), text })
+        Ok(Self { given: (grid, diagram), canon: Some((canon_grid, canon)), doc: canonical })
     }
 
     /// The sheet as given: what the caller's positions name.
-    pub(crate) fn given(&self) -> (&Grid, &Diagram) {
-        (&self.given.0, &self.given.1)
+    pub(crate) fn given(&self) -> (&'a Grid, &'a Diagram) {
+        self.given
     }
 
     /// The canonical sheet: what edits draw on.
-    pub(crate) fn canon(&self) -> (&Grid, &Diagram) {
-        let (grid, diagram) = self.canon.as_ref().unwrap_or(&self.given);
-        (grid, diagram)
+    pub(crate) fn canon(&self) -> (&'a Grid, &'a Diagram) {
+        self.canon.unwrap_or(self.given)
     }
 
-    /// The canonical text.
-    pub(crate) fn text(&self) -> &str {
-        &self.text
+    /// The canonical revision.
+    pub(crate) fn doc(&self) -> &'a Doc {
+        self.doc
     }
 
     /// The top-left corner of box `b` in the canonical sheet.
@@ -181,4 +185,27 @@ fn rebase(p: Pos, from: Pos, to: Pos) -> Option<Pos> {
         p.row.checked_add(to.row)?.checked_sub(from.row)?,
         p.col.checked_add(to.col)?.checked_sub(from.col)?,
     ))
+}
+
+/// Why an edit's drawing can't be read back.
+pub(crate) const STRAY: &str = "it would write a stray character";
+
+/// The revision an edit returns for the text it drew, formatted afresh:
+/// `drawn` itself when formatting changes nothing, otherwise the formatted
+/// text, which must format to itself. `Err` says what's wrong.
+///
+/// Never an input's canonical revision: that one is seeded as canonical
+/// without being formatted again ([`Doc::canonical`]), so it proves
+/// nothing about a result.
+pub(crate) fn tidy(drawn: Doc) -> Result<Doc, &'static str> {
+    let formatted = drawn.formatted().ok_or(STRAY)?;
+    if formatted == drawn.text() {
+        return Ok(drawn);
+    }
+    let tidied = Doc::new(formatted.to_owned());
+    match tidied.formatted() {
+        Some(again) if again == tidied.text() => Ok(tidied),
+        Some(_) => Err("formatting it again would change it"),
+        None => Err(STRAY),
+    }
 }

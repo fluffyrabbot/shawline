@@ -9,10 +9,10 @@
 use std::collections::{HashMap, HashSet};
 
 use shawline_grid::{Dir, Grid, Pos, Rect};
-use shawline_shape::stroke::{self, Kind};
+use shawline_shape::stroke::Kind;
 use shawline_shape::{BoxStyle, Diagram, EndKind, Port, PortKind, TextKind};
 
-use crate::Refusal;
+use crate::{Refusal, RefusalKind};
 use crate::sheet::{across, borders, text_cells};
 
 /// The empty list's word (SPEC §9), the one constant written as a word.
@@ -85,17 +85,22 @@ impl Sink {
     }
 }
 
+/// Why a wire at an inline node is refused ([`RefusalKind::Unsupported`]).
+const INLINE: &str = "wires at an inline node can't be edited by mouse yet; edit the text";
+
 /// The refusal for a cell that is neither a port nor text, as a source.
 pub(crate) fn no_source(at: Pos) -> Refusal {
     Refusal::new(
         at,
+        RefusalKind::Target,
         "nothing here feeds a wire: start at an output tee, an input, a constant or an arm's input",
     )
 }
 
 /// The refusal for a cell that isn't an arrowhead, as a sink.
 pub(crate) fn no_sink(at: Pos) -> Refusal {
-    Refusal::new(at, "wires end at arrowheads: a node's input, an output or a switch port")
+    let why = "wires end at arrowheads: a node's input, an output or a switch port";
+    Refusal::new(at, RefusalKind::Target, why)
 }
 
 /// A source with the cell naming it, and whether a wire already starts there.
@@ -253,6 +258,7 @@ impl<'a> Model<'a> {
         if self.grid.get(goal) != ' ' {
             return Err(Refusal::new(
                 text.pos,
+                RefusalKind::Blocked,
                 format!("{} needs a space after it before a wire can start", text.content),
             ));
         }
@@ -280,7 +286,11 @@ impl<'a> Model<'a> {
                 }),
                 (BoxKind::Definition, PortKind::Arrow, Dir::W) => match self.input_name(at) {
                     Some(t) => self.text_source(t, self.inside(b, row)),
-                    None => Err(Refusal::new(at, "this input has no name yet; type one first")),
+                    None => Err(Refusal::new(
+                        at,
+                        RefusalKind::Target,
+                        "this input has no name yet; type one first",
+                    )),
                 },
                 (BoxKind::Switch, PortKind::Arrow, Dir::W) => Ok(Source {
                     term: Term::Port(at, Dir::W),
@@ -291,9 +301,14 @@ impl<'a> Model<'a> {
                 }),
                 (BoxKind::Switch, _, Dir::E) => Err(Refusal::new(
                     at,
+                    RefusalKind::Unsupported,
                     "a switch's merged output can't be wired by mouse yet; draw it in the text",
                 )),
-                _ => Err(Refusal::new(at, "this arrowhead takes a wire in; drag from a source")),
+                _ => Err(Refusal::new(
+                    at,
+                    RefusalKind::Target,
+                    "this arrowhead takes a wire in; drag from a source",
+                )),
             };
         }
         if let Some(t) = self.text_at(at) {
@@ -304,12 +319,10 @@ impl<'a> Model<'a> {
                 return self.text_source(t, self.inside(b, port.pos.row));
             }
             if self.after_free_arrow(t) {
-                return Err(Refusal::new(
-                    at,
-                    "wires at an inline node can't be edited by mouse yet; edit the text",
-                ));
+                return Err(Refusal::new(at, RefusalKind::Unsupported, INLINE));
             }
-            return Err(Refusal::new(at, format!("{} can't feed a wire", self.content(t))));
+            let why = format!("{} can't feed a wire", self.content(t));
+            return Err(Refusal::new(at, RefusalKind::Target, why));
         }
         Err(no_source(at))
     }
@@ -326,7 +339,8 @@ impl<'a> Model<'a> {
             (BoxKind::Node, Dir::W, Dir::E) => self.outside(b, row),
             (BoxKind::Definition, Dir::E, Dir::E) => Some(self.inside(b, row)),
             (BoxKind::Definition, Dir::W, _) => {
-                return Err(Refusal::new(at, "this is an input: wires start here, they don't end"));
+                let why = "this is an input: wires start here, they don't end";
+                return Err(Refusal::new(at, RefusalKind::Target, why));
             }
             (BoxKind::Switch, Dir::N, Dir::S) | (BoxKind::Switch, Dir::W, Dir::E) => {
                 self.outside(b, row)
@@ -354,15 +368,14 @@ impl<'a> Model<'a> {
     }
 
     /// `Err` with the reason when wire `w` isn't editable in Phase 1: it
-    /// touches an inline node, or carries a switch's merged output.
+    /// touches an inline node, or carries a switch's merged output. Either
+    /// is [`RefusalKind::Unsupported`].
     pub(crate) fn editable(&self, w: usize) -> Result<(), &'static str> {
         for &term in &self.terms[w] {
             match term {
-                Term::Arrow(_) => {
-                    return Err("wires at an inline node can't be edited by mouse yet; edit the text");
-                }
+                Term::Arrow(_) => return Err(INLINE),
                 Term::Text(p, Dir::W) if self.text_at(p).is_some_and(|t| self.after_free_arrow(t)) => {
-                    return Err("wires at an inline node can't be edited by mouse yet; edit the text");
+                    return Err(INLINE);
                 }
                 Term::Port(p, Dir::W)
                     if self.port(p).is_some_and(|(b, port)| {
@@ -377,21 +390,14 @@ impl<'a> Model<'a> {
         Ok(())
     }
 
-    /// The wire cells' own connections, as drawn. A crossing belongs to two
-    /// wires; each owns one axis of it.
-    pub(crate) fn own_mask(&self, w: usize, p: Pos) -> u8 {
-        let Some(s) = self.diagram.strokes.get(p) else { return 0 };
-        if s.kind != Kind::Crossing {
-            return s.conn;
-        }
-        let cells = &self.diagram.wires[w].cells;
-        let horizontal = [Dir::E, Dir::W].into_iter().any(|d| {
-            p.step(d).is_some_and(|q| {
-                cells.contains(&q)
-                    && self.diagram.strokes.get(q).is_some_and(|s| s.connects(d.opposite()))
-            })
-        });
-        if horizontal { stroke::E | stroke::W } else { stroke::N | stroke::S }
+    /// The directions in which cell `p` joins wire `w` ([`Wire::links`]):
+    /// its own strokes, or at a crossing the axes the wire owns. 0 for a
+    /// cell off the wire.
+    ///
+    /// [`Wire::links`]: shawline_shape::Wire::links
+    pub(crate) fn links(&self, w: usize, p: Pos) -> u8 {
+        let wire = &self.diagram.wires[w];
+        wire.cells.binary_search(&p).map_or(0, |i| wire.links[i])
     }
 
     /// Every potential text source in the sheet: constants and input names.
