@@ -19,11 +19,11 @@ mod lint;
 mod spacing;
 mod verify;
 
-use shawline_grid::{Diagnostic, Grid};
+use shawline_grid::{Code, Diagnostic, Grid};
 use shawline_shape::Diagram;
+use shawline_shape::structure::Structure;
 
 use canvas::{Canvas, Edit, reparse};
-use verify::Fingerprint;
 
 /// The limits behind the lints of SPEC §12, in one place so they can be
 /// tuned against the corpus.
@@ -90,12 +90,13 @@ pub fn lint(grid: &Grid, diagram: &Diagram) -> Vec<Diagnostic> {
 
 /// One pass of every phase, then trailing spaces and blank lines.
 fn format_once(grid: &Grid, diagram: &Diagram) -> String {
-    let base = Fingerprint::of(grid, diagram);
+    let base = Structure::of(grid, diagram);
+    let syntax = verify::syntax(grid, diagram);
     let mut canvas = Canvas::from_grid(grid);
     for phase in PHASES {
         let (g, d) = canvas.recognize();
         let edits = phase(&g, &d);
-        apply(&mut canvas, &edits, &base);
+        apply(&mut canvas, &edits, &base, &syntax);
     }
 
     let rows = layout::trimmed(&canvas);
@@ -103,7 +104,7 @@ fn format_once(grid: &Grid, diagram: &Diagram) -> String {
     let (_, d) = reparse(&flat);
     let same = |out: &str| {
         let (g, d) = reparse(out);
-        Fingerprint::of(&g, &d) == base
+        verify::holds(&g, &d, &base, &syntax)
     };
     // Each blank-line change stands alone, so an inserted blank that would
     // split a wire doesn't block the rest. Drops go first, as one batch
@@ -141,9 +142,10 @@ fn keep_safe<T: Copy>(mut kept: Vec<T>, items: &[T], ok: impl Fn(&[T]) -> bool) 
     kept
 }
 
-/// Applies `edits`, keeping only those that leave the structure as `base`.
-/// All at once is the common case; edit by edit is the fallback.
-fn apply(canvas: &mut Canvas, edits: &[Edit], base: &Fingerprint) {
+/// Applies `edits`, keeping only those that leave the structure as `base`
+/// and the syntax codes as `syntax`. All at once is the common case; edit
+/// by edit is the fallback.
+fn apply(canvas: &mut Canvas, edits: &[Edit], base: &Structure, syntax: &[Code]) {
     if edits.is_empty() {
         return;
     }
@@ -151,29 +153,30 @@ fn apply(canvas: &mut Canvas, edits: &[Edit], base: &Fingerprint) {
     for e in edits {
         canvas.write(e);
     }
-    if unchanged(canvas, base) {
+    if unchanged(canvas, base, syntax) {
         return;
     }
     *canvas = before;
     for e in edits {
         let undo: Edit = e.iter().map(|&(p, _)| (p, canvas.get(p))).collect();
         canvas.write(e);
-        if !unchanged(canvas, base) {
+        if !unchanged(canvas, base, syntax) {
             canvas.write(&undo);
         }
     }
 }
 
-fn unchanged(canvas: &Canvas, base: &Fingerprint) -> bool {
+fn unchanged(canvas: &Canvas, base: &Structure, syntax: &[Code]) -> bool {
     let (g, d) = canvas.recognize();
-    Fingerprint::of(&g, &d) == *base
+    verify::holds(&g, &d, base, syntax)
 }
 
 /// Moves each near box's slipped cells home, one box at a time, keeping a
 /// move only if that box then has no slips and nothing else changed.
 fn repair(grid: &Grid, diagram: &Diagram) -> Canvas {
     let mut canvas = Canvas::from_grid(grid);
-    let mut want = Fingerprint::of(grid, diagram);
+    let mut want = Structure::of(grid, diagram);
+    let syntax = verify::syntax(grid, diagram);
     for (i, b) in diagram.boxes.iter().enumerate() {
         if b.slips.is_empty() {
             continue;
@@ -185,8 +188,9 @@ fn repair(grid: &Grid, diagram: &Diagram) -> Canvas {
         canvas.write(&edit);
         let (g, d) = canvas.recognize();
         let whole = d.boxes.get(i).is_some_and(|nb| nb.rect == b.rect && nb.slips.is_empty());
-        let target = want.repaired(i);
-        if whole && Fingerprint::of(&g, &d) == target {
+        let mut target = want.clone();
+        target.boxes[i].slips = 0;
+        if whole && verify::holds(&g, &d, &target, &syntax) {
             want = target;
         } else {
             canvas.write(&undo);
