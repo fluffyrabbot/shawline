@@ -7,6 +7,7 @@
 
 mod boxes;
 pub mod stroke;
+pub mod structure;
 mod text;
 mod trace;
 pub mod wire;

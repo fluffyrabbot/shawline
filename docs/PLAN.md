@@ -43,7 +43,7 @@ Grid ──► shawline-render (SVG) ◄── shawline-glyph (stroke skeletons)
 | Crate | Role | Built in | Contract file (lead-owned, read-only to agents) |
 |---|---|---|---|
 | `shawline-grid` | Repertoire, Grid, Pos/Dir/Rect, Diagnostic | P0 ✅ | the whole crate |
-| `shawline-shape` | Stroke recognition | P0 seed ✅ → A1 | `src/wire.rs` (P1) |
+| `shawline-shape` | Stroke recognition | P0 seed ✅ → A1 | `src/wire.rs` (P1), `src/structure.rs` (P8) |
 | `shawline-word` | Letter classes, mirrors, primitive table, transliteration | A2 | — |
 | `shawline-glyph` | Stroke skeletons, SVG paths, specimen sheet | A3 | — |
 | `shawline-vm` | Bytecode VM and assembler | A4 | `src/bytecode.rs` (P1) |
@@ -585,6 +585,22 @@ Wave 1 gate (done). E (`92e202a`) and W (`2fe35c9`) merged without conflicts.
 - **How each check uses it:** a formatting step expects equality. A move or a row/column insertion also expects equality after relabelling, because positions are not part of the structure. A wiring edit expects the old structure plus the graph change it declares.
 - **F** moves `fmt::verify` to it; **E** moves `edit::check` and `edit::model`'s `Print` to it. Both old fingerprint types are deleted.
 - **Gate:** every existing gate stays green, including jitter, `fmt_mutations`, the formatter property test, `studio`, `edit_moves` and `studio_sequences`. `grep` finds no second fingerprint type.
+
+Wave 2 contract (done): `shawline-shape/src/structure.rs`, lead-owned, with 9 unit tests. Nothing uses it yet.
+- **What it records:**
+  - **boxes:** style, title, slips, parent, ports (side, kind, direction, what an arrowhead meets) and guarded dividers;
+  - **texts:** kind, content, owner, and the boxes they title or guard;
+  - **wires:** sorted term lists, each term a facing and what it meets (a port by box and port index, or a free arrowhead, a loose end or a blocked stroke, with what lies across);
+  - **shape codes,** without `S012`.
+- **`Mapping` relabels box and text indices.** `Mapping::by_place` builds one from where a step should have put each box and text. Relabelling drops what maps to nothing:
+  - a wire loses its terms at a dropped box;
+  - a wire left with fewer than two terms goes, as when a node is removed;
+  - a reference across a dropped text becomes `Nothing`.
+- **One comparison, `expect(found, routing)`,** reports the first part that differs (boxes, texts, wires or codes). Wiring edits declare their graph change with `connect`, `remove_wire` and `disconnect`.
+- **Deviations from the design above**, each decided while writing it:
+  - **Wires keep tee and crossing counts, and `Routing` says how far a step may change them.** `Kept` is for formatting and insertion. `Rerouted` lets crossings change, because today's move check ignores them and a re-routed stretch may cross a wire the old one didn't. `Ignored` is for wiring edits. Without this, moving the move check onto the structure would refuse moves that pass today.
+  - **Texts name the box they title or guard,** rather than carrying flags. The formatter's net already compared these by index, so flags would weaken it.
+  - **Syntax codes stay outside the structure,** because `shawline-shape` sits upstream of syntax. The formatter compares them beside it, as before.
 
 **Then Phase 2**, starting with inserting rows and columns. With wave 2 in place, insertion is a mapping that leaves structure equal, and needs no new check.
 
