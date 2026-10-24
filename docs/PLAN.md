@@ -628,7 +628,7 @@ Wave 2 gate (done). F (`2c23150`) and E (`d1d09ad`) merged without conflicts.
 
 **Then Phase 2**, starting with inserting rows and columns. With wave 2 in place, insertion is a mapping that leaves structure equal, and needs no new check.
 
-### P9: Gloss layer (after P8, before Studio Phase 2)
+### P9: Gloss layer (after P8, before Studio Phase 2) ✅
 
 **Goal.** Every surface teaches the Shavian alphabet to a newcomer. English sits beside the drawing, on by default, and one toggle turns it off. The rule that keeps it minimal: **English goes in the margin, never in the grid.** A gloss is never source text, never takes up a column, and never changes a program's meaning. SPEC §2's closed repertoire and one-cell rule hold exactly as before.
 
@@ -756,7 +756,23 @@ Gate (done). K (`673695c`), G (`01140bd`), R (`460211e`) and W (`5b96f85`) merge
   - the playground build (548,447-byte wasm, up from 535,273) and 45 Node checks green, the 8 new ones covering toggle and peek leaving the text unchanged, hit-testing at each pitch, and plain messages with the layer off;
   - every `.svg` byte-identical without re-blessing, and `render --plain` byte-identical to `38862bf` on all 37 corpus programs.
 - **By hand:** `01-hello` and the first definition of `11-even-odd`, glossed and plain, light and dark, rasterized with `resvg`. Strokes run unbroken through every strip. The user judged the layer to read as annotation, not clutter, so the strip (half a cell) and the gloss scale (half a letter) stay as they are.
-- **In flight: the LSP piece.** K has it as its own crate assignment: the hover `Reading:` line, `annotate` on published diagnostics, and `shawline.gloss`. It gets its own small gate, and P9 closes when it merges.
+- **The LSP piece** went to K, the first agent done, as its own crate assignment.
+
+LSP gate (done). K's `17ec32c` merged without conflicts, touching only `shawline-lsp` and `editors/vscode`.
+- **Hover:** every Shavian word gets a `Reading:` line, read off the grid, so port names, words in `«»` and comment words count, as do unknown names and `𐑯𐑦𐑤`, which had no hover before. A primitive's line adds its short name (``Reading: `p` · add``). Call words and titles keep their description above it.
+- **Diagnostics:** published messages go through `annotate`.
+- **`shawline.gloss`:**
+  - a boolean, default true, declared in the extension's `package.json` and sent as `initializationOptions`;
+  - a change is pushed as `workspace/didChangeConfiguration`, and the server then republishes every open document's diagnostics;
+  - with it off, hover is exactly as before P9 and messages are plain.
+  
+  There are no inlay hints and no CodeLens.
+- **Gate:**
+  - 312 tests, the three new ones covering hover on every kind of word, the setting off from the start, and the setting changed while running;
+  - clippy clean on host and wasm;
+  - the extension's `tsc` build green;
+  - the playground build (548,447-byte wasm, unchanged) and its 45 Node checks green.
+- **P9 closed.**
 
 ## Risks
 
