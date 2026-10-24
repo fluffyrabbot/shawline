@@ -22,6 +22,10 @@ pub(crate) enum Ink {
     Comment,
 }
 
+impl Ink {
+    pub(crate) const ALL: [Ink; 4] = [Ink::Wire, Ink::Border, Ink::Text, Ink::Comment];
+}
+
 /// An open centreline in grid coordinates.
 #[derive(Clone, Debug)]
 pub(crate) struct Stroke {

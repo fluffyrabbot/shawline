@@ -11,7 +11,7 @@
 //!
 //! The gloss layer (PLAN P9) is drawn only on request ([`render_with`]): a
 //! strip under every row holding each word's reading, or a primitive's short
-//! name, in the comment ink.
+//! name, in the comment ink. Box sides and wires run on through it unbroken.
 
 mod cells;
 mod chain;
@@ -34,8 +34,12 @@ pub const SCALE: f64 = 0.025;
 /// Blank space around the drawing on every side, in glyph units (one cell
 /// width, half a cell height).
 pub const MARGIN: f64 = 600.0;
-/// Height of the gloss strip under each row, in glyph units.
+/// Height of the gloss strip under each row, in glyph units. [`row_pitch`]
+/// is the one place it reaches outside the renderer.
 const STRIP: f64 = CELL_HEIGHT / 2.0;
+/// Size of a gloss glyph against its skeleton's box, which is half a cell
+/// each way. Glosses are drawn with the same pen at any scale.
+const GLOSS_SCALE: f64 = 1.0;
 
 /// An sRGB colour.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -110,7 +114,14 @@ pub fn render_with(grid: &Grid, options: Options) -> String {
     let theme = options.theme;
     let pitch = row_pitch(options.gloss);
     let diagram = shawline_shape::recognize(grid);
-    let (strokes, fills) = cells::pieces(grid, &diagram, pitch);
+    let (mut strokes, mut fills) = cells::pieces(grid, &diagram, pitch);
+    if options.gloss {
+        let blocked = strip::blocked(grid, &diagram);
+        strokes.extend(strip::bridges(&strokes, &blocked, pitch));
+        let (glyphs, dots) = strip::pieces(&strip::glosses(grid, &diagram, &blocked), pitch);
+        strokes.extend(glyphs);
+        fills.extend(dots);
+    }
     let chains = chain::merge(&strokes);
 
     let (w, h) = (
@@ -160,7 +171,8 @@ pub fn render_with(grid: &Grid, options: Options) -> String {
 /// Every Shavian word on the sheet in row-major order, with its reading, a
 /// primitive's short name, and where the gloss strip shows it.
 pub fn glosses(grid: &Grid) -> Vec<Gloss> {
-    strip::glosses(grid)
+    let diagram = shawline_shape::recognize(grid);
+    strip::glosses(grid, &diagram, &strip::blocked(grid, &diagram))
 }
 
 /// The distance from one row's top to the next, in glyph units:
