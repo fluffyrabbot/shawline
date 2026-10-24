@@ -3,12 +3,13 @@
 // wires it to the page.
 import init, {
   Doc, table, move_box, connect, remove_wire, disconnect, remove_node, place_node, place_and_connect,
-  Transliterator,
+  Transliterator, row_pitch, annotate, reading,
 } from "./pkg/shawline_wasm.js";
 import { Tour, TOUR_EXAMPLE } from "./tour.js";
 import { Store, TOUR_SLOT } from "./drafts.js";
 import { Docs } from "./docs.js";
 import { Flight } from "./flight.js";
+import { Layer, CELL_W } from "./layer.js";
 
 const $ = (id) => document.getElementById(id);
 const editor = $("editor");
@@ -18,17 +19,22 @@ const problems = $("problems");
 const output = $("output");
 const runButton = $("run");
 const translit = $("translit");
+const readings = $("readings");
 const examples = $("examples");
 const values = $("values");
 const traceState = $("trace-status");
 const statusLine = $("drawing-status");
 const resetButton = $("reset");
-const tour = new Tour($("tour"), () => showOverlays());
-
-// One cell in the renderer's SVG units (shawline-glyph CELL_WIDTH/HEIGHT).
-const CELL_W = 600;
-const CELL_H = 1200;
+const tour = new Tour($("tour"), () => showOverlays(), (text) => layer.message(text));
 const RUN_LIMIT_MS = 10_000;
+
+/** The gloss layer (layer.js), made once the wasm package has loaded. */
+let layer;
+/**
+ * Where cells sit in the drawing on the page, as it was drawn: every
+ * overlay and hit test goes through it, so they follow the row pitch.
+ */
+let geo;
 
 const store = new Store((() => {
   // Reading `localStorage` itself throws where storage is disabled.
@@ -165,6 +171,45 @@ translit.addEventListener("change", () => {
   settle();
 });
 
+// The gloss layer (PLAN P9): readings under every word and in messages, on
+// by default. Holding Alt by itself flips it until Alt comes up; any other
+// key ends that, so Option-typing never flashes it. Window listeners in the
+// capture phase see every key, whatever has focus and whatever stops it.
+
+readings.addEventListener("change", () => {
+  store.set("readings", readings.checked);
+  layer.set(readings.checked);
+});
+addEventListener("keydown", (e) => layer?.keydown(e), { capture: true });
+addEventListener("keyup", (e) => layer?.keyup(e), { capture: true });
+for (const type of ["pointerdown", "pointermove"]) addEventListener(type, (e) => layer?.pointer(e), { capture: true });
+addEventListener("blur", () => layer?.cancel());
+document.addEventListener("visibilitychange", () => layer?.cancel());
+
+/**
+ * Shows everything again as the layer now shows it: the drawing at its new
+ * pitch, with whatever drag is under way, and every message.
+ */
+function relayer() {
+  layer.resay(document);
+  drawing.querySelectorAll(".refusal").forEach((n) => n.remove());
+  if (drag?.view) drawSheet(drag.cut);
+  else showDrawing();
+  if (drag) {
+    if (drag.kind !== "box" && (drag.kind !== "branch" || drag.view)) glow();
+    if (drag.at && drag.kind === "box") showGhost();
+    else if (drag.at && drag.path) showPath();
+  }
+  if (menu) {
+    menu.show();
+    placeMenu();
+  }
+  // A peek or a turn of the switch is what the tour's first step asks for;
+  // a peek counts once it is over.
+  if (layer.peeking) tour.update(current());
+  else tour.looked(current());
+}
+
 // Live checking and drawing, a beat after the last keystroke.
 
 let refreshTimer;
@@ -234,7 +279,7 @@ function problem(d, i) {
   const item = el("li", d.severity);
   item.dataset.i = i;
   // One-based, like the CLI's diagnostic report.
-  item.append(el("span", "pos", `${d.row + 1}:${d.col + 1}`), el("span", "code", d.code), el("span", "message", d.message));
+  item.append(el("span", "pos", `${d.row + 1}:${d.col + 1}`), el("span", "code", d.code), layer.say(el("span", "message"), d.message));
   item.title = d.severity;
   item.addEventListener("click", () => jumpTo(d));
   item.addEventListener("mouseenter", () => highlight(i, true));
@@ -246,14 +291,20 @@ function highlight(i, on) {
   document.querySelectorAll(`[data-i="${i}"]`).forEach((node) => node.classList.toggle("hot", on));
 }
 
-/** Draws `src` at the editor's scale; false when the text can't be read. */
+/**
+ * Draws `src` at the editor's scale, glossed while the layer shows; false
+ * when the text can't be read, and then the drawing and `geo` stay as they
+ * were.
+ */
 function drawSheet(src) {
-  const svg = docs.get(src).render(document.documentElement.dataset.theme === "dark");
+  const svg = docs.get(src).render(document.documentElement.dataset.theme === "dark", layer.shown);
   if (svg === undefined) return false;
   drawing.innerHTML = svg;
+  geo = layer.geometry;
   const view = drawing.querySelector("svg").viewBox.baseVal;
-  const cell = parseFloat(getComputedStyle(editor).fontSize);
-  drawing.firstElementChild.style.width = `${(view.width / CELL_H) * cell}px`;
+  // A cell is half an em wide, as in the editor, whatever the row pitch.
+  const em = parseFloat(getComputedStyle(editor).fontSize);
+  drawing.firstElementChild.style.width = `${(view.width / CELL_W) * (em / 2)}px`;
   return true;
 }
 
@@ -264,18 +315,36 @@ function showDrawing() {
     return;
   }
   const background = drawing.querySelector("svg > rect");
-  const ns = "http://www.w3.org/2000/svg";
   background?.after(
     ...shown.map((d, i) => {
-      const cell = document.createElementNS(ns, "rect");
-      const attrs = { x: d.col * CELL_W, y: d.row * CELL_H, width: CELL_W, height: CELL_H, rx: 90 };
-      Object.entries(attrs).forEach(([k, v]) => cell.setAttribute(k, v));
-      cell.setAttribute("class", `cell ${d.severity}`);
+      const cell = cellRect(`cell ${d.severity}`, d);
       cell.dataset.i = i;
       return cell;
     }),
   );
+  showWords();
   showOverlays();
+}
+
+/**
+ * While the layer shows, every word says how it is read when hovered,
+ * over the word and the strip under it: a gloss the strip had no room for
+ * is still there.
+ */
+function showWords() {
+  const svg = drawing.querySelector("svg");
+  if (!layer.shown || !svg) return;
+  const view = current();
+  view.words ??= doc().glosses();
+  const group = svgEl("g", "words");
+  for (const { row, col, span, word, reading: keys, gloss } of view.words) {
+    const target = svgRect("", { top: row, left: col, bottom: row, right: col + span - 1, under: true });
+    const title = svgEl("title");
+    title.textContent = gloss ? `${word} reads ${keys}: ${gloss}` : `${word} reads ${keys}`;
+    target.append(title);
+    group.append(target);
+  }
+  svg.append(group);
 }
 
 /** The drawing's cell under a pointer event, or null off the sheet. */
@@ -287,7 +356,7 @@ function cellAt(e) {
   const view = svg.viewBox.baseVal;
   const x = view.x + ((e.clientX - box.left) * view.width) / box.width;
   const y = view.y + ((e.clientY - box.top) * view.height) / box.height;
-  return x >= 0 && y >= 0 ? { row: Math.floor(y / CELL_H), col: Math.floor(x / CELL_W) } : null;
+  return geo.cellAt(x, y);
 }
 
 // The drawing as an editor (Studio Phase 1). Every gesture is one checked
@@ -326,13 +395,16 @@ function viewOf(src) {
     const ends = sheet.endpoints();
     const list = sheet.wires();
     const byCell = new Map();
+    /** Cells that join a wire southward, through the strip under them. */
+    const downs = new Set();
     for (const w of list) {
       for (const c of w.cells) {
         const k = keyOf(c);
         byCell.set(k, [...(byCell.get(k) ?? []), w]);
+        if (c.down) downs.add(k);
       }
     }
-    return { src, boxes: sheet.boxes(), sources: ends.sources, sinks: ends.sinks, wires: list, byCell };
+    return { src, boxes: sheet.boxes(), sources: ends.sources, sinks: ends.sinks, wires: list, byCell, downs };
   });
 }
 
@@ -387,18 +459,23 @@ function svgEl(tag, className, attrs = {}) {
   return node;
 }
 
-function svgRect(className, { top, left, bottom, right }) {
-  return svgEl("rect", className, {
-    x: left * CELL_W, y: top * CELL_H,
-    width: (right - left + 1) * CELL_W, height: (bottom - top + 1) * CELL_H, rx: 90,
-  });
+/** A cell rectangle; `under` and `over` carry it through the strips beside it. */
+function svgRect(className, { top, left, bottom, right, under, over }) {
+  return svgEl("rect", className, { ...geo.rect({ top, left, bottom, right }, { under, over }), rx: 90 });
 }
 
-const cellRect = (className, { row, col }, span = 1) =>
-  svgRect(className, { top: row, left: col, bottom: row, right: col + span - 1 });
-const centre = ({ row, col }) => `${col * CELL_W + CELL_W / 2},${row * CELL_H + CELL_H / 2}`;
+const cellRect = (className, { row, col, down }, span = 1) =>
+  svgRect(className, { top: row, left: col, bottom: row, right: col + span - 1, under: down });
+const centre = (at) => {
+  const { x, y } = geo.centre(at);
+  return `${x},${y}`;
+};
 
-/** Cells as rectangles, one per straight run, so an outline reads as one. */
+/**
+ * Cells as rectangles, one per straight run, so an outline reads as one.
+ * A one-column run reaches through the gloss strip to the cells it joins
+ * above and below (`down` on a cell says it joins the cell under it).
+ */
 function runs(cells) {
   const across = [];
   for (const { row, col } of cells) {
@@ -411,6 +488,12 @@ function runs(cells) {
     const above = r.left === r.right && out.find((o) => o.left === r.left && o.right === r.left && o.bottom + 1 === r.top);
     if (above) above.bottom = r.top;
     else out.push(r);
+  }
+  const down = new Set(cells.filter((c) => c.down).map(keyOf));
+  for (const r of out) {
+    if (r.left !== r.right) continue;
+    r.under = down.has(keyOf({ row: r.bottom, col: r.left }));
+    r.over = down.has(keyOf({ row: r.top - 1, col: r.left }));
   }
   return out;
 }
@@ -427,6 +510,7 @@ function showOverlays() {
   if (selected?.kind === "node") svg.append(svgRect("overlay selected", selected.box));
   if (selected?.kind === "wire") {
     const group = svgEl("g", "overlay selected-wire");
+    // Each cell reaches through the strip to the cell it joins below.
     selected.wire.cells.forEach((c) => group.append(cellRect("", c)));
     svg.append(group);
   }
@@ -479,7 +563,8 @@ function selectBranch(sink) {
   before.forEach((line, row) =>
     line.forEach((ch, col) => {
       const at = { row, col };
-      if (ch !== (after[row]?.[col] ?? " ") && current().byCell.has(keyOf(at))) cells.push(at);
+      const k = keyOf(at);
+      if (ch !== (after[row]?.[col] ?? " ") && current().byCell.has(k)) cells.push({ ...at, down: current().downs.has(k) });
     }),
   );
   select({ kind: "branch", sink, cells });
@@ -488,7 +573,7 @@ function selectBranch(sink) {
 /** Says something about the drawing until the next action: a refusal, or
  * what the selection is. Empty clears it. */
 function showStatus(text = "", kind = "") {
-  statusLine.textContent = text;
+  layer.say(statusLine, text);
   statusLine.className = kind ? `drawing-status ${kind}` : "drawing-status";
 }
 
@@ -527,7 +612,7 @@ function refuse({ row, col, reason }) {
   if (!svg) return;
   const cell = cellRect("refused", { row, col });
   svg.append(cell);
-  const tip = el("div", "refusal", reason);
+  const tip = layer.say(el("div", "refusal"), reason);
   place(tip, { row: row + 1, col });
   drawing.append(tip);
   setTimeout(() => (tip.remove(), cell.remove()), 2800);
@@ -538,9 +623,10 @@ function clientOf({ row, col }) {
   const svg = drawing.querySelector("svg");
   const view = svg.viewBox.baseVal;
   const box = svg.getBoundingClientRect();
+  const { x, y } = geo.rect({ top: row, left: col, bottom: row, right: col });
   return {
-    x: ((col * CELL_W - view.x) * box.width) / view.width + box.left,
-    y: ((row * CELL_H - view.y) * box.height) / view.height + box.top,
+    x: ((x - view.x) * box.width) / view.width + box.left,
+    y: ((y - view.y) * box.height) / view.height + box.top,
   };
 }
 
@@ -797,6 +883,8 @@ function closeMenu() {
 function openMenu(at, from) {
   closeMenu();
   const offered = doc().palette(from?.row, from?.col);
+  // Every word can be found by how it is typed, shown or not.
+  offered.forEach((c) => (c.reading = reading(c.word)));
   menu = el("div", "palette");
   menu.setAttribute("role", "dialog");
   menu.setAttribute("aria-label", "Place a node");
@@ -836,16 +924,21 @@ function openMenu(at, from) {
 
   const show = () => {
     const q = filter.value.trim().toLowerCase();
-    const items = offered.filter((c) => !q || c.word.includes(q) || c.gloss.toLowerCase().includes(q));
+    const items = offered.filter(
+      (c) => !q || c.word.includes(q) || c.reading.includes(q) || c.gloss.toLowerCase().includes(q),
+    );
     list.replaceChildren(
       ...items.map((c, i) => {
         const item = el("li");
         item.setAttribute("role", "option");
         if (i === 0) item.classList.add("first");
         const arity = `${c.inputs}→${c.outputs}`;
-        item.append(el("span", "word", c.word), el("span", "gloss", c.gloss), el("span", "arity", arity));
+        const word = el("span", "word", c.word);
+        if (layer.shown) word.append(el("span", "reading", c.reading));
+        const gloss = layer.message(c.gloss);
+        item.append(word, el("span", "gloss", gloss), el("span", "arity", arity));
         if (c.mirror) item.append(el("span", "mirror", `⇄ ${c.mirror}`));
-        item.title = c.mirror ? `${c.gloss}; its mirror ${c.mirror} is the dual` : c.gloss;
+        item.title = c.mirror ? `${gloss}; its mirror ${layer.message(c.mirror)} is the dual` : gloss;
         item.addEventListener("pointerdown", (e) => e.stopPropagation());
         item.addEventListener("click", (e) => {
           e.stopPropagation();
@@ -865,16 +958,25 @@ function openMenu(at, from) {
   menu.addEventListener("pointerdown", (e) => e.stopPropagation());
   menu.addEventListener("click", (e) => e.stopPropagation());
   show();
-  // Fixed over the page rather than inside the drawing's scroll box, which
-  // would clip it: below the drop point, or above it when there's no room.
+  // A flip of the layer shows the list again and moves it with its cell.
+  Object.assign(menu, { at, show });
   document.body.append(menu);
+  placeMenu();
+  // After the click that ends the drag, which would take focus back.
+  setTimeout(() => filter.focus({ preventScroll: true }));
+}
+
+/**
+ * Fixed over the page rather than inside the drawing's scroll box, which
+ * would clip it: below the drop point, or above it when there's no room.
+ */
+function placeMenu() {
+  const { at } = menu;
   const below = clientOf({ row: at.row + 1, col: at.col });
   const above = clientOf(at).y - menu.offsetHeight - 8;
   const room = below.y + menu.offsetHeight + 8 <= innerHeight;
   menu.style.left = `${Math.max(8, Math.min(below.x, innerWidth - menu.offsetWidth - 8))}px`;
   menu.style.top = `${Math.max(8, room || above < 8 ? below.y : above)}px`;
-  // After the click that ends the drag, which would take focus back.
-  setTimeout(() => filter.focus({ preventScroll: true }));
 }
 
 document.addEventListener("pointerdown", (e) => {
@@ -928,12 +1030,13 @@ function showTraced({ failed, error, stopped }) {
 }
 
 function showTrace(state, detail = "", at = null) {
-  traceState.title = [FIRST_CALL, detail].filter(Boolean).join(" ");
+  const title = [FIRST_CALL, detail].filter(Boolean).join(" ");
+  layer.say(traceState, title, { title: true });
   if (!at) return void traceState.replaceChildren(state);
   // One-based, like the diagnostics.
   const jump = el("button", "link", `runtime error ${at.row + 1}:${at.col + 1}`);
   jump.type = "button";
-  jump.title = `${traceState.title} Click to show where it failed.`;
+  layer.say(jump, `${title} Click to show where it failed.`, { title: true });
   jump.addEventListener("click", () => jumpTo(at));
   traceState.replaceChildren(jump);
 }
@@ -986,11 +1089,9 @@ function showBadges(svg) {
   for (const { wire, value } of traced.values) {
     const w = list[wire];
     if (!w) continue;
-    const at = anchor(w.cells);
     const badge = svgEl("g", "badge");
     const label = svgEl("text", "", {
-      x: at.col * CELL_W + CELL_W / 2,
-      y: at.row * CELL_H + CELL_H / 2,
+      ...geo.centre(anchor(w.cells)),
       "text-anchor": "middle",
       "dominant-baseline": "central",
     });
@@ -1057,7 +1158,7 @@ function showOutputAge() {
 function say(text, className = "hint") {
   outputRev = null;
   outputMs = "";
-  output.replaceChildren(el("span", className, text));
+  output.replaceChildren(layer.say(el("span", className), text));
   showOutputAge();
 }
 
@@ -1088,12 +1189,12 @@ function finish(job, result) {
     const { at } = result;
     const text = at ? `error ${at.row + 1}:${at.col + 1} ${at.code}: ${at.message}` : result.error;
     if (at) {
-      const failure = el("button", "failure", text);
+      const failure = layer.say(el("button", "failure"), text);
       failure.type = "button";
       failure.addEventListener("click", () => jumpTo(at));
       output.replaceChildren(failure);
     } else {
-      output.replaceChildren(el("span", "failure", text));
+      output.replaceChildren(layer.say(el("span", "failure"), text));
     }
   } else if (result.diagnostics.some((d) => d.severity === "error")) {
     say("The sheet has errors, so it can’t run yet. See Diagnostics.");
@@ -1293,6 +1394,9 @@ async function main() {
     drawing.replaceChildren(el("p", "hint", "The playground needs WebAssembly, which didn’t load."));
     throw e;
   }
+  readings.checked = store.get("readings") !== "false";
+  layer = new Layer({ on: readings.checked, rowPitch: row_pitch, annotate, changed: relayer });
+  geo = layer.geometry;
   trans = new Transliterator();
   const entries = table();
   keys = new Set(["/", ...entries.flatMap(([k]) => [...k])]);

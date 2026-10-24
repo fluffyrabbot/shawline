@@ -1,12 +1,23 @@
-// The guided tour: six moves on 03-double that show the drawing is an
-// editor. Each step names what to do, rings the cells to press on, and
-// advances by itself once the sheet shows the step was done, so it reads
-// the program's state rather than the clicks that got there. It only moves
-// forward: an undo that happens to satisfy a later step just skips ahead.
+// The guided tour on 03-double: how to read the sheet, then six moves that
+// show the drawing is an editor. Each step names what to do, rings the
+// cells to look at or press on, and advances by itself once the step was
+// done: a look at the gloss layer, or a sheet that shows the move, so it
+// reads the program's state rather than the clicks that got there. It only
+// moves forward: an undo that happens to satisfy a later step just skips
+// ahead.
 
 export const TOUR_EXAMPLE = "03-double";
 
 const STEPS = [
+  {
+    // Written with its readings, so it is never annotated.
+    plain: true,
+    text: "Read the sheet. Under each word is its reading, the keys that type it: ·𐑥𐑱𐑯 reads =mayn, " +
+      "and a primitive shows its name, so 𐑐 is add. Hold Alt (⌥ on a Mac) by itself to flip the readings " +
+      "until you let go; the Readings switch sets them for good.",
+    rings: (m) => [m.title, m.primitive].filter(Boolean),
+    done: (m, event) => event === "looked",
+  },
   {
     text: "Cut a wire. Click the wire that runs into ▶ 𐑬 at the right of ·𐑥𐑱𐑯, then press Delete.",
     rings: (m) => (m.outWire ? runs(m.outWire.cells) : []),
@@ -35,7 +46,7 @@ const STEPS = [
   {
     text: "Press Run. Every gesture rewrote the source text, so ⌘Z undoes any of them.",
     rings: () => [],
-    done: (m, ran) => ran,
+    done: (m, event) => event === "ran",
   },
 ];
 
@@ -58,14 +69,23 @@ function runs(cells) {
 const inside = (r, { row, col }) => row > r.top && row < r.bottom && col > r.left && col < r.right;
 
 /**
- * What the tour needs of ·𐑥𐑱𐑯: its box, its output arrowhead and the wire
- * into it, its first node with that node's output tee, and its constant.
- * Anything missing is undefined, and its step rings nothing.
+ * What the tour needs of ·𐑥𐑱𐑯: its title with the strip under it, its box,
+ * its output arrowhead and the wire into it, its first node with that
+ * node's output tee, and its constant; and the sheet's first node that
+ * calls a primitive, 𐑐. Anything missing is undefined, and its step rings
+ * nothing.
  */
 function mainOf(view) {
   const lines = view.src.split("\n");
+  // Columns count code points, and a Shavian letter is two UTF-16 units.
+  const inner = (b, row) => [...(lines[row] ?? "")].slice(b.left + 1, b.right).join("").trim();
+  const primitive = view.boxes.find(
+    (b) => b.kind === "node" && Array.from({ length: b.bottom - b.top - 1 }, (_, i) => inner(b, b.top + 1 + i)).includes("𐑐"),
+  );
   const box = view.boxes.find((b) => b.kind === "definition" && lines[b.top]?.includes("·𐑥𐑱𐑯"));
-  if (!box) return {};
+  if (!box) return { primitive };
+  const left = [...lines[box.top].slice(0, lines[box.top].indexOf("·𐑥𐑱𐑯"))].length;
+  const title = { top: box.top, left, bottom: box.top, right: left + 3, under: true };
   const sink = view.sinks.find((s) => s.col === box.right && s.row > box.top && s.row < box.bottom);
   const outWire = sink && view.wires.find((w) => w.cells.some((c) => c.row === sink.row && c.col === sink.col - 1));
   const node = view.boxes.find((b) => b.kind === "node" && inside(box, { row: b.top, col: b.left }));
@@ -74,17 +94,20 @@ function mainOf(view) {
   const onNode = (s) =>
     view.boxes.some((b) => b.kind === "node" && s.row >= b.top && s.row <= b.bottom && s.col >= b.left && s.col <= b.right);
   const constant = view.sources.find((s) => inside(box, s) && !onNode(s));
-  return { box, sink, outWire, node, tee, constant };
+  return { title, primitive, box, sink, outWire, node, tee, constant };
 }
 
 export class Tour {
   /**
    * `host` is the strip that shows the step; `changed` is called whenever
    * the rings may differ, so the drawing can redraw its overlays.
+   * `message(text)` is how a step's text is shown: with readings while the
+   * gloss layer shows.
    */
-  constructor(host, changed) {
+  constructor(host, changed, message = (text) => text) {
     this.host = host;
     this.changed = changed;
+    this.message = message;
     this.step = -1;
     this.parts = {};
     this.counter = host.querySelector(".tour-count");
@@ -114,17 +137,25 @@ export class Tour {
     this.changed();
   }
 
-  /** Reads a fresh sheet, advancing past every step it shows done. */
-  update(view, ran = false) {
+  /**
+   * Reads a fresh sheet, advancing past every step it shows done. `event`
+   * is what just happened besides: `"ran"` or `"looked"`.
+   */
+  update(view, event = null) {
     if (!this.active) return;
     this.parts = mainOf(view);
-    while (!this.finished && STEPS[this.step].done(this.parts, ran)) this.step++;
+    while (!this.finished && STEPS[this.step].done(this.parts, event)) this.step++;
     this.show();
   }
 
   /** A run finished cleanly. */
   ran(view) {
-    this.update(view, true);
+    this.update(view, "ran");
+  }
+
+  /** The gloss layer was looked at: a peek ended, or the switch was turned. */
+  looked(view) {
+    this.update(view, "looked");
   }
 
   advance() {
@@ -135,7 +166,8 @@ export class Tour {
   show() {
     const total = STEPS.length;
     this.counter.textContent = this.finished ? "Done" : `${this.step + 1} of ${total}`;
-    this.text.textContent = this.finished ? FINISHED : STEPS[this.step].text;
+    const step = STEPS[this.step];
+    this.text.textContent = this.finished ? this.message(FINISHED) : step.plain ? step.text : this.message(step.text);
     this.next.textContent = this.finished ? "Close" : "Skip";
     this.changed();
   }
