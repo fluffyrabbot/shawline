@@ -1,6 +1,5 @@
 //! Readings: transliteration run backwards, for the gloss layer (SPEC §13,
-//! Reading). The signatures are a contract (PLAN P9); the bodies are thin
-//! first versions.
+//! Reading). The signatures are a contract (PLAN P9).
 
 use std::ops::Range;
 

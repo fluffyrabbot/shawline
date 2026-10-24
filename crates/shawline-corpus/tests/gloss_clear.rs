@@ -1,7 +1,7 @@
 //! The P9 gate for the gloss layer (PLAN P9), over every valid corpus
 //! program: no gloss the strip shows overlaps a vertical stroke, leaves its
 //! strip, sits off its word's centre, or comes within one gloss character of
-//! another gloss.
+//! another gloss. Every valid program also keeps a `.gloss` dump.
 //!
 //! Strokes are read from the recognized diagram rather than from the
 //! renderer, so this check doesn't share the placement's reasoning.
@@ -71,6 +71,9 @@ fn shown_glosses_keep_clear_of_strokes_and_each_other() {
             && fs::read_to_string(program.with_extension("check")).is_ok_and(|c| c.is_empty());
         if !valid {
             continue;
+        }
+        if !program.with_extension("gloss").exists() {
+            failures.push(format!("{name} has no .gloss: create it empty, then bless the gloss stage"));
         }
         let doc = Doc::new(fs::read_to_string(&program).unwrap());
         let (grid, diagram) = (doc.grid().unwrap(), doc.diagram().unwrap());

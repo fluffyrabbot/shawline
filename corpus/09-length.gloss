@@ -1,0 +1,18 @@
+0:2 𐑤𐑧𐑙𐑔 length shown
+2:3 ·𐑤𐑧𐑙𐑔 =length shown
+5:2 𐑤𐑦𐑕𐑑 list shown
+5:18 𐑦 i same shown
+6:11 𐑯𐑦𐑤 nil shown
+13:20 𐑕 s uncons shown
+13:42 𐑐 p add shown
+13:58 𐑬 ow shown
+14:28 𐑤𐑧𐑙𐑔 length shown
+20:3 ·𐑥𐑱𐑯 =mayn shown
+23:10 𐑟 z cons shown
+23:22 𐑟 z cons shown
+23:30 𐑤𐑧𐑙𐑔 length shown
+23:42 𐑢𐑳𐑯 wun shown
+24:3 𐑯𐑦𐑤 nil shown
+27:23 𐑯𐑦𐑤 nil shown
+27:30 𐑤𐑧𐑙𐑔 length shown
+27:42 𐑑𐑵 too shown
