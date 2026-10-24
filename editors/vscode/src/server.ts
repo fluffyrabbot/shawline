@@ -2,7 +2,12 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import * as vscode from 'vscode';
-import { LanguageClient, LanguageClientOptions, ServerOptions } from 'vscode-languageclient/node';
+import {
+  DidChangeConfigurationNotification,
+  LanguageClient,
+  LanguageClientOptions,
+  ServerOptions,
+} from 'vscode-languageclient/node';
 
 const INSTALL_COMMAND = 'cargo install --path crates/shawline-lsp';
 
@@ -22,6 +27,7 @@ export class ServerController {
     const clientOptions: LanguageClientOptions = {
       documentSelector: [{ language: 'shawline' }],
       outputChannelName: 'Shawline',
+      initializationOptions: { gloss: glossSetting() },
     };
     const client = new LanguageClient('shawline', 'Shawline', serverOptions, clientOptions);
     try {
@@ -44,6 +50,18 @@ export class ServerController {
     await this.stop();
     await this.start();
   }
+
+  /** Tells the running server that `shawline.gloss` changed; it republishes its diagnostics. */
+  async sendGloss(): Promise<void> {
+    await this.client?.sendNotification(DidChangeConfigurationNotification.type, {
+      settings: { shawline: { gloss: glossSetting() } },
+    });
+  }
+}
+
+/** Whether hovers and messages show readings (PLAN P9, the gloss layer). */
+function glossSetting(): boolean {
+  return vscode.workspace.getConfiguration('shawline').get<boolean>('gloss', true);
 }
 
 /**

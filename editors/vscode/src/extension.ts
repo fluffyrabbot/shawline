@@ -15,8 +15,11 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('shawline.installFont', () => installFont(context)),
     vscode.commands.registerCommand('shawline.restartServer', () => server?.restart()),
     vscode.workspace.onDidChangeConfiguration((event) => {
+      // A restart reads the gloss setting afresh, so it needs no separate update.
       if (event.affectsConfiguration('shawline.serverPath')) {
         void server?.restart();
+      } else if (event.affectsConfiguration('shawline.gloss')) {
+        void server?.sendGloss();
       }
     }),
   );
