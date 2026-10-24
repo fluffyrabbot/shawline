@@ -720,6 +720,44 @@ Contracts (done):
 - The number of dropped glosses across the corpus is recorded here.
 - **By hand:** screenshots of `01-hello` and the largest corpus sheet, glossed and plain, in light and dark. The layer passes if it reads as annotation and never as clutter. If it doesn't, the strip height and gloss scale are tuned here.
 
+Gate (done). K (`673695c`), G (`01140bd`), R (`460211e`) and W (`5b96f85`) merged without conflicts, each branch touching only its own crate.
+- **K, `shawline-word`:**
+  - `reading` puts a `/` only where the longest match from one of the two keys before would run past that key's end, as late as possible (`𐑨𐑦𐑮` reads `ai/r`);
+  - `annotate` follows each run of Shavian letters and namer dots with its reading;
+  - the tests cover every word of up to three letters (120,099), 5,000 seeded random words, and the minimality of every `/`.
+  
+  Accepted deviation: a run of namer dots alone gets no reading, since `Y001`'s message uses the dot as punctuation ("one ·-word").
+- **G, `shawline-glyph`:**
+  - a monoline geometric lowercase for `a`–`z`, `@`, `=` and `/`, with bowls drawn as ellipses;
+  - `d`, `p`, `q` and `u` are derived by transform;
+  - the `@` ring's right side doubles as the inner `a`'s stem;
+  - the specimen gains the gloss alphabet and a sample strip, and the tracked `specimen.svg` is regenerated.
+- **R, `shawline-render`:**
+  - a line bridges a strip only where the plain drawing joins strokes across that row boundary in a blocked column, so box sides and wires stay one chained path;
+  - placement follows `Gloss::span`, counting covered columns the way `gloss_clear` does;
+  - the gloss box is centred in the strip, 93 units clear of both rows' ink;
+  - `STRIP` and `GLOSS_SCALE` are named constants.
+- **W, `shawline-wasm` and `playground/`:**
+  - `layer.js` holds the switch, the peek and each pitch's cell geometry, and `CELL_H` is gone;
+  - wasm passes messages through as written and exports `annotate`, `reading` and `row_pitch`, plus `Doc.render(dark, gloss)` and `Doc.glosses`. The page annotates only while the layer shows, so a flip never needs a second reading or a second run;
+  - the tour opens with a reading step.
+  
+  Accepted beyond the brief:
+  - the peek waits 250 ms of lone Alt before it flips, so Option-typing never flashes the layer;
+  - the palette shows readings and searches by them;
+  - wire cells carry a `down` flag, so a selected wire's highlight runs on through the strips.
+- **Lead diffs:**
+  - `reading.rs`'s contract header loses its "thin first versions" note, as K proposed;
+  - `gloss_clear` fails when a valid program has no `.gloss`. Moving one aside makes it fail.
+- **`.gloss` blessed** for the 17 valid programs after reading all 176 lines. Every reading round-trips, for example `@/rithm@tik` and `faktori/@l`. Every primitive node carries its short name, and port names such as `15-fanout-cross`'s `𐑚` carry only their reading. **Dropped glosses across the corpus: 0.**
+- **Gate:**
+  - 309 tests;
+  - clippy clean on host and wasm;
+  - the playground build (548,447-byte wasm, up from 535,273) and 45 Node checks green, the 8 new ones covering toggle and peek leaving the text unchanged, hit-testing at each pitch, and plain messages with the layer off;
+  - every `.svg` byte-identical without re-blessing, and `render --plain` byte-identical to `38862bf` on all 37 corpus programs.
+- **By hand:** `01-hello` and the first definition of `11-even-odd`, glossed and plain, light and dark, rasterized with `resvg`. Strokes run unbroken through every strip. The user judged the layer to read as annotation, not clutter, so the strip (half a cell) and the gloss scale (half a letter) stay as they are.
+- **In flight: the LSP piece.** K has it as its own crate assignment: the hover `Reading:` line, `annotate` on published diagnostics, and `shawline.gloss`. It gets its own small gate, and P9 closes when it merges.
+
 ## Risks
 
 | Risk | Mitigation |
