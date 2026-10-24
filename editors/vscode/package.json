@@ -55,6 +55,11 @@
           "default": "shawline-lsp",
           "scope": "machine-overridable",
           "markdownDescription": "Path to the `shawline-lsp` language server. A bare name is looked up on `PATH` and in `~/.cargo/bin`. Install it with `cargo install --path crates/shawline-lsp`."
+        },
+        "shawline.gloss": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Show each Shavian word's reading, the keys that type it, in hovers and diagnostic messages, and each primitive's short name in its hover. Turn it off to see Shavian only."
         }
       }
     },

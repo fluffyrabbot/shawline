@@ -28,6 +28,11 @@ struct Client {
 
 impl Client {
     fn start(offer: &[PositionEncodingKind]) -> Client {
+        Client::start_with(offer, Value::Null)
+    }
+
+    /// Starts a server, passing `options` as `initializationOptions`.
+    fn start_with(offer: &[PositionEncodingKind], options: Value) -> Client {
         let (server_side, conn) = Connection::memory();
         let server = std::thread::spawn(move || shawline_lsp::run(&server_side).unwrap());
         let mut client = Client {
@@ -40,7 +45,10 @@ impl Client {
             text: String::new(),
         };
         let caps = json!({ "general": { "positionEncodings": offer } });
-        let init = client.request("initialize", json!({ "capabilities": caps }));
+        let init = client.request(
+            "initialize",
+            json!({ "capabilities": caps, "initializationOptions": options }),
+        );
         client.announced = init["capabilities"]["positionEncoding"].clone();
         client.enc = match client.announced.as_str() {
             Some("utf-32") => Encoding::Utf32,
@@ -109,6 +117,15 @@ impl Client {
         self.diagnostics()
     }
 
+    /// Sends new settings and waits for the diagnostics they republish.
+    fn configure(&self, settings: Value) -> Vec<Value> {
+        self.notify(
+            "workspace/didChangeConfiguration",
+            json!({ "settings": settings }),
+        );
+        self.diagnostics()
+    }
+
     fn at(&self, pos: Position) -> Value {
         json!({ "textDocument": { "uri": URI }, "position": pos })
     }
@@ -116,6 +133,12 @@ impl Client {
     fn hover(&mut self, pos: Position) -> Value {
         let params = self.at(pos);
         self.request("textDocument/hover", params)
+    }
+
+    /// The hover's markdown at `pos`, if there is a hover.
+    fn hover_text(&mut self, pos: Position) -> Option<String> {
+        let hover = self.hover(pos);
+        hover["contents"]["value"].as_str().map(str::to_owned)
     }
 
     /// Applies edits (non-overlapping, as LSP requires) to the local text.
@@ -390,4 +413,87 @@ fn transliteration_sequences() {
         client.type_keys(0, "lv");
         assert_eq!(client.text, "※ 𐑐𐑤𐑝\n");
     }
+}
+
+#[test]
+fn hover_reads_every_word() {
+    let mut client = Client::start(&[PositionEncodingKind::UTF32]);
+    client.open(&corpus("03-double.shaw"));
+    // A comment word and both ports have only their reading.
+    for (line, col, start, end, want) in [
+        (0, 4, 2, 7, "Reading: `dub@l`"),
+        (5, 2, 2, 3, "Reading: `n`"),
+        (5, 24, 24, 25, "Reading: `ow`"),
+    ] {
+        let hover = client.hover(Position::new(line, col));
+        assert_eq!(hover["contents"]["value"], want, "{line}:{col}");
+        assert_eq!(hover["range"], range(line, start, end), "{line}:{col}");
+    }
+    // A primitive keeps its description and adds its key and short name.
+    assert_eq!(
+        client.hover_text(Position::new(5, 12)).unwrap(),
+        "**𐑐** add · 2→1\n\nMirror: **𐑚** subtract · 2→1\n\nReading: `p` · add"
+    );
+    // A title reads with its namer dot, a call of it without.
+    let title = client.hover_text(Position::new(2, 5)).unwrap();
+    assert!(title.starts_with("**·𐑛𐑳𐑚𐑩𐑤** · 1→1\n\n"), "{title}");
+    assert!(title.ends_with("\n\nReading: `=dub@l`"), "{title}");
+    let call = client.hover_text(Position::new(14, 12)).unwrap();
+    assert!(call.starts_with("**·𐑛𐑳𐑚𐑩𐑤** · 1→1\n\n"), "{call}");
+    assert!(call.ends_with("\n\nReading: `dub@l`"), "{call}");
+    // Numbers have nothing to read.
+    assert_eq!(client.hover(Position::new(14, 2)), Value::Null);
+
+    // Words inside `«»` text, and an unknown name, read too.
+    client.open(&corpus("12-guards.shaw"));
+    let hover = client.hover(Position::new(7, 6));
+    assert_eq!(hover["contents"]["value"], "Reading: `wun`");
+    assert_eq!(hover["range"], range(7, 5, 8));
+    client.open(&corpus("95-unknown.shaw"));
+    assert_eq!(
+        client.hover_text(Position::new(5, 8)).as_deref(),
+        Some("Reading: `foo`")
+    );
+}
+
+#[test]
+fn gloss_off_from_the_start() {
+    let mut client = Client::start_with(&[PositionEncodingKind::UTF32], json!({ "gloss": false }));
+    client.open(&corpus("03-double.shaw"));
+    assert_eq!(client.hover(Position::new(0, 4)), Value::Null);
+    assert_eq!(client.hover(Position::new(5, 2)), Value::Null);
+    assert_eq!(
+        client.hover_text(Position::new(5, 12)).unwrap(),
+        "**𐑐** add · 2→1\n\nMirror: **𐑚** subtract · 2→1"
+    );
+    let title = client.hover_text(Position::new(2, 5)).unwrap();
+    assert_eq!(title, "**·𐑛𐑳𐑚𐑩𐑤** · 1→1\n\nInputs: 𐑯\n\nOutputs: 𐑬");
+
+    let diags = client.open(&corpus("95-unknown.shaw"));
+    assert_eq!(diags[0]["message"], "unknown name 𐑓𐑵");
+    assert_eq!(client.hover(Position::new(5, 8)), Value::Null);
+}
+
+#[test]
+fn changing_the_setting_rewords_diagnostics() {
+    let mut client = Client::start(&[PositionEncodingKind::UTF32]);
+    let diags = client.open(&corpus("95-unknown.shaw"));
+    assert_eq!(diags[0]["message"], "unknown name 𐑓𐑵 (foo)");
+
+    let diags = client.configure(json!({ "shawline": { "gloss": false } }));
+    assert_eq!(diags[0]["message"], "unknown name 𐑓𐑵");
+    assert_eq!(client.hover(Position::new(5, 8)), Value::Null);
+
+    // Settings that don't mention the gloss leave it as it was.
+    let diags = client.configure(json!({ "shawline": { "serverPath": "shawline-lsp" } }));
+    assert_eq!(diags[0]["message"], "unknown name 𐑓𐑵");
+    let diags = client.configure(Value::Null);
+    assert_eq!(diags[0]["message"], "unknown name 𐑓𐑵");
+
+    let diags = client.configure(json!({ "shawline": { "gloss": true } }));
+    assert_eq!(diags[0]["message"], "unknown name 𐑓𐑵 (foo)");
+    assert_eq!(
+        client.hover_text(Position::new(5, 8)).as_deref(),
+        Some("Reading: `foo`")
+    );
 }

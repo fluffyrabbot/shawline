@@ -53,11 +53,16 @@ The full table is in `docs/SPEC.md` §13 of the Shawline repository.
 
 Transliteration is `editor.formatOnType` for the `shawline` language. The status bar shows **Shavian** (on) or **ASCII** (off); click it, or run **Shawline: Toggle Shavian Transliteration**, to switch.
 
+## Readings
+
+Hovering any Shavian word shows its **reading**, the keys that type it: `·𐑥𐑱𐑯` reads `=mayn`, and `𐑑𐑣` reads `t/h`. That includes port names, words in `«»` text and comments. A primitive's hover adds its short name, so `𐑐` shows `p` and `add`. Diagnostic messages carry readings too: `unknown name 𐑓𐑵 (foo)`. Readings never enter the text, and there are no inlay hints, because those would push cells out of line. Set `shawline.gloss` to `false` to turn readings off.
+
 ## Settings
 
 | Setting | Default | Purpose |
 |---|---|---|
 | `shawline.serverPath` | `shawline-lsp` | Language server binary |
+| `shawline.gloss` | `true` | Readings in hovers and diagnostic messages |
 
 Defaults applied to `[shawline]` only, each to keep the drawing on its grid:
 

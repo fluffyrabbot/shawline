@@ -1,6 +1,11 @@
 //! The Shawline language server: diagnostics, formatting, semantic tokens,
 //! hovers, and transliteration as you type.
 //!
+//! The gloss layer (PLAN P9) is on unless the client turns it off, with
+//! `{"gloss": false}` in `initializationOptions` or `{"shawline": {"gloss":
+//! false}}` in `workspace/didChangeConfiguration`. It adds each word's reading
+//! to hovers and to diagnostic messages.
+//!
 //! The server is synchronous. Messages are handled strictly in arrival order,
 //! which transliteration relies on: the `didChange` carrying a typed key must
 //! land before the `onTypeFormatting` request that rewrites it.
@@ -14,8 +19,8 @@ use std::error::Error;
 
 use lsp_server::{Connection, ErrorCode, Message, Notification, Request, Response};
 use lsp_types::notification::{
-    DidChangeTextDocument, DidCloseTextDocument, DidOpenTextDocument, Notification as _,
-    PublishDiagnostics,
+    DidChangeConfiguration, DidChangeTextDocument, DidCloseTextDocument, DidOpenTextDocument,
+    Notification as _, PublishDiagnostics,
 };
 use lsp_types::request::{
     Formatting, HoverRequest, OnTypeFormatting, Request as _, SemanticTokensFullRequest,
@@ -48,6 +53,11 @@ pub fn run(connection: &Connection) -> Result<(), BoxError> {
     let mut server = Server {
         enc: Encoding::negotiate(offered),
         docs: HashMap::new(),
+        gloss: params
+            .initialization_options
+            .as_ref()
+            .and_then(|options| options["gloss"].as_bool())
+            .unwrap_or(true),
     };
     connection.initialize_finish(
         id,
@@ -112,6 +122,8 @@ struct Open {
 struct Server {
     enc: Encoding,
     docs: HashMap<Uri, Open>,
+    /// Whether hovers and messages carry readings (`shawline.gloss`).
+    gloss: bool,
 }
 
 impl Server {
@@ -176,12 +188,31 @@ impl Server {
                 let params = PublishDiagnosticsParams::new(p.text_document.uri, Vec::new(), None);
                 return vec![Notification::new(PublishDiagnostics::METHOD.into(), params)];
             }
+            DidChangeConfiguration::METHOD => {
+                let Ok(p) = note.extract::<lsp_types::DidChangeConfigurationParams>(
+                    DidChangeConfiguration::METHOD,
+                ) else {
+                    return Vec::new();
+                };
+                if let Some(gloss) = p.settings["shawline"]["gloss"].as_bool() {
+                    self.gloss = gloss;
+                }
+                // The setting rewords messages, so every open document's go out again.
+                let mut uris: Vec<&Uri> = self.docs.keys().collect();
+                uris.sort_by_key(|uri| uri.as_str());
+                return uris.into_iter().map(|uri| self.publish(uri)).collect();
+            }
             _ => return Vec::new(),
         };
-        let open = &self.docs[&uri];
+        vec![self.publish(&uri)]
+    }
+
+    /// The diagnostics notification for the open document `uri`.
+    fn publish(&self, uri: &Uri) -> Notification {
+        let open = &self.docs[uri];
         let params =
             PublishDiagnosticsParams::new(uri.clone(), self.diagnostics(&open.doc), Some(open.version));
-        vec![Notification::new(PublishDiagnostics::METHOD.into(), params)]
+        Notification::new(PublishDiagnostics::METHOD.into(), params)
     }
 
     fn diagnostics(&self, doc: &Doc) -> Vec<lsp_types::Diagnostic> {
@@ -196,7 +227,11 @@ impl Server {
                 }),
                 code: Some(NumberOrString::String(d.code.to_string())),
                 source: Some("shawline".into()),
-                message: d.message.clone(),
+                message: if self.gloss {
+                    shawline_word::annotate(&d.message)
+                } else {
+                    d.message.clone()
+                },
                 ..Default::default()
             })
             .collect()
@@ -244,7 +279,7 @@ impl Server {
         let at = p.text_document_position_params;
         let doc = &self.docs.get(&at.text_document.uri)?.doc;
         let cell = position::lsp_to_cell(doc.text(), self.enc, at.position);
-        let (start, width, text) = analysis::hover(doc, cell)?;
+        let (start, width, text) = analysis::hover(doc, cell, self.gloss)?;
         Some(Hover {
             contents: HoverContents::Markup(MarkupContent {
                 kind: MarkupKind::Markdown,
