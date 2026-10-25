@@ -56,7 +56,7 @@ Grid ──► shawline-render (SVG) ◄── shawline-glyph (stroke skeletons)
 | `shawline-lsp` | Language server | C2 | — |
 | `shawline-cli` | `shawline` binary over `shawline-doc` and `shawline-render` (no library since P8) | P0 ✅ → lead at each gate | — |
 | `shawline-doc` | One revision of a sheet, each stage read once (`Doc`) | P8 (lead) | the whole crate |
-| `shawline-edit` | Studio's checked edits | P6 → P7 → P8 | the signatures in `src/lib.rs` |
+| `shawline-edit` | Studio's checked edits, repairs and descriptions | P6 → P7 → P8 → P10 | the signatures in `src/lib.rs` |
 | `shawline-corpus` | The oracle: stage registry and runner | P0 ✅ → lead | the whole crate |
 
 ### Entry points
@@ -418,11 +418,11 @@ Two read-only Codex audits, one on UX (checked against WAI, MDN, Blender and Unr
 
 **Next, in order:**
 1. **Document spine** ✅. See P8 below.
-2. **Gloss layer.** See P9 below; it also precedes Phase 2.
-3. **Keyboard and semantic selection.** A real palette combobox with phonemic search, zoom and pan, and a node inspector.
-4. **Repair in place.** `fix` in the playground and as an LSP quick fix, and richer diagnostics.
-5. **Onboarding.** A tour that tracks undo, README prerequisites, VS Code server status, and CLI `--help`.
-6. **Phase 2 order.** Insert rows and columns, constants by mouse, switch outputs, drawing switches, extracting definitions, then scrubbing.
+2. **Gloss layer** ✅. See P9 below.
+3. **Onboarding** (batch 6, items 28–30): a tour that tracks undo, README prerequisites, VS Code server status, and CLI `--help`. It runs as its own session and merges before P10's wave 1 agents start, because both touch the playground.
+4. **Studio Phase 2** (P10 below), with the other two batches folded in:
+   - batch 4 (keyboard and semantic selection, the palette combobox, zoom and pan, the inspector) opens its wave 1;
+   - batch 5 (repair in place, richer diagnostics, transliteration parity) closes its wave 3.
 
 ### P8: Document spine (before Studio Phase 2) ✅
 
@@ -774,6 +774,191 @@ LSP gate (done). K's `17ec32c` merged without conflicts, touching only `shawline
   - the playground build (548,447-byte wasm, unchanged) and its 45 Node checks green.
 - **P9 closed.**
 
+### P10: Studio Phase 2, forgiving
+
+**Goal.** Studio forgives. When there's no room, the editor can make room. Every corpus program can be built from an empty sheet with the mouse or the keyboard alone. Every diagnostic with a known fix offers that fix in one click.
+- This makes P7's gate honest: constants and switches are still typed today.
+- It meets the Studio doc's Phase 2 gate: "every fix one click".
+- Review batches 4 and 5 are folded in. Batch 6 runs on its own first.
+
+**What exists today** (`4cb7e36`):
+- **Edits:** `move_box`, `connect`, `remove_wire`, `disconnect`, `place_node` and `remove_node`. Each takes a `Doc` and returns either the `Doc` it checked or a `Refusal` with a kind. The corpus's `Step` (`shawline-corpus/src/studio.rs`) is the only list of edits as data.
+- **No room is a dead end.** All 36 refusals in the `.studio` dumps are moves refused as `blocked`.
+  - `RefusalKind::Blocked`'s doc comment says that inserting rows or columns may help, but nothing can insert them.
+  - `structure.rs` already describes insertion: a relabelling through `Mapping::by_place` that keeps `Routing::Kept`.
+- **Two kinds of wire are refused as unsupported:** a switch's merged outputs ("can't be wired by mouse yet"), and any wire touching an inline node.
+- **Constants and switches are typed.** A drag can start from an unwired arrowhead, but releasing it on blank canvas is refused ("Drop on a source or a wire"). Switches appear in 7 of the 17 valid programs and inline nodes in two (`05-inline` and `13-fanout`), so P7's mouse-only gate covered only wires and node boxes.
+- **Keyboard and view:**
+  - the drawing handles only undo, Delete and Escape;
+  - the palette filters by meaning, letter or reading, Enter takes the first match, and arrow keys do nothing;
+  - there's no zoom, no pan and no inspector.
+- **Selection:** `app.js` ties the selection to the text it was made on, so any edit drops it.
+- **Repair:** `Doc::fixed()` (P5's `fmt --fix`) exists, but wasm doesn't export it and the language server has no code actions. Hover text is built inside `shawline-lsp/src/analysis.rs`, so Studio can't show it.
+
+**Decisions.**
+
+| Decision | Choice | Rationale |
+|---|---|---|
+| Scope | PLAN's six, in three waves: rows and columns, constants, switch outputs and inline nodes, drawing switches and definitions, extracting a definition, and scrubbing. Ghost repairs are added | Chosen by the user. Definitions and inline nodes join the list because building every corpus program from empty needs them. |
+| Step-through runs | Phase 3 | Chosen by the user. Nothing in Phase 2 needs them, and they are a VM trace feature with their own UI. |
+| Order with the review batches | Batch 4's keyboard and selection model opens wave 1. Batch 5's repairs close wave 3. Batch 6 runs first in its own session | Chosen by the user. Extraction needs multiple selection, and Studio principle 8 asks for a keyboard path for every new gesture, so the model comes first. Batch 6 edits `playground/tour.js`, which W1 also edits. |
+| No room | A `blocked` refusal offers **Make room**. One click inserts the rows or columns needed and retries the edit, as one undo step. Inserting and deleting a row or column are also explicit commands | Chosen by the user. Nothing grows unless the user asks (Studio principle 6), and the retry is checked like any other edit. |
+| Where rows and columns go | A row is inserted or deleted only between a top-level box's top and bottom borders. A column is inserted or deleted only across the rows of the top-level box that holds it, so other definitions stay where they are | SPEC §11 rule 7 allows exactly one blank line between top-level items, so a row between them can't be canonical. Definitions are stacked in the corpus, never side by side, and `place_definition` keeps it so. |
+| How a cut stretches | The inserted cell continues any stroke that joins across the cut (`─`, `┄` or `│`), and is blank elsewhere. A cut never splits text. Where it would fall in the gap between a text and the stroke it meets, it moves to the stroke's side of the gap. Deleting is the exact inverse, refused where a cell is neither blank nor a plain stretch of stroke | Strokes stretch like a spreadsheet's borders (Studio doc). Spacing stays canonical, so the result needs no tidying. |
+| How room is found | `make_room(doc, &Edit)` tries candidates in a fixed order: first growing the parent by exactly what a move overshoots, then 1 to 3 rows or columns at the refusal's cell. It makes at most 12 attempts, each a checked compound edit, and the first that succeeds wins. The result lists what it inserted | It is deterministic and bounded, like the router's budget. The list lets the UI show what was added. |
+| Edits as data | `shawline_edit::Edit` has one variant per edit, and `apply(doc, &Edit)`. Its `Display` is the `.studio` step syntax. It replaces the corpus's `Step` | Make room and repairs both need an edit they can hold and replay. One enum names edits the same way in the dumps, the gates and the UI. |
+| Selection across edits | Every edit returns `Edited { doc, map }`. `map` is P8's `Mapping` from the old diagram's boxes and texts to the new one's. `Placed` gains `map` too | The check already builds this mapping. The page maps its selection through it instead of re-deriving geometry in JS, the duplicated editing logic the Studio doc rejected. These are the review's "stable entity handles". |
+| Text edits | `set_text(doc, at, content)`, `place_text(doc, at, content)` and `remove_text(doc, at)`. A constant grows or shrinks at its left end, so its wire stays put. A name, title, guard or comment grows or shrinks at its right end. A text keeps its role: a constant stays a literal, a name a word, and a title a `·`-word | One edit covers constants, scrubbing, renaming ports and titles, guards, and comments. Growing away from the wire leaves the wire untouched. |
+| Placing text | `place_text` refuses a text that would meet a stroke across spaces, so a new constant is stray (`Y012`) until a `connect` wires it. `remove_text` removes a stray text or a comment, or a constant together with its wire, as `remove_node` does for a node. It refuses names, titles and guards | Wiring stays one edit, `connect`, whatever the source is. |
+| Constants by mouse | Release a drag from an unwired arrowhead on blank canvas and a palette of sources opens. It lists Number, Text and `𐑯𐑦𐑤` first, then callees with an output. The pick is placed and wired as one edit. The palette opened on blank canvas without a drag also offers those three | This is Unreal Blueprints' convention in both directions: Phase 1 drags from sources, this drags from sinks. |
+| Scrubbing | Click a number constant to select it, then drag its digits sideways. Each 8 px is one step, Shift makes a step 10, and the value stays between 0 and the largest Int. The inspector's number field scrubs the same way. Each step edits a preview revision, and the trace follows the latest one (`flight.js`). Releasing commits one undo step. If a step is refused for lack of room for another digit, the value stops at the last one that fit | Chosen by the user. An unselected constant still starts a wire, so the two drags never clash. |
+| Keyboard | A cell cursor, Tab to select, arrow keys to nudge, Enter to connect or edit, `/` for the palette, and a `?` overlay listing every key (details below). Clicking a source and then a sink also connects with the mouse | Studio principle 8 and review item 21, with the Studio doc's "arrow keys nudge the selection". |
+| Palette | A combobox: arrow keys move through the list, Enter picks the highlighted entry, and search matches meaning, letters or reading (P9) | Review item 22. |
+| Zoom and pan | Ctrl or Cmd with the scroll wheel, or a pinch, zooms about the pointer, from 50% to 400%. A Fit command fits the sheet. The default zoom never shrinks a cell below 16 px, so wide sheets scroll | Review item 23. Hit-testing is still a division, now by zoom times pitch (P9's `layer.js`). |
+| Inspector | A panel describing the selection in the same words as editor hover. It has a field for the selection's text (constant, name, title or guard), and each field commits one `set_text` | Review item 24. Hover and Studio share one description, `shawline_edit::describe`, moved there from `shawline-lsp`. |
+| Inline nodes | `place_inline` splices a 1→1 call into a straight stretch of wire, and removing the node joins the wire up again (details below) | An inline node exists only on a wire, so it is placed onto one. |
+| Switch outputs | A switch's merged output is a source, named by its first arm's right through-port at that ordinal. Connecting from it routes each arm's port at that ordinal into one merge, and from there to the sink. The merge goes when its last sink does | One cell names the whole merged output, as P7 names every other source. |
+| Drawing boxes | One edit per Box-tool gesture: an empty box first, then ports and arms added at border cells (details below) | The build gate can then replay any corpus program's geometry exactly, and `C002`'s repair is `set_ports`. |
+| Extracting a definition | `extract` moves a pick into a new definition below the sheet and leaves a call node in its place (details below) | It is the only automatic layout in Studio (Studio doc). It lays out nothing the author drew, since the pick keeps its own composition. |
+| Inline, the inverse | Not in Phase 2 | Chosen by the user. It would have to lay a whole body out inside the caller, where there is rarely room, so it waits for Tidy and `--relayout`. |
+| Repairs | `repairs(doc) -> Vec<Repair { at, code, label, action }>`, where `action` is an `Edit`, a field to fill (`Name(at)`), or a wire to draw (`Wire(at)`). Hovering a diagnostic shows the repaired drawing as a faint ghost, and a click applies it. The language server offers the same repairs as quick fixes. The table below is the contract | Studio principle 5 and the Studio doc's Phase 2 gate. One table serves Studio and editors, since the Studio doc already has the language server calling the same crate. |
+| Richer messages | Review item 26: which input is wrong, expected against actual counts, and a cycle's path. Wording only, in wave 3 | The corpus checks codes and positions, so no expectation changes. |
+| Not in Phase 2 | Step-through runs (Phase 3), Inline, free typing on the canvas (the text pane does it), dragging a wire's segments or bends, the knife, copying as text, and Tidy | Each is outside the chosen scope, and none blocks a gate. |
+
+**Gesture details.**
+- **Keyboard:**
+  - the drawing keeps a cell cursor while it has focus;
+  - Tab and Shift+Tab select objects in row-major order;
+  - arrow keys nudge a selected node (`move_box`) and otherwise move the cursor;
+  - Enter edits a selected text in place, or starts a connection from a selected source or sink: Tab then picks among the glowing ends, and Enter commits;
+  - `/` opens the palette at the cursor, and Escape clears;
+  - every other gesture has a key, listed in a `?` overlay;
+  - a live region reads out the description of the selection.
+- **Inline nodes:**
+  - `place_inline(doc, at, word)` splices a 1→1 call into the straight stretch of wire through `at`;
+  - `remove_node` on its word splices it out and joins the wire up again;
+  - its output is a source named by its word's first cell, and its input arrowhead is a sink that always has its wire;
+  - double-clicking a straight stretch of wire opens the palette of 1→1 callees.
+- **Drawing boxes:**
+  - `place_definition(doc, rect, name)` and `place_switch(doc, rect, guard)` draw an empty box. A definition must share no rows with another top-level item;
+  - `add_port(doc, at, name)` adds a port at a border cell: a definition's named input or output, a node's port, or a switch's selector or through-port;
+  - `add_arm(doc, at, guard)` draws a divider;
+  - `set_ports(doc, corner, inputs, outputs)` resizes a node and keeps its wires by port index. Renaming a node resizes it the same way;
+  - `remove_port`, `remove_arm` and `remove_box` undo these.
+- **Extracting a definition,** `extract(doc, picks, name)`:
+  - the pick is node boxes, inline nodes and constants, all in one scope. A switch can only be picked whole;
+  - the pick moves into a new definition, placed one blank line below the sheet, and keeps its relative placement;
+  - each wire into the pick becomes an input, one per source. Each wire out of it becomes an output, one per source inside. Both are ordered row-major by their first cell;
+  - a port takes the name of the definition input it comes from, and otherwise 𐑨, 𐑚, 𐑒, … in order;
+  - a call node takes the pick's top-left corner, and its wires are re-routed the way a move re-routes them.
+
+**Repairs** (wave 3's contract; any code not listed has no known fix in Phase 2 and gets a richer message instead):
+
+| Code | Repair | Action |
+|---|---|---|
+| `S012` | Move the slipped cell home | `Edit::Fix` (`Doc::fixed`) |
+| `Y003` | Connect to the nearest free sink in scope, or remove the wire | `Connect` or `RemoveWire` |
+| `Y004` | Remove the dangling wire | `RemoveWire` |
+| `Y009`, `Y013`, `C004` | Name it (the inspector field opens) | `Name` |
+| `Y012` | Remove the stray text; a literal can be wired instead | `RemoveText` or `Wire` |
+| `Y019` | Wire it: a connection starts from the arrowhead | `Wire` |
+| `Y001` | Add the namer dot | `SetText` |
+| `Y014`, `Y015`, `Y018` | Square or round its corners | `Restyle` |
+| `C001` | "Did you mean …?" with the known name nearest by edit distance, offered only within 2 | `SetText` |
+| `C002` | Match the callee's ports | `SetPorts` |
+| `C005` | Add `·𐑥𐑱𐑯` below the sheet | `PlaceDefinition` |
+| `C006` | Remove main's inputs | `RemovePort` |
+| `W001` | Add a default arm | `AddArm` |
+| `W002` | Remove the unused input | `RemovePort` |
+
+**Oracle first** (lead, before wave 1):
+- **`Edit` and `apply`** move into `shawline-edit`'s contract, and the corpus's `Step` is removed. Every `.studio` file must stay byte-identical without re-blessing.
+- **`Edited { doc, map }`,** with adapters building the maps by place: unchanged places for wiring edits, and the shifted box for a move. `studio_sequences` checks that every successful step's map sends each kept box and text where the step says.
+- **New `.studio` sections.** The stubs refuse as `unsupported`, so the first bless records that. Each gate re-blesses after reading the diff.
+  - `room`: each blocked move, retried with `make_room`;
+  - `insert`: for each definition, a row before its bottom border, a column at its right border, and a row and a column through its middle, each one deleted again;
+  - `retext`: each number constant gets +1, then ×10, then is set back.
+- **Gate `studio_room`:**
+  - inserting and then deleting, or retexting and then setting back, returns the original text exactly;
+  - every success is canonical, keeps the codes and the output, and matches the original structure relabelled by the shift at `Routing::Kept` (for retext, with that one text's content changed);
+  - a `make_room` success leaves the moved box where the move asked, relative to its parent.
+- **Gate `studio_build`, with a `build` section in `.studio`.** Each valid program is rebuilt from an empty sheet, in this order:
+  - top-level comments;
+  - each definition: `place_definition` at its rectangle, then `add_port` for each port;
+  - inside each definition, boxes in row-major order: `place_node` at a node's corner, or `place_switch` at a switch's rectangle followed by `add_port` for its selector and through-ports and `add_arm` for each divider;
+  - constants and comments inside boxes, with `place_text`;
+  - every connection, sinks in row-major order;
+  - inline nodes last. Each inline node's wire is first connected straight through, then the node is placed on it.
+  
+  Every intermediate state must be canonical. It may gain only codes from an allowance list, measured on the first run as `WHILE_UNWIRED` was. The final sheet must have the original's codes, output and wiring. The gate stays red until wave 2.
+
+**Wave 1: room, text and the keyboard model.**
+- **Contracts (lead):**
+  - `Edit` and `Edited`, as above;
+  - stubs for `insert`, `delete`, `make_room` (returning `Roomed { edited, inserted }`), `set_text`, `place_text` and `remove_text`;
+  - `describe`, moved verbatim from `shawline-lsp`'s hover. The language server calls it, and its hover output stays byte-identical;
+  - `preview` also accepts an unwired sink as the anchor of a drag.
+- **E1** owns `shawline-edit`: the six new edits, exact maps for every edit, and previews from a sink.
+- **W1** owns `shawline-wasm` and `playground/`.
+  - It builds these first, against today's edits: the keyboard model, selection carried through maps, the palette combobox, zoom, pan and Fit, the inspector, and the `?` overlay.
+  - It builds these last: Make room, constants by mouse, scrubbing, and the insert and delete commands. They get a short second round once E1 merges, as W's badges did after T in P7.
+- **Gate:**
+  - the workspace tests pass;
+  - `.studio` is re-blessed after reading the diff. Only the `room`, `insert` and `retext` lines may change, from `refused unsupported` to their outcomes;
+  - `studio_room` passes;
+  - clippy is clean on host and wasm;
+  - the playground build and its Node checks pass, with new checks for:
+    - a keyboard-only rewire of `03-double`;
+    - a palette pick made with the arrow keys;
+    - hit-testing at three zooms and both pitches;
+    - a scrub committing one undo step;
+    - a selection surviving a move, an insertion and a retext;
+  - **by hand:** Make room on a blocked move in the browser, and scrubbing `03-double`'s `21` with the badges following;
+  - **timing:** the p95 of a scrub step (edit and refresh) on `11-even-odd` is recorded here. Over 16 ms, scrubbing moves to a worker.
+
+**Wave 2: the whole language by mouse.**
+- **Contracts (lead):**
+  - `place_definition`, `place_switch`, `add_port`, `remove_port`, `add_arm`, `remove_arm`, `remove_box`, `set_ports` and `place_inline`;
+  - `set_text` on node words;
+  - the P7 contract's two unsupported kinds of wire are lifted, with the semantics above;
+  - `studio_build`'s allowance list.
+- **E2** owns `shawline-edit`: those edits, plus merged outputs and the wires around inline nodes.
+- **W2** owns `shawline-wasm` and `playground/`:
+  - the Box tool: drag a rectangle at top level for a definition, or inside one for a switch;
+  - clicking a border adds a port, and its name field opens;
+  - the `+ arm` handle on a switch's lower edge;
+  - port-count steppers in the inspector;
+  - placing an inline node by double-click;
+  - renaming a node.
+- **Gate:** `studio_build` passes on all 17 valid programs, and its `.studio` lines are blessed after reading. **By hand:** build `04-abs` from an empty sheet with the mouse.
+
+**Wave 3: extract and repair.**
+- **Contracts (lead):**
+  - `extract`, returning `Extracted { edited, definition, call }`;
+  - `restyle(doc, corner, rounded)`;
+  - `repairs`, with `Repair`, `Action` and the table above;
+  - the corpus stage `repair`: one line per offered repair, in the form `ROW:COL CODE EDIT ok DIGEST` or `… refused KIND AT`;
+  - new negative cases under `corpus/static/` for the table's codes the corpus lacks: `Y001`, `Y004`, `Y009`, `Y012`, `Y014`, `Y015`, `C004`, `C006`, `W001` and `W002`;
+  - an `extract` section in `.studio`, extracting every node box on its own.
+- **E3** owns `shawline-edit`: `extract`, `restyle` and `repairs`.
+- **W3** owns `shawline-wasm` and `playground/`:
+  - multiple selection, by Shift-click and marquee, and Make definition;
+  - ghost repairs: shown on hover, applied on click;
+  - the faded drawing labelled "last valid drawing" (review item 27).
+- **L** owns `shawline-lsp` and `editors/vscode`: code actions from `repairs`, and review item 27's VS Code part (uppercase keys, and a convert action for pasted phonemic text).
+- **I** owns the messages of `shawline-ir` and `shawline-syntax`: review item 26.
+- **Gate (Phase 2's gate):**
+  - every code in the table offers its repair on its corpus case, in Studio and as an LSP quick fix. Applying the repair clears that diagnostic without adding an error;
+  - every single-node extraction in `.studio` keeps the program's codes and output, or is refused with a kind;
+  - every earlier gate stays green;
+  - **by hand, the lead and then the user:**
+    - build `04-abs` from an empty sheet with the mouse;
+    - build `03-double` with the keyboard alone;
+    - fix one case of each repairable code in one click;
+    - extract a definition from `11-even-odd`.
+
+**Then Phase 3**, the toy layer, with step-through runs.
+
 ## Risks
 
 | Risk | Mitigation |
@@ -785,4 +970,6 @@ LSP gate (done). K's `17ec32c` merged without conflicts, touching only `shawline
 | `write-fonts` API churn | Pin the version. Fallback: emit a UFO and build it with `fontmake`. |
 | Glosses crowd the drawing | Readings in glyphs half a cell wide are usually narrower than their word. A gloss that doesn't fit is dropped rather than squeezed in (P9), and the layer turns off with one switch. |
 | No suitably licensed English → Shavian lexicon | v1 transliteration needs no dictionary (SPEC §13). |
+| Studio Phase 2 is the largest phase yet | Three waves, each with its oracle written first and its own gate. `studio_build` says exactly what "done" means. |
+| Making room moves the author's work | Only on request, as one undo step, and only by whole rows and columns, which keep every relative placement. |
 | Tail-call detection through switch arms | Defined in SPEC §10; B5 tests it directly and A4 tests constant-stack execution from `.shawasm`. |
