@@ -16,6 +16,7 @@ How Shawline gets built: what is built in what order, who builds it, and how the
 | Character set | Closed repertoire, every character one cell wide | One font can cover everything, so alignment never depends on font fallback. |
 | Verification | One golden corpus plus per-crate unit tests | A single oracle, checked once at each gate (see Orchestration). |
 | Transliteration | Phonemic ASCII keys, no dictionary | Deterministic and license-free. A dictionary is an optional extra. |
+| Reader | Programmers who take Shawline as an art piece or an art substrate, don't read Shavian, and learn it as a hobby | Chosen by the user. Surfaces explain the alphabet and the drawing's grammar, not programming. The pitch leads with mirrored letters naming duals (SPEC §1.2). Readings should teach toward reading unaided rather than stay a permanent translation. How a drawing looks and how it travels count as features. Studio is the front door, and the CLI and VS Code serve readers who stay. A hobbyist who is refused twice without a reason leaves, so every refusal names the rule of the drawing it enforces and a next step. |
 | Teaching the alphabet | An English gloss layer, on by default, drawn beside the program but never part of it (P9) | Every surface should teach Shavian to a newcomer. Because the layer is never source, turning it off costs fluent readers nothing. |
 
 ## Architecture
@@ -419,7 +420,12 @@ Two read-only Codex audits, one on UX (checked against WAI, MDN, Blender and Unr
 **Next, in order:**
 1. **Document spine** ✅. See P8 below.
 2. **Gloss layer** ✅. See P9 below.
-3. **Onboarding** (batch 6, items 28–30): a tour that tracks undo, README prerequisites, VS Code server status, and CLI `--help`. It runs as its own session and merges before P10's wave 1 agents start, because both touch the playground.
+3. **Onboarding** (batch 6, items 28–30, scoped to the reader in Decisions). It runs as its own session and merges before P10's wave 1 agents start, because both touch the playground.
+   - **The tour** tracks undo, and its first step shows why the alphabet is Shavian: 𐑐 adds and its mirror 𐑚 subtracts, so a pair of opposite operations is a pair of mirrored letters.
+   - **One word per concept.** The place a wire starts, the arrowhead it ends at, the two views of a program and the values shown on wires each get one user-facing word. They are recorded in a terminology section of SPEC and used identically in the tour, hints, the status line and refusals (`index.html`, `tour.js`, `app.js`). The P10 terms that will become labels (through-port, merged output, selector, arm) are settled in the same section.
+   - **Shavian in the page's own text has its reading:** "Run main (·𐑥𐑱𐑯)", the brand name, and the CLI's help.
+   - **The README** names the reader, says why Shavian, gives the current status, and lists prerequisites. Studio comes first, the CLI next, VS Code last.
+   - **VS Code** shows the server's status, and **the CLI** gets `--help`.
 4. **Studio Phase 2** (P10 below), with the other two batches folded in:
    - batch 4 (keyboard and semantic selection, the palette combobox, zoom and pan, the inspector) opens its wave 1;
    - batch 5 (repair in place, richer diagnostics, transliteration parity) closes its wave 3.
@@ -795,7 +801,8 @@ Five read-only audits (interaction mechanics, product legibility, conceptual int
 - touch: no `touch-action`, and the palette opens only by double-click;
 - the drawing has no role, name or text outline for screen readers;
 - a drag doesn't scroll the pane at its edges;
-- the product's reader isn't named on any surface, nothing says why the alphabet is Shavian (SPEC §1.2 has the reason), and the place a wire starts is called a tee, a source, a notch and an output tee. A glossary of the words P10 brings to labels (through-port, merged output, selector, arm) is due before wave 2.
+- no surface named a reader. The reader is now in Decisions, and batch 6 carries the consequences: why Shavian, one word per concept (the place a wire starts was a tee, a source, a notch and an output tee), and the P10 label terms;
+- readings of words other than primitives are written in typing notation (`·𐑛𐑳𐑚𐑩𐑤` reads `=dub@l`), which the reader has to learn before it helps. A readable respelling, with the keys taught as typing, would serve the reader better. It changes `shawline_word::reading` and every `.gloss` expectation, so it waits for its own decision.
 
 ### P10: Studio Phase 2, forgiving
 
