@@ -27,11 +27,27 @@ extern "C" {
     fn error(message: &str);
 }
 
+thread_local! {
+    static PANIC: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };
+}
+
 /// Sends Rust panics to the console, so a pipeline bug shows its message
-/// instead of a bare `unreachable` trap.
+/// instead of a bare `unreachable` trap, and keeps it for [`panic_message`].
 #[wasm_bindgen(start)]
 pub fn start() {
-    std::panic::set_hook(Box::new(|info| error(&info.to_string())));
+    std::panic::set_hook(Box::new(|info| {
+        let message = info.to_string();
+        error(&message);
+        PANIC.with(|p| *p.borrow_mut() = Some(message));
+    }));
+}
+
+/// The message of the last panic, if one has happened. The trap that ends
+/// a panic reaches JS as a bare `RuntimeError`, so the page asks here what
+/// went wrong.
+#[wasm_bindgen]
+pub fn panic_message() -> Option<String> {
+    PANIC.with(|p| p.borrow().clone())
 }
 
 /// One revision of a sheet (`shawline_doc::Doc`): its text, and each stage
@@ -99,24 +115,22 @@ impl Doc {
             .collect()
     }
 
-    /// The node and definition boxes, for hit-testing: an array of `{ top,
-    /// left, bottom, right, kind }` (inclusive cell rectangles, `kind`
-    /// `"node"` or `"definition"`), empty when the text has grid errors.
+    /// Every box, for hit-testing: an array of `{ top, left, bottom, right,
+    /// kind }` (inclusive cell rectangles, `kind` `"definition"`,
+    /// `"switch"` or `"node"`), empty when the text has grid errors.
     pub fn boxes(&self) -> Array {
         let Some(diagram) = self.0.diagram() else { return Array::new() };
         diagram
             .boxes
             .iter()
-            .filter_map(|b| {
+            .map(|b| {
                 let kind = match b.parent {
                     None => "definition",
                     // A switch has dividers or a selector on its top edge.
-                    Some(_)
-                        if b.dividers.is_empty() && !b.ports.iter().any(|p| p.side == Dir::N) =>
-                    {
-                        "node"
+                    Some(_) if !b.dividers.is_empty() || b.ports.iter().any(|p| p.side == Dir::N) => {
+                        "switch"
                     }
-                    Some(_) => return None,
+                    Some(_) => "node",
                 };
                 let o = Object::new();
                 set(&o, "top", &(b.rect.top as u32).into());
@@ -124,7 +138,7 @@ impl Doc {
                 set(&o, "bottom", &(b.rect.bottom as u32).into());
                 set(&o, "right", &(b.rect.right as u32).into());
                 set(&o, "kind", &kind.into());
-                Some(JsValue::from(o))
+                JsValue::from(o)
             })
             .collect()
     }

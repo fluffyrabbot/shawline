@@ -3,7 +3,7 @@
 // wires it to the page.
 import init, {
   Doc, table, move_box, connect, remove_wire, disconnect, remove_node, place_node, place_and_connect,
-  Transliterator, row_pitch, annotate, reading,
+  Transliterator, row_pitch, annotate, reading, panic_message,
 } from "./pkg/shawline_wasm.js";
 import { Tour, TOUR_EXAMPLE } from "./tour.js";
 import { Store, TOUR_SLOT } from "./drafts.js";
@@ -53,8 +53,15 @@ const isHigh = (unit) => unit >= 0xd800 && unit <= 0xdbff;
 const isLow = (unit) => unit >= 0xdc00 && unit <= 0xdfff;
 const width = (text, i) => (text.codePointAt(i) > 0xffff ? 2 : 1);
 
+// A leading byte-order mark isn't a cell (shawline-grid skips it), so row 0's
+// columns start after it.
+const BOM = "\ufeff";
+
+/** The text's rows, without a leading byte-order mark. */
+const rowsOf = (text) => (text.startsWith(BOM) ? text.slice(1) : text).split("\n");
+
 function offsetOf(text, row, col) {
-  let i = 0;
+  let i = row === 0 && text.startsWith(BOM) ? 1 : 0;
   for (let r = 0; r < row; r++) {
     const next = text.indexOf("\n", i);
     if (next < 0) return text.length;
@@ -66,7 +73,8 @@ function offsetOf(text, row, col) {
 
 function posOf(text, offset) {
   const before = text.slice(0, offset);
-  const lineStart = before.lastIndexOf("\n") + 1;
+  let lineStart = before.lastIndexOf("\n") + 1;
+  if (lineStart === 0 && before.startsWith(BOM)) lineStart = 1;
   return { row: before.split("\n").length - 1, col: [...before.slice(lineStart)].length };
 }
 
@@ -228,7 +236,8 @@ const doc = () => docs.get(editor.value);
 function changed() {
   rev++;
   const lines = editor.value.split("\n");
-  const cols = Math.max(0, ...lines.map((l) => [...l].length));
+  // Not Math.max(...): a paste of some 100,000 lines overflows its arguments.
+  const cols = lines.reduce((widest, l) => Math.max(widest, [...l].length), 0);
   editor.style.width = `${cols + 2}ch`;
   editor.style.height = `calc(${lines.length + 1}em + var(--pad))`;
   saveDraft();
@@ -240,12 +249,32 @@ function changed() {
 }
 
 function refresh() {
+  // Reading and drawing run here, unbounded: a sheet that freezes the page
+  // leaves the mark, and the next load opens the original instead.
+  const marked = Boolean(slot) && store.markDrawing(slot);
   shown = doc().diagnostics();
   tour.update(current());
   showProblems();
   showDrawing();
   scheduleTrace();
+  if (marked) store.unmarkDrawing();
 }
+
+// Anything thrown and not caught (a Rust panic arrives as a bare
+// RuntimeError) would otherwise leave a stale drawing and say nothing.
+function showFailure(error) {
+  let panic;
+  try {
+    panic = panic_message();
+  } catch {
+    // The package never loaded, so there was no panic to ask about.
+  }
+  const message = panic ?? String(error?.message ?? error);
+  statusLine.textContent = `Something went wrong inside the playground (${message}). Your text is saved; reload the page to continue.`;
+  statusLine.className = "drawing-status refused";
+}
+addEventListener("error", (e) => showFailure(e.error ?? e.message));
+addEventListener("unhandledrejection", (e) => showFailure(e.reason));
 
 function el(tag, className, text) {
   const node = document.createElement(tag);
@@ -417,7 +446,7 @@ const sinkAt = (at, view = current()) => view.sinks.find((s) => same(s, at));
 const wireAt = (at, view = current()) => (view.byCell.get(keyOf(at)) ?? []).find((w) => w.source) ?? null;
 /** A wire runs through the cell, but none the mouse can edit. */
 const lockedAt = (at) => (current().byCell.get(keyOf(at))?.length ?? 0) > 0 && !wireAt(at);
-const charAt = ({ row, col }) => [...(editor.value.split("\n")[row] ?? "")][col] ?? " ";
+const charAt = ({ row, col }) => [...(rowsOf(editor.value)[row] ?? "")][col] ?? " ";
 
 drawing.addEventListener("click", (e) => {
   // The click that ends a drag isn't a request for the caret.
@@ -432,10 +461,11 @@ drawing.addEventListener("click", (e) => {
   else if (wire) select({ kind: "wire", at, wire });
   else if (box?.kind === "node" && !lockedAt(at)) select({ kind: "node", box });
   else {
-    // The press already said why a locked wire can't be selected; the caret
-    // goes to it, since the text is where it can be edited.
     select(null);
-    jumpTo(at, false);
+    // On a character (a locked wire, a name, a border) the caret goes to
+    // it, since the text is where it can be edited. A click on blank sheet
+    // only deselects, so focus stays here and Delete can't reach the text.
+    if (charAt(at) !== " ") jumpTo(at, false);
   }
 });
 
@@ -557,8 +587,8 @@ function selectBranch(sink) {
   const text = cut.doc.text;
   // Only its text is wanted; the drag that may follow cuts it again.
   cut.doc.free();
-  const before = src.split("\n").map((l) => [...l]);
-  const after = text.split("\n").map((l) => [...l]);
+  const before = rowsOf(src).map((l) => [...l]);
+  const after = rowsOf(text).map((l) => [...l]);
   const cells = [];
   before.forEach((line, row) =>
     line.forEach((ch, col) => {
@@ -819,7 +849,10 @@ drawing.addEventListener("pointerup", (e) => {
     // One edit either way: off, or off and on again at the new source.
     const { cut, sink } = finished;
     const source = sourceUnder(at, viewOf(cut));
-    if (!source) return applyText(cut);
+    if (!source) {
+      applyText(cut);
+      return void showStatus("Branch removed. Undo puts it back.");
+    }
     apply(connect(docs.get(cut), source.row, source.col, sink.row, sink.col));
   } else if (finished.kind === "sink") {
     const source = sourceUnder(at);
@@ -1419,6 +1452,7 @@ async function main() {
     listed = false;
   }
   store.migrate(names);
+  const stopped = store.setAsideStopped();
   const last = store.get("example");
   const options = names.map((name) => new Option(optionLabel(name, store.draft(name) !== null), name));
   if (!listed) {
@@ -1447,6 +1481,26 @@ async function main() {
     await startTour(true);
   }
   if (!listed) note("Couldn’t load the list of examples.");
+  if (stopped !== null) offerStopped(stopped);
+}
+
+/**
+ * Says that `stopped`'s draft stopped the last page while it was being
+ * drawn, and offers it back: to open anyway, or to download and inspect.
+ */
+function offerStopped(stopped) {
+  const text = store.stopped(stopped);
+  if (text === null) return;
+  const open = el("button", "", "Open the draft anyway");
+  open.type = "button";
+  open.addEventListener("click", async () => {
+    if (store.restoreStopped(stopped)) await openSlot(stopped);
+  });
+  const download = el("a", "", "download it");
+  download.href = URL.createObjectURL(new Blob([text], { type: "text/plain" }));
+  download.download = `${baseOf(stopped)}.shaw`;
+  say(`The page stopped while drawing your draft of ${label(baseOf(stopped))}, so the original is open. `);
+  output.append(open, " or ", download, ".");
 }
 
 main();

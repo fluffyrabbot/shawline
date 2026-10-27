@@ -106,6 +106,20 @@ test("move_box moves a box in 03-double", () => {
 const double = corpus("03-double.shaw");
 const outputsOf = (src) => shawline.run(src).outputs;
 
+test("boxes names switches, so pressing one moves the switch, not its definition", () => {
+  const abs = corpus("04-abs.shaw");
+  const kinds = sheet(abs).boxes().map((b) => `${b.top}:${b.left} ${b.kind}`);
+  assert.ok(kinds.includes("9:12 switch"), kinds.join(", "));
+  assert.ok(kinds.includes("2:0 definition") && kinds.includes("4:14 node"), kinds.join(", "));
+  const moved = edits.move_box(abs, 9, 12, 0, 1);
+  if (moved.ok) {
+    assert.ok(sheet(moved.text).boxes().some((b) => b.kind === "switch" && b.top === 9 && b.left === 13));
+    assert.ok(sheet(moved.text).boxes().some((b) => b.kind === "definition" && b.top === 2 && b.left === 0));
+  } else {
+    assert.ok(moved.reason, "a refused switch move says why");
+  }
+});
+
 test("remove_wire and connect rebuild 03-double's fan-out", () => {
   const bare = edits.remove_wire(double, 5, 4);
   assert.equal(bare.ok, true, bare.reason);
@@ -484,6 +498,26 @@ test("full or missing storage refuses without throwing", () => {
   const none = new Store(null);
   assert.equal(none.get("theme"), null);
   assert.equal(none.saveDraft("03-double", "mine", "original"), false);
+});
+
+test("a draft whose drawing never finished is set aside on load, and can come back", () => {
+  const store = new Store(memory());
+  store.saveDraft("03-double", "frozen", "original");
+  assert.equal(store.markDrawing("03-double"), true);
+  store.unmarkDrawing();
+  assert.equal(store.setAsideStopped(), null, "a finished drawing leaves nothing to set aside");
+  assert.equal(store.draft("03-double"), "frozen");
+  store.markDrawing("03-double");
+  assert.equal(store.setAsideStopped(), "03-double");
+  assert.equal(store.draft("03-double"), null, "the slot opens its original");
+  assert.equal(store.stopped("03-double"), "frozen");
+  assert.equal(store.get("drawing"), null, "the mark is cleared");
+  assert.equal(store.restoreStopped("03-double"), true);
+  assert.equal(store.draft("03-double"), "frozen");
+  assert.equal(store.stopped("03-double"), null);
+  assert.equal(store.restoreStopped("03-double"), false);
+  store.markDrawing("08-factorial");
+  assert.equal(store.setAsideStopped(), null, "a slot without a draft opens its original anyway");
 });
 
 test("the single pre-draft sheet moves into its example's draft", () => {

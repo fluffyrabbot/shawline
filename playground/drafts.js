@@ -57,6 +57,46 @@ export class Store {
   }
 
   /**
+   * Records that `slot`'s text is being drawn, until `unmarkDrawing`. A
+   * mark still there when the page loads means the last page stopped while
+   * drawing it (a freeze or a crash), so its draft could stop this one too.
+   */
+  markDrawing(slot) {
+    return this.set("drawing", slot);
+  }
+
+  unmarkDrawing() {
+    this.remove("drawing");
+  }
+
+  /**
+   * Clears a mark left by the last page and moves that slot's draft aside,
+   * so opening the slot gives its original. Returns the slot, or null when
+   * nothing was set aside.
+   */
+  setAsideStopped() {
+    const slot = this.get("drawing");
+    this.unmarkDrawing();
+    const draft = slot === null ? null : this.draft(slot);
+    if (draft === null || !this.set(`stopped.${slot}`, draft)) return null;
+    this.remove(`draft.${slot}`);
+    return slot;
+  }
+
+  /** The draft set aside for `slot`, or null when there is none. */
+  stopped(slot) {
+    return this.get(`stopped.${slot}`);
+  }
+
+  /** Makes a set-aside draft the slot's draft again; false when it can't. */
+  restoreStopped(slot) {
+    const text = this.stopped(slot);
+    if (text === null || !this.set(`draft.${slot}`, text)) return false;
+    this.remove(`stopped.${slot}`);
+    return true;
+  }
+
+  /**
    * Moves the one sheet saved before drafts existed (`source`, with the
    * example it came from) into that example's draft. An existing draft
    * wins, and the old key stays until the move has succeeded.

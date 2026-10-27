@@ -76,7 +76,8 @@ const inside = (r, { row, col }) => row > r.top && row < r.bottom && col > r.lef
  * nothing.
  */
 function mainOf(view) {
-  const lines = view.src.split("\n");
+  // Without a leading byte-order mark, which isn't a cell.
+  const lines = view.src.replace(/^\ufeff/, "").split("\n");
   // Columns count code points, and a Shavian letter is two UTF-16 units.
   const inner = (b, row) => [...(lines[row] ?? "")].slice(b.left + 1, b.right).join("").trim();
   const primitive = view.boxes.find(
