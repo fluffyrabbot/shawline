@@ -306,7 +306,7 @@ fn a_wired_sink_takes_no_second_wire() {
 #[test]
 fn connect_refuses_what_it_cannot_name_or_reach() {
     let not_source = connect(DOUBLE, Pos::new(3, 3), Pos::new(5, 10)).unwrap_err();
-    assert!(not_source.reason.contains("feeds a wire"), "{not_source:?}");
+    assert!(not_source.reason.contains("starts a wire"), "{not_source:?}");
     let not_sink = remove_wire(DOUBLE, Pos::new(5, 4)).unwrap();
     let refusal = connect(&not_sink, Pos::new(5, 0), Pos::new(5, 14)).unwrap_err();
     assert!(refusal.reason.contains("arrowheads"), "{refusal:?}");

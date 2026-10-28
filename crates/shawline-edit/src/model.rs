@@ -94,13 +94,13 @@ pub(crate) fn no_source(at: Pos) -> Refusal {
     Refusal::new(
         at,
         RefusalKind::Target,
-        "nothing here feeds a wire: start at an output tee, an input, a constant or an arm's input",
+        "nothing here starts a wire: a source is a node's ├, an input, a constant or an arm's input",
     )
 }
 
 /// The refusal for a cell that isn't an arrowhead, as a sink.
 pub(crate) fn no_sink(at: Pos) -> Refusal {
-    let why = "wires end at arrowheads: a node's input, an output or a switch port";
+    let why = "wires end at arrowheads: a node's input, an output, a selector or a through-port";
     Refusal::new(at, RefusalKind::Target, why)
 }
 

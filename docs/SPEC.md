@@ -418,3 +418,28 @@ The corpus `.check` files list every static diagnostic (grid, shape, syntax, che
 The VM is a register machine with heap-allocated frames. Instructions, values, primitives and the `.shawasm` text format are specified in `shawline-vm/src/bytecode.rs`. Tail calls compile to `TailCall` (§10). Switch guards compile to `JumpIfNe` against a constant, falling through to the default arm or to `NoMatch`.
 
 A frame has at most 65,535 registers. The checker bounds the registers a definition needs by counting its inputs and outputs plus, for every node, constant and switch inside it at any depth, the larger of its number of inputs and its number of outputs. A constant has one output. A switch's inputs are its selector and every arm's input through-ports; its outputs are one arm's output through-ports. A count over 65,535 is `C007`. The count is generous, since registers are reused, but only a definition of tens of thousands of nodes reaches it. It is checked after every other check passes, so it never appears beside another error.
+
+## 16. Terminology
+
+Every surface (Studio, the CLI, the language server and the VS Code extension) uses one word per concept, and the same word everywhere: in the tour, hints, the status line, refusals and labels. The first table holds the words a reader meets first; the second settles the words that name a switch's parts, which Studio Phase 2 turns into labels. Where this spec's own term differs, the surfaces still say the word given here.
+
+| Concept | Word | Not | Spec's term |
+|---|---|---|---|
+| The two views of a program: the characters in the file, and the boxes and wires they draw | **text** and **drawing**. Studio's panes are named Text and Drawing | source, code, canvas, diagram | source text (§2) |
+| The place a wire starts: a `├` on a node's right border, an input's name, a constant or an inline node's word | **source** | tee, notch, output tee, port | source (§7) |
+| The arrowhead a wire ends at | **arrowhead** | sink, input, tip | sink (§7); every sink is an arrowhead |
+| One source's path to one of its arrowheads, on a wire that fans out | **branch** | fork, leg | fan-out (§7) |
+| The values shown on wires after a run, and the switch that shows them | **value**, the **Values** switch: "each wire shows the value it carried" | badge, trace, label | — |
+| How a word sounds, under its row and after it in messages, and the switch that shows it | **reading**, the **Readings** switch | gloss, transliteration, pronunciation | reading (§13) |
+| What types a word | **keys** | spelling, code, ASCII | keys (§13) |
+| A rounded box, a square box | **definition**, **node** | function, block, call box | definition (§5), node (§6) |
+| One file | **sheet** | program, file, page | sheet (§5) |
+
+| Part of a switch | Word | Not | What it is |
+|---|---|---|---|
+| The wire that picks the arm | **selector** | condition, test, input | The wire ending in a `▼` on the switch's top border (§8) |
+| One band of rows between dividers | **arm** | case, branch, lane | An arm runs if its guard matches the selector, or if it is the default arm (§8). Branch is taken by fan-out |
+| An arrowhead on a switch's left or right border | **through-port** | pass, port, gate | It carries a value across the border: in from the left, out on the right (§8) |
+| Where the same-ordinal right through-ports of every arm join outside the switch | **merged output** | switch output, join, merge | One source to every wire leaving it, however many arms feed it (§7, §8) |
+
+`tee` stays the name of the stroke shape (§3). A surface says source when it means the place a wire starts, whatever stroke draws it.
