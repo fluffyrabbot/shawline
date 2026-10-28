@@ -421,12 +421,20 @@ Two read-only Codex audits, one on UX (checked against WAI, MDN, Blender and Unr
 1. **Document spine** ✅. See P8 below.
 2. **Gloss layer** ✅. See P9 below.
 3. **Readings as respellings** ✅ (below). It landed before onboarding, whose tour teaches both readings and keys.
-4. **Onboarding** (batch 6, items 28–30, scoped to the reader in Decisions). It runs as its own session and merges before P10's wave 1 agents start, because both touch the playground.
+4. **Onboarding** ✅ (batch 6, items 28–30, scoped to the reader in Decisions). It runs as its own session and merges before P10's wave 1 agents start, because both touch the playground.
    - **The tour** tracks undo, and its first step shows why the alphabet is Shavian: 𐑐 adds and its mirror 𐑚 subtracts, so a pair of opposite operations is a pair of mirrored letters.
    - **One word per concept.** The place a wire starts, the arrowhead it ends at, the two views of a program and the values shown on wires each get one user-facing word. They are recorded in a terminology section of SPEC and used identically in the tour, hints, the status line and refusals (`index.html`, `tour.js`, `app.js`). The P10 terms that will become labels (through-port, merged output, selector, arm) are settled in the same section.
    - **Shavian in the page's own text has its reading:** "Run main (·𐑥𐑱𐑯)", the brand name, and the CLI's help.
    - **The README** names the reader, says why Shavian, gives the current status, and lists prerequisites. Studio comes first, the CLI next, VS Code last.
    - **VS Code** shows the server's status, and **the CLI** gets `--help`.
+
+   **Landed.**
+   - SPEC §16, Terminology: text and drawing, source, arrowhead, branch, value, reading, keys, definition, node and sheet, and for P10's labels selector, arm, through-port and merged output. Studio's Source pane is now Text, since source names where a wire starts. Two `shawline-edit` refusals said "output tee" and "switch port", and now use the same words.
+   - The tour has 8 steps. The first, answered by Next, shows 𐑐 (p) and its mirror 𐑚 (b) as add and subtract. The palette step teaches keys: type `dub` to find 𐑛𐑳𐑚𐑩𐑤. An undo (the editor's `historyUndo`) back to the text a step started on returns to that step, and redo moves forward through the usual checks. Only an undo goes back, because redrawing the cut wire by hand gives back the text the cut started on.
+   - Readings use the format of `annotate`, `·𐑥𐑱𐑯 (mayn)`, rather than this item's "Run main (·𐑥𐑱𐑯)", so the page reads like its messages. The page's own Shavian (the brand, Run's title, the output hint, the typing help) is marked `data-plain` in `index.html` and follows the Readings switch like every message. The CLI's help writes its readings in.
+   - The CLI: `--help`, `-h` and `help` print the help on stdout and exit 0. A bad command line names what was wrong before the help.
+   - VS Code: a language status item shows the server starting, running, stopped, not found or failed to start, and clicking it restarts the server or opens `shawline.serverPath`.
+   - **Gate:** 314 workspace tests pass under `scripts/capped`. Clippy is clean on host and wasm. The playground build (551,005-byte wasm) and its 49 Node checks pass, two of them new: the first step, and undo and redo. The extension's `tsc` build is green. By hand in Studio, the tour was walked to Done, with a real ⌘Z stepping back from 4 to 3 and ⌘⇧Z forward again. The static readings were checked with Readings on and off. The status item wasn't checked in an editor, and the committed `.vsix` wasn't rebuilt.
 5. **Studio Phase 2** (P10 below), with the other two batches folded in:
    - batch 4 (keyboard and semantic selection, the palette combobox, zoom and pan, the inspector) opens its wave 1;
    - batch 5 (repair in place, richer diagnostics, transliteration parity) closes its wave 3.
