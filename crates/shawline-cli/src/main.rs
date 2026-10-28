@@ -7,11 +7,15 @@ use shawline_doc::Doc;
 use shawline_grid::Diagnostic;
 use shawline_render::{Options, Theme};
 
-const USAGE: &str = "usage: shawline <command> [flags] <file.shaw>
+const HELP: &str = "Shawline, ·𐑖𐑷𐑤𐑲𐑯 (shawlien): a dataflow language you draw.
+
+usage: shawline <command> [flags] <file.shaw>
+       shawline --help
 
 commands:
   check     report diagnostics
-  run       check, then run ·𐑥𐑱𐑯 and print its outputs
+  run       check, then run ·𐑥𐑱𐑯 (mayn), the main definition, and print its
+            outputs
   fmt       print the canonical form (--fix: also move slipped border cells
             home; --write: rewrite the file in place)
   render    print an SVG drawing with each word's reading in a strip under
@@ -20,29 +24,37 @@ commands:
   ast       print the syntax tree
   asm       print the compiled bytecode as .shawasm
 
-Messages follow each Shavian word with its reading, as in 𐑥𐑱𐑯 (mayn).
---plain turns the readings off, in messages and in the drawing.
+flags:
+  --plain   leave out the readings, in messages and in the drawing
+  --help    print this help
+
+Messages follow each Shavian word with its reading, how it sounds, as in
+·𐑥𐑱𐑯 (mayn). The language is described in docs/SPEC.md.
 ";
 
 const COMMANDS: [&str; 7] = ["check", "run", "fmt", "render", "diagram", "ast", "asm"];
 
 fn main() -> ExitCode {
     let args: Vec<String> = env::args().skip(1).collect();
+    if args.iter().any(|a| a == "--help" || a == "-h") || args.first().is_some_and(|a| a == "help") {
+        print!("{HELP}");
+        return ExitCode::SUCCESS;
+    }
     let (flags, rest): (Vec<&String>, Vec<&String>) = args.iter().partition(|a| a.starts_with("--"));
     let flag = |name: &str| flags.iter().any(|f| *f == name);
     let [command, path] = rest.as_slice() else {
-        eprint!("{USAGE}");
-        return ExitCode::from(2);
+        return usage("expected a command and one file");
     };
+    if !COMMANDS.contains(&command.as_str()) {
+        return usage(&format!("unknown command `{command}`"));
+    }
     let allowed: &[&str] = match command.as_str() {
         "fmt" => &["--write", "--fix", "--plain"],
         "render" => &["--dark", "--plain"],
         _ => &["--plain"],
     };
-    let known = COMMANDS.contains(&command.as_str()) && flags.iter().all(|f| allowed.contains(&f.as_str()));
-    if !known {
-        eprint!("{USAGE}");
-        return ExitCode::from(2);
+    if let Some(unknown) = flags.iter().find(|f| !allowed.contains(&f.as_str())) {
+        return usage(&format!("`{command}` takes no flag `{unknown}`"));
     }
     let src = match fs::read_to_string(path) {
         Ok(src) => src,
@@ -110,6 +122,12 @@ fn main() -> ExitCode {
         }
     }
     ExitCode::SUCCESS
+}
+
+/// Says what was wrong with the command line, then prints the help.
+fn usage(problem: &str) -> ExitCode {
+    eprint!("shawline: {problem}\n\n{HELP}");
+    ExitCode::from(2)
 }
 
 /// Writes `text` over `path` without ever leaving it half-written: the new
