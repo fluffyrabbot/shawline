@@ -55,6 +55,26 @@ pub const TABLE: &[(&str, char)] = &[
     ("=", '·'),   // namer dot
 ];
 
+/// Each letter's traditional name, a word it sounds in (SPEC §13): 𐑐 is
+/// "peep". The key panel shows it beside the keys.
+const LETTER_NAMES: &[(char, &str)] = &[
+    ('𐑐', "peep"), ('𐑑', "tot"), ('𐑒', "kick"), ('𐑓', "fee"), ('𐑔', "thigh"), ('𐑕', "so"),
+    ('𐑖', "sure"), ('𐑗', "church"), ('𐑘', "yea"), ('𐑙', "hung"), ('𐑚', "bib"), ('𐑛', "dead"),
+    ('𐑜', "gag"), ('𐑝', "vow"), ('𐑞', "they"), ('𐑟', "zoo"), ('𐑠', "measure"), ('𐑡', "judge"),
+    ('𐑢', "woe"), ('𐑣', "ha-ha"), ('𐑤', "loll"), ('𐑥', "mime"), ('𐑦', "if"), ('𐑧', "egg"),
+    ('𐑨', "ash"), ('𐑩', "ado"), ('𐑪', "on"), ('𐑫', "wool"), ('𐑬', "out"), ('𐑭', "ah"),
+    ('𐑮', "roar"), ('𐑯', "nun"), ('𐑰', "eat"), ('𐑱', "age"), ('𐑲', "ice"), ('𐑳', "up"),
+    ('𐑴', "oak"), ('𐑵', "ooze"), ('𐑶', "oil"), ('𐑷', "awe"), ('𐑸', "are"), ('𐑹', "or"),
+    ('𐑺', "air"), ('𐑻', "err"), ('𐑼', "array"), ('𐑽', "ear"), ('𐑾', "ian"), ('𐑿', "yew"),
+    ('·', "namer dot"),
+];
+
+/// `letter`'s traditional name (SPEC §13), or `None` for a character that
+/// isn't in [`TABLE`].
+pub fn letter_name(letter: char) -> Option<&'static str> {
+    LETTER_NAMES.iter().find(|&&(c, _)| c == letter).map(|&(_, name)| name)
+}
+
 /// Typed between keys to stop them combining (`t/h` is 𐑑𐑣). It produces
 /// no output.
 pub const SEPARATOR: char = '/';

@@ -603,7 +603,7 @@ test("the tour's first step rings ·𐑥𐑱𐑯 with its strip and the 𐑐 nod
   assert.deepEqual({ ...title }, { top: 11, left: 3, bottom: 11, right: 6, under: true });
   assert.deepEqual([primitive.top, primitive.left, primitive.bottom, primitive.right], [4, 10, 7, 14]);
   const text = () => host.querySelector(".tour-text").textContent;
-  assert.match(text(), /·𐑥𐑱𐑯 reads =mayn/);
+  assert.match(text(), /·𐑥𐑱𐑯 reads mayn/);
   assert.doesNotMatch(text(), /\[read\]/, "it writes its readings itself");
   tour.update(view(edits.remove_wire(double, 14, 18).text));
   assert.equal(tour.step, 0, "an edit isn't a look");
@@ -812,12 +812,17 @@ test("messages are plain with the layer off, annotated while it shows, and flip 
 test("glosses give each word its reading and each primitive node its name", () => {
   const words = sheet(double).glosses();
   const at = (row, col) => words.find((g) => g.row === row && g.col === col);
-  assert.deepEqual([at(11, 3).word, at(11, 3).reading, at(11, 3).span, at(11, 3).gloss], ["·𐑥𐑱𐑯", "=mayn", 4, null]);
-  assert.deepEqual([at(5, 12).word, at(5, 12).reading, at(5, 12).gloss], ["𐑐", "p", "add"]);
+  assert.deepEqual([at(11, 3).word, at(11, 3).reading, at(11, 3).keys, at(11, 3).span, at(11, 3).gloss], ["·𐑥𐑱𐑯", "mayn", "=mayn", 4, null]);
+  assert.deepEqual([at(5, 12).word, at(5, 12).reading, at(5, 12).keys, at(5, 12).gloss], ["𐑐", "p", "p", "add"]);
+  const title = at(2, 3);
+  assert.deepEqual([title.word, title.reading, title.keys], ["·𐑛𐑳𐑚𐑩𐑤", "dubəl", "=dub@l"]);
   assert.ok(words.every((g) => typeof g.shown === "boolean"));
   assert.ok(!words.some((g) => /^\d+$/.test(g.word)), "numbers have no reading");
   assert.deepEqual(sheet("\t").glosses(), []);
-  assert.deepEqual([shawline.reading("·𐑥𐑱𐑯"), shawline.reading("𐑣𐑧𐑤𐑴")], ["=mayn", "heloh"]);
+  assert.deepEqual([shawline.reading("·𐑥𐑱𐑯"), shawline.reading("𐑣𐑧𐑤𐑴"), shawline.reading("𐑑𐑣")], ["mayn", "heloh", "t-h"]);
+  assert.deepEqual([shawline.keys("·𐑥𐑱𐑯"), shawline.keys("𐑑𐑣"), shawline.keys("𐑝")], ["=mayn", "t/h", "/v"]);
+  const peep = shawline.table().find(([, letter]) => letter === "𐑐");
+  assert.deepEqual(peep, ["p", "𐑐", "peep"], "the key panel's entry names a word the letter sounds in");
 });
 
 test("a wire's cells say which join it southward, through the strip", () => {

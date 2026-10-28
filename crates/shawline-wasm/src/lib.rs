@@ -93,7 +93,7 @@ impl Doc {
     }
 
     /// Every Shavian word on the sheet in row-major order, for hover: an
-    /// array of `{ row, col, span, word, reading, gloss, shown }`, where
+    /// array of `{ row, col, span, word, reading, keys, gloss, shown }`, where
     /// `span` is the word's length in cells, `gloss` a primitive's short
     /// name (`null` for any other word), and `shown` whether the strip has
     /// room to show it. Empty when the text has grid errors.
@@ -109,6 +109,7 @@ impl Doc {
                 set(&o, "shown", &g.shown().into());
                 set(&o, "gloss", &g.gloss.map_or(JsValue::NULL, JsValue::from));
                 set(&o, "reading", &g.reading.into());
+                set(&o, "keys", &g.keys.into());
                 set(&o, "word", &g.word.into());
                 JsValue::from(o)
             })
@@ -440,18 +441,28 @@ pub fn annotate(message: &str) -> String {
     shawline_word::annotate(message)
 }
 
-/// The keys that type `word` (SPEC §13, Reading): `·𐑥𐑱𐑯` reads `=mayn`.
+/// How `word` sounds (SPEC §13, Reading): `·𐑛𐑳𐑚𐑩𐑤` reads `dubəl`.
 #[wasm_bindgen]
 pub fn reading(word: &str) -> String {
     shawline_word::reading(word)
 }
 
-/// The transliteration table (SPEC §13) as an array of `[keys, letter]`.
+/// The keys that type `word` (SPEC §13): `·𐑛𐑳𐑚𐑩𐑤` is typed `=dub@l`.
+#[wasm_bindgen]
+pub fn keys(word: &str) -> String {
+    shawline_word::keys(word)
+}
+
+/// The transliteration table (SPEC §13) as an array of `[keys, letter,
+/// name]`, where `name` is the letter's traditional name (`peep`).
 #[wasm_bindgen]
 pub fn table() -> Array {
     shawline_word::TABLE
         .iter()
-        .map(|(keys, letter)| Array::of2(&(*keys).into(), &letter.to_string().into()))
+        .map(|&(keys, letter)| {
+            let name = shawline_word::letter_name(letter).unwrap_or_default();
+            Array::of3(&keys.into(), &letter.to_string().into(), &name.into())
+        })
         .collect()
 }
 

@@ -312,9 +312,21 @@ Shawline is typed through **phonemic ASCII transliteration**. Each Shavian lette
 - **The namer dot is `=`,** because `.` is a stroke.
 - **Only word runs are transliterated.** Inside a word run, `v` is 𐑝. Anywhere else `v` is left alone, so it stays the `▼` arrowhead fallback. To start a word with 𐑝, type `/v`. Other characters (digits, spaces, marks, strokes) always pass through unchanged.
 
-**Reading.** A word's reading is the keys that type it: `·𐑥𐑱𐑯` reads `=mayn` and `𐑣𐑧𐑤𐑴` reads `heloh`. The reading puts `/` between two keys only where the longest match would otherwise read them as one letter (`𐑑𐑣` reads `t/h`), and a word that starts with 𐑝 reads `/v`. Transliterating a reading gives back its word. Readings, and the primitives' short names (§9), appear only in views of a sheet: the drawing's gloss strip, editor hover, the Studio palette and diagnostic messages. They are never source text, and no dump the corpus checks contains them except `.gloss`. User-defined words get a reading and nothing more; there is no bundled lexicon of meanings.
+**Reading.** A word's reading says how it sounds, and its keys are what types it: `·𐑛𐑳𐑚𐑩𐑤` reads `dubəl` and is typed `=dub@l`. The reading is the keys with three changes, which exist only for the typist:
 
-`shawline-word` owns the table (`TABLE`) and readings (`reading`, `annotate`), and a test keeps this copy in step with the table. The language server may also offer whole-word suggestions from the ReadLex lexicon (MIT-licensed; only its Latin→Shavian columns are bundled), but source text never depends on it.
+| Letter | Key | Reads |
+|---|---|---|
+| 𐑩 ado | `@` | `ə` |
+| 𐑼 array | `@r` | `ər` |
+| 𐑾 ian | `i@` | `iə` |
+| · namer dot | `=` | nothing |
+
+- **A `-` keeps two letters apart** where their spellings would otherwise read as a third letter's: `𐑑𐑣` reads `t-h`, as it is typed `t/h`. A word that starts with 𐑝 needs none: `𐑝𐑧𐑮𐑦` reads `veri`.
+- **Reading a reading back** by longest match over these spellings gives the word without its namer dots. Transliterating the keys gives back the word itself.
+- **Where each appears.** Readings, and the primitives' short names (§9), appear only in views of a sheet: the drawing's gloss strip, editor hover, the Studio palette and diagnostic messages. Keys appear where a word is typed or looked up by typing: editor hover, the drawing's hover title, palette search and Studio's key panel. Neither is ever source text, and no dump the corpus checks contains them except `.gloss`, which holds readings.
+- User-defined words get a reading and nothing more; there is no bundled lexicon of meanings.
+
+`shawline-word` owns the table (`TABLE`), readings (`reading`, `annotate`) and keys (`keys`), and a test keeps both tables here in step with it. The language server may also offer whole-word suggestions from the ReadLex lexicon (MIT-licensed; only its Latin→Shavian columns are bundled), but source text never depends on it.
 
 ## 14. Diagnostics
 

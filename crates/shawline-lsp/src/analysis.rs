@@ -198,8 +198,9 @@ fn callee<'a>(sheet: &'a Sheet, name: &Name) -> Callee<'a> {
 
 /// Hover text for the word covering `at`, with the hovered cells' first cell
 /// and width. Call words and definition titles are described. With `gloss`,
-/// every Shavian word (ports, text and comments too) also gets a `Reading:`
-/// line, and a primitive its short name on that line.
+/// every Shavian word (ports, text and comments too) also gets a line with
+/// its reading and the keys that type it, and a primitive its short name on
+/// that line.
 pub fn hover(doc: &Doc, at: Pos, gloss: bool) -> Option<(Pos, usize, String)> {
     let described = doc.sheet().and_then(|sheet| describe(sheet, at));
     let word = if gloss {
@@ -210,7 +211,8 @@ pub fn hover(doc: &Doc, at: Pos, gloss: bool) -> Option<(Pos, usize, String)> {
     let Some((start, width, word)) = word else {
         return described.map(|d| (d.at, d.width, d.text));
     };
-    let mut reading = format!("Reading: `{}`", shawline_word::reading(&word));
+    let mut reading =
+        format!("Reading: `{}` · Type: `{}`", shawline_word::reading(&word), shawline_word::keys(&word));
     if let Some(p) = described.as_ref().and_then(|d| d.prim) {
         reading.push_str(" · ");
         reading.push_str(p.gloss());

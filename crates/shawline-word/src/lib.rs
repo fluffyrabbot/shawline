@@ -54,8 +54,8 @@
 mod reading;
 mod translit;
 
-pub use reading::{annotate, reading};
-pub use translit::{Edit, SEPARATOR, TABLE, Transliterator, transliterate};
+pub use reading::{READING_SEPARATOR, annotate, keys, reading};
+pub use translit::{Edit, SEPARATOR, TABLE, Transliterator, letter_name, transliterate};
 
 /// The four shape classes of the Shavian letters (SPEC §4).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

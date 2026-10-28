@@ -22,7 +22,7 @@ pub const GLOSS_WIDTH: f64 = CELL_WIDTH / 2.0;
 pub const GLOSS_HEIGHT: f64 = CELL_HEIGHT / 2.0;
 /// Every character with a gloss skeleton: what readings and primitive names
 /// are spelled in.
-pub const GLOSS_CHARS: &str = "abcdefghijklmnopqrstuvwxyz@=/";
+pub const GLOSS_CHARS: &str = "abcdefghijklmnopqrstuvwxyzə-";
 
 /// Ink radius of the dots on `i` and `j`: a little over the stroke, as a
 /// half-size [`DOT_RADIUS`](crate::DOT_RADIUS) would be thinner than the pen.
@@ -97,15 +97,10 @@ pub fn gloss_skeleton(ch: char) -> Option<Skeleton> {
         'x' => strokes_only(&["M70,200 L230,400", "M230,200 L70,400"]),
         'y' => strokes_only(&["M66,200 L150,400", "M234,200 L90,545"]),
         'z' => strokes_only(&["M75,200 L225,200 L75,400 L225,400"]),
-        // Four strokes across would not fit at this weight, so, as in pixel
-        // fonts, the ring's right side doubles as the inner `a`'s stem.
-        '@' => bowl_and(
-            ellipse(204.0, 300.0, 59.0, 68.0),
-            "M263,368 L263,250 C263,170 212,105 150,105 C88,105 37,192 37,300 C37,408 88,495 150,495 \
-             C185,495 214,485 237,468",
-        ),
-        '=' => strokes_only(&["M66,240 L234,240", "M66,360 L234,360"]),
-        '/' => strokes_only(&["M232,55 L68,545"]),
+        // The schwa is `e` turned, as its IPA form is.
+        'ə' => gloss_skeleton('e')?.transformed(ROTATE),
+        // On the axis, so it reads as a break between letters, not a dash.
+        '-' => strokes_only(&["M96,300 L204,300"]),
         _ => return None,
     })
 }

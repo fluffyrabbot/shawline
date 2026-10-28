@@ -29,8 +29,11 @@ pub struct Gloss {
     /// digits that isn't all digits. Words inside `«»` and comments count;
     /// numbers don't.
     pub word: String,
-    /// How the word is typed: [`shawline_word::reading`].
+    /// How the word sounds: [`shawline_word::reading`].
     pub reading: String,
+    /// What types the word: [`shawline_word::keys`]. Hover and the palette
+    /// teach it; the strip never shows it.
+    pub keys: String,
     /// The primitive's short name ([`Prim::gloss`]) when the word names a
     /// primitive node, boxed or inline.
     ///

@@ -421,9 +421,9 @@ fn hover_reads_every_word() {
     client.open(&corpus("03-double.shaw"));
     // A comment word and both ports have only their reading.
     for (line, col, start, end, want) in [
-        (0, 4, 2, 7, "Reading: `dub@l`"),
-        (5, 2, 2, 3, "Reading: `n`"),
-        (5, 24, 24, 25, "Reading: `ow`"),
+        (0, 4, 2, 7, "Reading: `dubəl` · Type: `dub@l`"),
+        (5, 2, 2, 3, "Reading: `n` · Type: `n`"),
+        (5, 24, 24, 25, "Reading: `ow` · Type: `ow`"),
     ] {
         let hover = client.hover(Position::new(line, col));
         assert_eq!(hover["contents"]["value"], want, "{line}:{col}");
@@ -432,27 +432,27 @@ fn hover_reads_every_word() {
     // A primitive keeps its description and adds its key and short name.
     assert_eq!(
         client.hover_text(Position::new(5, 12)).unwrap(),
-        "**𐑐** add · 2→1\n\nMirror: **𐑚** subtract · 2→1\n\nReading: `p` · add"
+        "**𐑐** add · 2→1\n\nMirror: **𐑚** subtract · 2→1\n\nReading: `p` · Type: `p` · add"
     );
     // A title reads with its namer dot, a call of it without.
     let title = client.hover_text(Position::new(2, 5)).unwrap();
     assert!(title.starts_with("**·𐑛𐑳𐑚𐑩𐑤** · 1→1\n\n"), "{title}");
-    assert!(title.ends_with("\n\nReading: `=dub@l`"), "{title}");
+    assert!(title.ends_with("\n\nReading: `dubəl` · Type: `=dub@l`"), "{title}");
     let call = client.hover_text(Position::new(14, 12)).unwrap();
     assert!(call.starts_with("**·𐑛𐑳𐑚𐑩𐑤** · 1→1\n\n"), "{call}");
-    assert!(call.ends_with("\n\nReading: `dub@l`"), "{call}");
+    assert!(call.ends_with("\n\nReading: `dubəl` · Type: `dub@l`"), "{call}");
     // Numbers have nothing to read.
     assert_eq!(client.hover(Position::new(14, 2)), Value::Null);
 
     // Words inside `«»` text, and an unknown name, read too.
     client.open(&corpus("12-guards.shaw"));
     let hover = client.hover(Position::new(7, 6));
-    assert_eq!(hover["contents"]["value"], "Reading: `wun`");
+    assert_eq!(hover["contents"]["value"], "Reading: `wun` · Type: `wun`");
     assert_eq!(hover["range"], range(7, 5, 8));
     client.open(&corpus("95-unknown.shaw"));
     assert_eq!(
         client.hover_text(Position::new(5, 8)).as_deref(),
-        Some("Reading: `foo`")
+        Some("Reading: `foo` · Type: `foo`")
     );
 }
 
@@ -494,6 +494,6 @@ fn changing_the_setting_rewords_diagnostics() {
     assert_eq!(diags[0]["message"], "unknown name 𐑓𐑵 (foo)");
     assert_eq!(
         client.hover_text(Position::new(5, 8)).as_deref(),
-        Some("Reading: `foo`")
+        Some("Reading: `foo` · Type: `foo`")
     );
 }

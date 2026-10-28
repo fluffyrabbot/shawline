@@ -55,7 +55,7 @@ Transliteration is `editor.formatOnType` for the `shawline` language. The status
 
 ## Readings
 
-Hovering any Shavian word shows its **reading**, the keys that type it: `·𐑥𐑱𐑯` reads `=mayn`, and `𐑑𐑣` reads `t/h`. That includes port names, words in `«»` text and comments. A primitive's hover adds its short name, so `𐑐` shows `p` and `add`. Diagnostic messages carry readings too: `unknown name 𐑓𐑵 (foo)`. Readings never enter the text, and there are no inlay hints, because those would push cells out of line. Set `shawline.gloss` to `false` to turn readings off.
+Hovering any Shavian word shows its **reading**, how it sounds, and the keys that type it: `·𐑛𐑳𐑚𐑩𐑤` reads `dubəl` and is typed `=dub@l`, and `𐑑𐑣` reads `t-h` and is typed `t/h`. That includes port names, words in `«»` text and comments. A primitive's hover adds its short name, so `𐑐` reads `p` and is `add`. Diagnostic messages carry readings too: `unknown name 𐑓𐑵 (foo)`. Readings never enter the text, and there are no inlay hints, because those would push cells out of line. Set `shawline.gloss` to `false` to turn readings off.
 
 ## Settings
 

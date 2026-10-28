@@ -98,6 +98,7 @@ fn misplaced_glosses_are_caught() {
         at: Pos::new(5, col),
         word: word.into(),
         reading: reading.into(),
+        keys: reading.into(),
         gloss,
         span: Some(span),
     };

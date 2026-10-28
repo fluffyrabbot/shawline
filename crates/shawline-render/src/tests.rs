@@ -221,9 +221,10 @@ fn a_gloss_is_centred_under_its_word() {
     let found = glosses(&g);
     let add = found.iter().find(|g| g.at == Pos::new(5, 12)).unwrap();
     assert_eq!((add.text(), add.span), ("add", Some((11.75, 13.25))));
-    // The title ·𐑛𐑳𐑚𐑩𐑤 fills columns 3 to 8, and its reading is as long.
+    // The title ·𐑛𐑳𐑚𐑩𐑤 fills columns 3 to 8, and its reading `dubəl`, one
+    // shorter (the namer dot isn't read), sits centred under it.
     let title = found.iter().find(|g| g.at == Pos::new(2, 3)).unwrap();
-    assert_eq!((title.text(), title.span), ("=dub@l", Some((4.5, 7.5))));
+    assert_eq!((title.text(), title.keys.as_str(), title.span), ("dubəl", "=dub@l", Some((4.75, 7.25))));
 }
 
 #[test]

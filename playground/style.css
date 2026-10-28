@@ -492,9 +492,11 @@ kbd {
   grid-template-columns: repeat(10, minmax(0, 72px));
   gap: 4px 12px;
 }
-#keys li { display: flex; align-items: baseline; gap: 10px; }
+/* The letter beside its keys, with the word it sounds in under them. */
+#keys li { display: grid; grid-template-columns: 1ch 1fr; align-items: baseline; column-gap: 10px; }
 #keys .letter { font: 26px/1.2 var(--mono); color: var(--text); width: 1ch; }
 #keys .keys { font: 13px var(--sans); }
+#keys .name { grid-column: 2; font: 11px/1.2 var(--sans); color: var(--comment); }
 
 .colophon { font: italic 15px/1.6 var(--serif); margin-top: 8px; }
 

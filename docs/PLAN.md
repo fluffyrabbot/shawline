@@ -420,7 +420,7 @@ Two read-only Codex audits, one on UX (checked against WAI, MDN, Blender and Unr
 **Next, in order:**
 1. **Document spine** ✅. See P8 below.
 2. **Gloss layer** ✅. See P9 below.
-3. **Readings as respellings** (below). It lands before onboarding, whose tour teaches both readings and keys.
+3. **Readings as respellings** ✅ (below). It landed before onboarding, whose tour teaches both readings and keys.
 4. **Onboarding** (batch 6, items 28–30, scoped to the reader in Decisions). It runs as its own session and merges before P10's wave 1 agents start, because both touch the playground.
    - **The tour** tracks undo, and its first step shows why the alphabet is Shavian: 𐑐 adds and its mirror 𐑚 subtracts, so a pair of opposite operations is a pair of mirrored letters.
    - **One word per concept.** The place a wire starts, the arrowhead it ends at, the two views of a program and the values shown on wires each get one user-facing word. They are recorded in a terminology section of SPEC and used identically in the tour, hints, the status line and refusals (`index.html`, `tour.js`, `app.js`). The P10 terms that will become labels (through-port, merged output, selector, arm) are settled in the same section.
@@ -805,7 +805,7 @@ Five read-only audits (interaction mechanics, product legibility, conceptual int
 - no surface named a reader. The reader is now in Decisions, and batch 6 carries the consequences: why Shavian, one word per concept (the place a wire starts was a tee, a source, a notch and an output tee), and the P10 label terms;
 - readings of words other than primitives are written in typing notation (`·𐑛𐑳𐑚𐑩𐑤` reads `=dub@l`), which the reader has to learn before it helps. Planned as its own step: Readings as respellings, below.
 
-### Readings as respellings (after the review after P9, before onboarding)
+### Readings as respellings (after the review after P9, before onboarding) ✅
 
 **Goal.** A reading says how a word sounds, in letters an English reader already knows. The keys that type a word stay exact and are taught where typing happens. `·𐑛𐑳𐑚𐑩𐑤` reads `dubəl` and is typed `=dub@l`.
 
@@ -837,6 +837,22 @@ Five read-only audits (interaction mechanics, product legibility, conceptual int
 - `gloss_clear` passes, so no newly shown gloss collides;
 - the playground's Node checks pass, updated for the new readings and with new checks for keys on each gloss and palette search by keys;
 - **by hand:** `03-double` and `11-even-odd` in Studio at both row pitches, the `ə` glyph beside `e` in the specimen, and a VS Code hover on `·𐑛𐑳𐑚𐑩𐑤`.
+
+**Landed.**
+- The `gloss` re-bless changed 43 readings, each exactly by the rewrite, and no `shown` flag.
+- The workspace tests pass, including the exhaustive three-letter check for both readings and keys.
+- A new test ties both SPEC §13 tables, and each letter's name, to the code. SPEC said such a test existed, but none did.
+- Clippy is clean on host and wasm, and the playground's 47 Node checks pass.
+- Checked by hand in Studio:
+  - `03-double` and `11-even-odd` with Readings on and off;
+  - the hover titles, for example `𐑰𐑝𐑩𐑯 reads eevən, typed eev@n`;
+  - palette search, which finds `𐑛𐑳𐑚𐑩𐑤` by `dub@` or `dubə`;
+  - the key panel;
+  - `ə` drawn large beside `e`.
+- The VS Code hover is covered by the language server's tests, not checked in the editor.
+- Two departures from the plan:
+  - SPEC lists the four changed letters in a table of their own, not in a mostly empty column of the key table;
+  - the key panel needed each letter's name in code, so `shawline_word::letter_name` exists, and wasm's `table()` returns `[keys, letter, name]`.
 
 ### P10: Studio Phase 2, forgiving
 

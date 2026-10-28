@@ -3,7 +3,7 @@
 // wires it to the page.
 import init, {
   Doc, table, move_box, connect, remove_wire, disconnect, remove_node, place_node, place_and_connect,
-  Transliterator, row_pitch, annotate, reading, panic_message,
+  Transliterator, row_pitch, annotate, reading, keys as keysOf, panic_message,
 } from "./pkg/shawline_wasm.js";
 import { Tour, TOUR_EXAMPLE } from "./tour.js";
 import { Store, TOUR_SLOT } from "./drafts.js";
@@ -366,10 +366,13 @@ function showWords() {
   const view = current();
   view.words ??= doc().glosses();
   const group = svgEl("g", "words");
-  for (const { row, col, span, word, reading: keys, gloss } of view.words) {
+  for (const { row, col, span, word, reading: sounds, keys: typed, gloss } of view.words) {
     const target = svgRect("", { top: row, left: col, bottom: row, right: col + span - 1, under: true });
     const title = svgEl("title");
-    title.textContent = gloss ? `${word} reads ${keys}: ${gloss}` : `${word} reads ${keys}`;
+    // The title is where a word is looked at closely, so it also teaches the
+    // keys; the strip shows only how it sounds.
+    const said = `${word} reads ${sounds}, typed ${typed}`;
+    title.textContent = gloss ? `${said}: ${gloss}` : said;
     target.append(title);
     group.append(target);
   }
@@ -916,8 +919,8 @@ function closeMenu() {
 function openMenu(at, from) {
   closeMenu();
   const offered = doc().palette(from?.row, from?.col);
-  // Every word can be found by how it is typed, shown or not.
-  offered.forEach((c) => (c.reading = reading(c.word)));
+  // Every word can be found by how it sounds or how it is typed, shown or not.
+  offered.forEach((c) => ((c.reading = reading(c.word)), (c.keys = keysOf(c.word))));
   menu = el("div", "palette");
   menu.setAttribute("role", "dialog");
   menu.setAttribute("aria-label", "Place a node");
@@ -958,7 +961,8 @@ function openMenu(at, from) {
   const show = () => {
     const q = filter.value.trim().toLowerCase();
     const items = offered.filter(
-      (c) => !q || c.word.includes(q) || c.reading.includes(q) || c.gloss.toLowerCase().includes(q),
+      (c) =>
+        !q || c.word.includes(q) || c.reading.includes(q) || c.keys.includes(q) || c.gloss.toLowerCase().includes(q),
     );
     list.replaceChildren(
       ...items.map((c, i) => {
@@ -1434,9 +1438,9 @@ async function main() {
   const entries = table();
   keys = new Set(["/", ...entries.flatMap(([k]) => [...k])]);
   $("keys").replaceChildren(
-    ...entries.map(([k, letter]) => {
+    ...entries.map(([k, letter, name]) => {
       const item = el("li");
-      item.append(el("span", "letter", letter), el("span", "keys", k));
+      item.append(el("span", "letter", letter), el("span", "keys", k), el("span", "name", name));
       return item;
     }),
   );

@@ -43,7 +43,7 @@ const SAMPLE: &[&str] = &[
 /// Words over their glosses, as the gloss layer sets them: readings under
 /// words, and each mirror pair of primitives over its pair of names.
 const GLOSSED: &[&[(&str, &str)]] = &[
-    &[("·𐑥𐑱𐑯", "=mayn"), ("𐑣𐑧𐑤𐑴", "heloh"), ("𐑑𐑣", "t/h"), ("𐑝𐑬", "/vow"), ("𐑾𐑮", "i@r"), ("𐑩𐑚𐑬𐑑", "@bowt")],
+    &[("·𐑥𐑱𐑯", "mayn"), ("𐑣𐑧𐑤𐑴", "heloh"), ("𐑑𐑣", "t-h"), ("𐑝𐑬", "vow"), ("𐑾𐑮", "iər"), ("𐑩𐑚𐑬𐑑", "əbowt")],
     &[("𐑟", "cons"), ("𐑕", "uncons"), ("𐑦", "same"), ("𐑰", "differ"), ("𐑥", "min"), ("𐑯", "max")],
 ];
 

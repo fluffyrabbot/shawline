@@ -56,6 +56,7 @@ pub(crate) fn glosses(grid: &Grid, diagram: &Diagram, blocked: &[Vec<bool>]) -> 
             let mut gloss = Gloss {
                 at,
                 reading: shawline_word::reading(&word),
+                keys: shawline_word::keys(&word),
                 word,
                 gloss: primitives.get(&at).map(|p| p.gloss()),
                 span: None,

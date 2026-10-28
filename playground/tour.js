@@ -12,8 +12,8 @@ const STEPS = [
   {
     // Written with its readings, so it is never annotated.
     plain: true,
-    text: "Read the sheet. Under each word is its reading, the keys that type it: ·𐑥𐑱𐑯 reads =mayn, " +
-      "and a primitive shows its name, so 𐑐 is add. Hold Alt (⌥ on a Mac) by itself to flip the readings " +
+    text: "Read the sheet. Under each word is how it sounds: ·𐑥𐑱𐑯 reads mayn, and a primitive shows " +
+      "its name, so 𐑐 is add. Hover a word for the keys that type it. Hold Alt (⌥ on a Mac) by itself to flip the readings " +
       "until you let go; the Readings switch sets them for good.",
     rings: (m) => [m.title, m.primitive].filter(Boolean),
     done: (m, event) => event === "looked",
