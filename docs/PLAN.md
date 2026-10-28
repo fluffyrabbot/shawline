@@ -17,7 +17,7 @@ How Shawline gets built: what is built in what order, who builds it, and how the
 | Verification | One golden corpus plus per-crate unit tests | A single oracle, checked once at each gate (see Orchestration). |
 | Transliteration | Phonemic ASCII keys, no dictionary | Deterministic and license-free. A dictionary is an optional extra. |
 | Reader | Programmers who take Shawline as an art piece or an art substrate, don't read Shavian, and learn it as a hobby | Chosen by the user. Surfaces explain the alphabet and the drawing's grammar, not programming. The pitch leads with mirrored letters naming duals (SPEC §1.2). Readings should teach toward reading unaided rather than stay a permanent translation. How a drawing looks and how it travels count as features. Studio is the front door, and the CLI and VS Code serve readers who stay. A hobbyist who is refused twice without a reason leaves, so every refusal names the rule of the drawing it enforces and a next step. |
-| Teaching the alphabet | An English gloss layer, on by default, drawn beside the program but never part of it (P9) | Every surface should teach Shavian to a newcomer. Because the layer is never source, turning it off costs fluent readers nothing. |
+| Teaching the alphabet | An English gloss layer, on by default, drawn beside the program but never part of it (P9). Readings are respellings, and the keys that type a word are taught where typing happens (Readings as respellings, below) | Every surface should teach Shavian to a newcomer. Because the layer is never source, turning it off costs fluent readers nothing. A reader learns sounds; only a typist needs `@`, `=` and `/`. |
 
 ## Architecture
 
@@ -420,13 +420,14 @@ Two read-only Codex audits, one on UX (checked against WAI, MDN, Blender and Unr
 **Next, in order:**
 1. **Document spine** ✅. See P8 below.
 2. **Gloss layer** ✅. See P9 below.
-3. **Onboarding** (batch 6, items 28–30, scoped to the reader in Decisions). It runs as its own session and merges before P10's wave 1 agents start, because both touch the playground.
+3. **Readings as respellings** (below). It lands before onboarding, whose tour teaches both readings and keys.
+4. **Onboarding** (batch 6, items 28–30, scoped to the reader in Decisions). It runs as its own session and merges before P10's wave 1 agents start, because both touch the playground.
    - **The tour** tracks undo, and its first step shows why the alphabet is Shavian: 𐑐 adds and its mirror 𐑚 subtracts, so a pair of opposite operations is a pair of mirrored letters.
    - **One word per concept.** The place a wire starts, the arrowhead it ends at, the two views of a program and the values shown on wires each get one user-facing word. They are recorded in a terminology section of SPEC and used identically in the tour, hints, the status line and refusals (`index.html`, `tour.js`, `app.js`). The P10 terms that will become labels (through-port, merged output, selector, arm) are settled in the same section.
    - **Shavian in the page's own text has its reading:** "Run main (·𐑥𐑱𐑯)", the brand name, and the CLI's help.
    - **The README** names the reader, says why Shavian, gives the current status, and lists prerequisites. Studio comes first, the CLI next, VS Code last.
    - **VS Code** shows the server's status, and **the CLI** gets `--help`.
-4. **Studio Phase 2** (P10 below), with the other two batches folded in:
+5. **Studio Phase 2** (P10 below), with the other two batches folded in:
    - batch 4 (keyboard and semantic selection, the palette combobox, zoom and pan, the inspector) opens its wave 1;
    - batch 5 (repair in place, richer diagnostics, transliteration parity) closes its wave 3.
 
@@ -802,7 +803,40 @@ Five read-only audits (interaction mechanics, product legibility, conceptual int
 - the drawing has no role, name or text outline for screen readers;
 - a drag doesn't scroll the pane at its edges;
 - no surface named a reader. The reader is now in Decisions, and batch 6 carries the consequences: why Shavian, one word per concept (the place a wire starts was a tee, a source, a notch and an output tee), and the P10 label terms;
-- readings of words other than primitives are written in typing notation (`·𐑛𐑳𐑚𐑩𐑤` reads `=dub@l`), which the reader has to learn before it helps. A readable respelling, with the keys taught as typing, would serve the reader better. It changes `shawline_word::reading` and every `.gloss` expectation, so it waits for its own decision.
+- readings of words other than primitives are written in typing notation (`·𐑛𐑳𐑚𐑩𐑤` reads `=dub@l`), which the reader has to learn before it helps. Planned as its own step: Readings as respellings, below.
+
+### Readings as respellings (after the review after P9, before onboarding)
+
+**Goal.** A reading says how a word sounds, in letters an English reader already knows. The keys that type a word stay exact and are taught where typing happens. `·𐑛𐑳𐑚𐑩𐑤` reads `dubəl` and is typed `=dub@l`.
+
+**What exists today.** `shawline_word::reading` returns the keys, and every surface shows them as the reading: the gloss strip, `.gloss`, editor hover, diagnostics through `annotate`, the Studio palette and the drawing's hover title. The keys already follow English pronunciation respellings (SPEC §13), so most readings need no change. Three symbols exist only for the typist: `@` for the schwa, `=` for the namer dot, and `/` to keep two keys apart. 43 of the corpus's 176 `.gloss` lines contain one.
+
+**Decisions.**
+
+| Decision | Choice | Rationale |
+|---|---|---|
+| Scope of the respelling | A reading is the keys with three changes: 𐑩 reads `ə` (so 𐑼 reads `ər` and 𐑾 reads `iə`), the namer dot reads nothing, and a `-` replaces `/` | One table to learn, not two. The other 45 keys already read as English respellings (`ie` as in pie, `ew` as in few, `dh` and `uu` as in dictionary respellings). |
+| Not attempted | Syllable breaks, stress marks, and context-dependent spellings (`eye` alone but `y` after a consonant) | Shavian marks neither syllables nor stress, so any choice would be a guess. Context rules break the one-letter, one-spelling correspondence a learner relies on. |
+| Where a `-` goes | Between two letters whose respellings would otherwise read as a third letter's, found by the same longest-match test `reading` uses for `/` today, against the respelling table: `𐑑𐑣` reads `t-h`, `𐑨𐑘` reads `a-y`, `𐑩𐑮` reads `ə-r`. A word starting with 𐑝 needs none | A reading must still name one word: reading the respelling back by longest match gives the word, without its namer dot. The leading `/v` exists only for the transliterator's `▼` fallback. |
+| The namer dot | Not read. `·𐑥𐑱𐑯` and `𐑥𐑱𐑯` both read `mayn` | The dot marks a definition's name in the drawing, where it is already visible. It has no sound. |
+| Contract | `reading(word)` returns the respelling. A new `keys(word)` returns what `reading` returns today, with the same exactness (`transliterate(&keys(w)) == w`). `annotate` uses `reading`. `shawline_render::Gloss` gains `keys: String` beside `reading`. Its `Display`, the `.gloss` line, keeps its format and prints the respelling | The name follows the meaning: a reading is how a word is read, and keys are what types it. The `.gloss` format doesn't change, so only values are re-blessed. |
+| Gloss glyphs | `ə` and `-` join `GLOSS_CHARS`. `ə` is `e` turned 180° (`ROTATE`), as the gloss letters derive turned and mirrored forms. `@`, `=` and `/` leave it, since no reading draws them | The strip draws only readings and primitive names. |
+| Where keys are taught | Wherever a word is typed or looked up by typing. Editor hover: `Reading: dubəl · Type: =dub@l`, with the primitive's name after, as today. The drawing's hover title: `𐑛𐑳𐑚𐑩𐑤 reads dubəl, typed dub@l`. The Studio palette shows each entry's reading, and search matches the word, its reading, its keys or its meaning. The key panel in Studio's footer lists each letter with its keys and its SPEC §13 example word (`𐑐 p peep`). P10's inspector shows the keys of the selected text beside its field. The tour (batch 6) teaches the keys at the step where the user first types a word. Diagnostics and the gloss strip carry the reading only | Learning to read and learning to type are different moments. The strip and messages are read; the hover, the palette, the key panel and the inspector are where a user is about to type. |
+
+**Work** (the lead alone; it is one contract change across six crates, too small to split):
+- **`shawline-word`:** `reading` and `keys` as above. The unit tests keep `keys`' exactness checks, including every word of up to three letters, and add the same checks for `reading` against the respelling table: every word of up to three letters reads back to itself (namer dots aside), and every `-` is needed.
+- **`shawline-glyph`:** `ə` and `-` in `GLOSS_CHARS`. The specimen shows them.
+- **`shawline-render`:** `Gloss.keys`. The strip fits the respelling.
+- **`shawline-lsp`:** the hover line above. **`shawline-cli`:** nothing, since `annotate` changes underneath it.
+- **`shawline-wasm` and `playground/`:** `keys` exported and on each gloss, then the hover title, palette search and key panel. The palette shows the reading as before.
+- **SPEC §13:** the Reading paragraph says what a reading is and what keys are, and the table gains a Reads column filled only for 𐑩, 𐑼, 𐑾 and the namer dot.
+
+**Gate:**
+- the workspace tests pass, and clippy is clean on host and wasm;
+- **re-bless `gloss`** after a script checks the diff: each changed line's reading equals its old reading with `@` turned into `ə`, `=` and a leading `/` dropped, and every other `/` turned into `-`. The respelling table merges letters exactly where the key table does, so no separator appears or disappears. A `shown` flag may only go from hidden to shown, since no respelling is longer than its keys;
+- `gloss_clear` passes, so no newly shown gloss collides;
+- the playground's Node checks pass, updated for the new readings and with new checks for keys on each gloss and palette search by keys;
+- **by hand:** `03-double` and `11-even-odd` in Studio at both row pitches, the `ə` glyph beside `e` in the specimen, and a VS Code hover on `·𐑛𐑳𐑚𐑩𐑤`.
 
 ### P10: Studio Phase 2, forgiving
 
