@@ -59,7 +59,7 @@
         "shawline.gloss": {
           "type": "boolean",
           "default": true,
-          "markdownDescription": "Show each Shavian word's reading, the keys that type it, in hovers and diagnostic messages, and each primitive's short name in its hover. Turn it off to see Shavian only."
+          "markdownDescription": "Show each Shavian word's reading, how it sounds, in hovers and diagnostic messages, and in hovers the keys that type it and each primitive's short name. Turn it off to see Shavian only."
         }
       }
     },

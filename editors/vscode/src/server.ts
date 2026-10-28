@@ -7,18 +7,33 @@ import {
   LanguageClient,
   LanguageClientOptions,
   ServerOptions,
+  State,
 } from 'vscode-languageclient/node';
 
 const INSTALL_COMMAND = 'cargo install --path crates/shawline-lsp';
 
-/** Owns the `shawline-lsp` client so it can be restarted when its path changes. */
-export class ServerController {
+/**
+ * Owns the `shawline-lsp` client so it can be restarted when its path changes,
+ * and shows the server's status beside the language name in the status bar.
+ */
+export class ServerController implements vscode.Disposable {
   private client: LanguageClient | undefined;
+  private readonly status = vscode.languages.createLanguageStatusItem('shawline.server', { language: 'shawline' });
+
+  constructor() {
+    this.status.name = 'Shawline Language Server';
+    this.show('stopped');
+  }
+
+  dispose(): void {
+    this.status.dispose();
+  }
 
   async start(): Promise<void> {
     const configured = vscode.workspace.getConfiguration('shawline').get<string>('serverPath') || 'shawline-lsp';
     const command = resolveExecutable(configured);
     if (!command) {
+      this.show('missing', configured);
       void reportMissing(configured);
       return;
     }
@@ -30,12 +45,46 @@ export class ServerController {
       initializationOptions: { gloss: glossSetting() },
     };
     const client = new LanguageClient('shawline', 'Shawline', serverOptions, clientOptions);
+    client.onDidChangeState(({ newState }) => {
+      // A client replaced by a restart no longer speaks for the server.
+      if (this.client === client) {
+        this.show(newState === State.Running ? 'running' : newState === State.Starting ? 'starting' : 'stopped', command);
+      }
+    });
+    this.client = client;
     try {
       await client.start();
-      this.client = client;
     } catch (error) {
+      this.client = undefined;
+      this.show('failed', command);
       void vscode.window.showErrorMessage(`Shawline: could not start ${command}: ${String(error)}`);
     }
+  }
+
+  /** Shows `state` in the language status item; `detail` is the server's path, or the setting when missing. */
+  private show(state: 'starting' | 'running' | 'stopped' | 'missing' | 'failed', detail = ''): void {
+    const item = this.status;
+    item.busy = state === 'starting';
+    item.severity =
+      state === 'missing' || state === 'failed'
+        ? vscode.LanguageStatusSeverity.Error
+        : state === 'stopped'
+          ? vscode.LanguageStatusSeverity.Warning
+          : vscode.LanguageStatusSeverity.Information;
+    item.text = {
+      starting: 'Shawline server starting',
+      running: 'Shawline server running',
+      stopped: 'Shawline server stopped',
+      missing: 'Shawline server not found',
+      failed: 'Shawline server failed to start',
+    }[state];
+    item.detail = state === 'missing' ? `"${detail}" is not on PATH or in ~/.cargo/bin` : detail;
+    item.command =
+      state === 'missing'
+        ? { title: 'Set Path', command: 'workbench.action.openSettings', arguments: ['shawline.serverPath'] }
+        : state === 'starting'
+          ? undefined
+          : { title: 'Restart', command: 'shawline.restartServer' };
   }
 
   async stop(): Promise<void> {
@@ -44,6 +93,7 @@ export class ServerController {
     if (client) {
       await client.stop();
     }
+    this.show('stopped');
   }
 
   async restart(): Promise<void> {

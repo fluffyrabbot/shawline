@@ -10,6 +10,7 @@ export function activate(context: vscode.ExtensionContext): void {
   const status = new TransliterationStatus();
 
   context.subscriptions.push(
+    server,
     status,
     vscode.commands.registerCommand('shawline.toggleTransliteration', toggleTransliteration),
     vscode.commands.registerCommand('shawline.installFont', () => installFont(context)),
