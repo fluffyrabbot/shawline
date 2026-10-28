@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Shawline playground</title>
+  <title>Shawline Studio</title>
   <meta name="description" content="A dataflow programming language you draw.">
   <link rel="preload" href="ShawlineMono.ttf" as="font" type="font/ttf" crossorigin>
   <link rel="stylesheet" href="style.css">
@@ -23,10 +23,10 @@
   <header>
     <div class="title">
       <h1>Shawline</h1>
-      <span class="shavian" lang="en-Shaw" aria-hidden="true">·𐑖𐑷𐑤𐑲𐑯</span>
+      <span class="shavian" lang="en-Shaw" aria-hidden="true" data-plain="·𐑖𐑷𐑤𐑲𐑯">·𐑖𐑷𐑤𐑲𐑯</span>
       <p>A dataflow language you draw.</p>
     </div>
-    <nav class="controls" aria-label="Playground settings">
+    <nav class="controls" aria-label="Studio settings">
       <div class="example">
         <label class="picker">
           <span class="label">Example</span>
@@ -35,18 +35,19 @@
         <button type="button" id="reset" class="quiet" hidden
           title="Your edits to each example are kept as a draft. Reset loads this one’s original; undo brings your edits back.">Reset</button>
       </div>
-      <label class="switch" title="Type phonemic ASCII and get Shavian: t h → 𐑔">
+      <label class="switch" title="Type a word’s keys and get Shavian: t h → 𐑔"
+        data-plain-title="Type a word’s keys and get Shavian: t h → 𐑔">
         <input type="checkbox" id="translit" checked>
         <span class="track" aria-hidden="true"></span>
         <span class="label">Transliterate</span>
       </label>
       <label class="switch"
-        title="Show how each word sounds, under its row and in messages. Hover a word for the keys that type it. Hold Alt by itself to flip it for a moment.">
+        title="Show each word’s reading, how it sounds, under its row and in messages. Hover a word for the keys that type it. Hold Alt by itself to flip the readings for a moment.">
         <input type="checkbox" id="readings" checked>
         <span class="track" aria-hidden="true"></span>
         <span class="label">Readings</span>
       </label>
-      <button type="button" id="tour-start" class="quiet" title="How to read the sheet, then six moves that show the drawing is an editor">Tour</button>
+      <button type="button" id="tour-start" class="quiet" title="Why the alphabet is Shavian and how to read the sheet, then six moves that show the drawing is an editor">Tour</button>
       <button type="button" id="theme" class="quiet" aria-label="Switch theme">
         <span class="when-light">Dark</span><span class="when-dark">Light</span>
       </button>
@@ -63,24 +64,25 @@
   <main>
     <section class="pane source" aria-labelledby="source-label">
       <div class="pane-head">
-        <h2 id="source-label">Source</h2>
+        <h2 id="source-label">Text</h2>
         <span id="cursor" class="meta" aria-live="off">1:1</span>
         <span class="spacer"></span>
         <span id="note" class="meta" role="status"></span>
         <button type="button" id="format" class="quiet" title="Redraw in canonical form">Format</button>
-        <button type="button" id="run" class="primary" title="Run ·𐑥𐑱𐑯 (Ctrl+Enter)">Run</button>
+        <button type="button" id="run" class="primary" title="Run ·𐑥𐑱𐑯, the main definition (Ctrl+Enter)"
+          data-plain-title="Run ·𐑥𐑱𐑯, the main definition (Ctrl+Enter)">Run</button>
       </div>
       <div class="editor">
         <div id="marks" aria-hidden="true"></div>
         <textarea id="editor" spellcheck="false" autocomplete="off" autocapitalize="off"
-          wrap="off" aria-label="Shawline source"></textarea>
+          wrap="off" aria-label="Shawline text"></textarea>
       </div>
     </section>
 
     <section class="pane drawing" aria-labelledby="drawing-label">
       <div class="pane-head">
         <h2 id="drawing-label">Drawing</h2>
-        <span class="meta hint-line">Drag from a tee to wire it · Delete removes</span>
+        <span class="meta hint-line">Drag from a source to wire it · Delete removes</span>
         <span class="spacer"></span>
         <span id="trace-status" class="meta trace-status" role="status"></span>
         <label class="switch" title="Show the value each wire carried during the first call of its definition">
@@ -107,7 +109,7 @@
         <h2 id="output-label">Output</h2>
         <span id="output-meta" class="meta"></span>
       </div>
-      <pre id="output" aria-live="polite"><span class="hint">Run the program to see what ·𐑥𐑱𐑯 returns.</span></pre>
+      <pre id="output" aria-live="polite"><span class="hint" data-plain="Run the program to see what ·𐑥𐑱𐑯 returns.">Run the program to see what ·𐑥𐑱𐑯 returns.</span></pre>
     </section>
   </main>
 
@@ -115,16 +117,16 @@
     <details>
       <summary>Typing Shavian</summary>
       <p>
-        With <em>Transliterate</em> on, each letter has a short phonemic key, and the longest
-        match wins: <kbd>t</kbd><kbd>h</kbd> is 𐑔. Type <kbd>/</kbd> between keys to keep them
+        With <em>Transliterate</em> on, each letter has short keys that spell its sound, and the longest
+        match wins: <kbd>t</kbd><kbd>h</kbd> is <span data-plain="𐑔">𐑔</span>. Type <kbd>/</kbd> between keys to keep them
         apart, <kbd>=</kbd> for the namer dot, and <kbd>v</kbd> outside a word for the ▼
-        arrowhead. Readings spell the schwa <kbd>@</kbd> as ə. Each letter is listed with a word
-        it sounds in.
+        arrowhead. Readings spell the schwa <kbd>@</kbd> as ə. Each letter is listed with its keys
+        and a word it sounds in.
       </p>
       <ol id="keys"></ol>
     </details>
     <p class="colophon">
-      Rounded boxes define, square boxes call, wires carry values.
+      Rounded boxes are definitions, square boxes are nodes that call them, and wires carry values from sources to arrowheads.
       The drawing is the program.
     </p>
   </footer>

@@ -222,6 +222,8 @@ function relayer() {
 
 let refreshTimer;
 let shown = [];
+/** Whether an undo happened since the last refresh, for the tour. */
+let undoPending = false;
 let storageWarned = false;
 /**
  * The editor's revision, counted up on every change to its text. Worker
@@ -253,7 +255,9 @@ function refresh() {
   // leaves the mark, and the next load opens the original instead.
   const marked = Boolean(slot) && store.markDrawing(slot);
   shown = doc().diagnostics();
-  tour.update(current());
+  if (undoPending) tour.undone(current());
+  else tour.update(current());
+  undoPending = false;
   showProblems();
   showDrawing();
   scheduleTrace();
@@ -270,7 +274,7 @@ function showFailure(error) {
     // The package never loaded, so there was no panic to ask about.
   }
   const message = panic ?? String(error?.message ?? error);
-  statusLine.textContent = `Something went wrong inside the playground (${message}). Your text is saved; reload the page to continue.`;
+  statusLine.textContent = `Something went wrong inside Studio (${message}). Your text is saved; reload the page to continue.`;
   statusLine.className = "drawing-status refused";
 }
 addEventListener("error", (e) => showFailure(e.error ?? e.message));
@@ -396,7 +400,7 @@ function cellAt(e) {
 // works as it does for typing; a refused edit changes nothing and says why
 // beside the cell it is about, and in the status line under the drawing.
 //
-// - Drag from a source (an output tee, an input, a constant, an arm's
+// - Drag from a source (a node's ├, an input, a constant, an arm's
 //   input) or from a wire: release on a free arrowhead to connect, or on
 //   empty space to pick a node from the palette, placed there and wired in.
 // - Drag from a free arrowhead back to a source or a wire: connect, joining
@@ -926,7 +930,7 @@ function openMenu(at, from) {
   menu.setAttribute("aria-label", "Place a node");
   const filter = el("input");
   filter.placeholder = from ? "Feed it into…" : "Place a node…";
-  filter.setAttribute("aria-label", "Filter by meaning or letter");
+  filter.setAttribute("aria-label", "Filter by meaning, letters, reading or keys");
   const list = el("ul");
   list.setAttribute("role", "listbox");
   menu.append(filter, list);
@@ -1029,7 +1033,7 @@ addEventListener("scroll", (e) => menu && !menu.contains(e.target) && closeMenu(
 // switch says why.
 
 const TRACE_LIMIT_MS = 4000;
-const FIRST_CALL = "Badges show the value each wire carried during the first call of its definition.";
+const FIRST_CALL = "Each wire shows the value it carried during the first call of its definition.";
 
 let traceTimer;
 /** The last trace of the editor's text: the revision it traced, and its values. */
@@ -1044,10 +1048,10 @@ const tracer = new Flight({
   settle: (job, outcome) => {
     if (outcome.broken !== undefined) {
       traced = { rev: -1, values: [] };
-      showTrace("unavailable", `Tracing failed to start${outcome.broken ? `: ${outcome.broken}` : ""}.`);
+      showTrace("unavailable", `The values couldn’t be worked out${outcome.broken ? `: ${outcome.broken}` : ""}.`);
     } else if (outcome.timedOut) {
       traced = { rev: job.rev, values: [] };
-      showTrace("unavailable", `Tracing took longer than ${TRACE_LIMIT_MS / 1000} s, so it was stopped.`);
+      showTrace("unavailable", `Working out the values took longer than ${TRACE_LIMIT_MS / 1000} s, so it was stopped.`);
     } else {
       traced = { rev: job.rev, values: outcome.failed ? [] : outcome.wires };
       showTraced(outcome);
@@ -1058,7 +1062,7 @@ const tracer = new Flight({
 
 /** Says how the last trace went, with a jump to a runtime error. */
 function showTraced({ failed, error, stopped }) {
-  if (failed) return showTrace("unavailable", `Tracing failed: ${failed}`);
+  if (failed) return showTrace("unavailable", `The values couldn’t be worked out: ${failed}`);
   // A static error means the sheet couldn't run at all; runtime codes are R.
   if (error && !error.code.startsWith("R")) return showTrace("unavailable", "The sheet has errors, so it can’t run.");
   if (error) return showTrace("runtime error", `${error.code}: ${error.message}. Wires after it have no value.`, error);
@@ -1407,6 +1411,7 @@ function followHistory(inputType) {
 
 editor.addEventListener("input", (e) => {
   followHistory(e.inputType);
+  if (e.inputType === "historyUndo") undoPending = true;
   changed();
 });
 
@@ -1428,12 +1433,14 @@ async function main() {
   try {
     await init();
   } catch (e) {
-    drawing.replaceChildren(el("p", "hint", "The playground needs WebAssembly, which didn’t load."));
+    drawing.replaceChildren(el("p", "hint", "Studio needs WebAssembly, which didn’t load."));
     throw e;
   }
   readings.checked = store.get("readings") !== "false";
   layer = new Layer({ on: readings.checked, rowPitch: row_pitch, annotate, changed: relayer });
   geo = layer.geometry;
+  // The page's own Shavian, marked in index.html, shows its readings too.
+  layer.resay(document);
   trans = new Transliterator();
   const entries = table();
   keys = new Set(["/", ...entries.flatMap(([k]) => [...k])]);

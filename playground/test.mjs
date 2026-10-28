@@ -569,9 +569,13 @@ test("the tour walks 03-double to the end", () => {
   };
   tour.start(view(src));
   assert.equal(tour.step, 0);
-  assert.ok(tour.rings().length > 0, "step 1 rings what to read");
+  assert.ok(tour.rings().length > 0, "step 1 rings 𐑐");
   tour.looked(view(src));
-  assert.equal(tour.step, 1, "a look at the layer is step 1");
+  assert.equal(tour.step, 0, "step 1 waits for Next");
+  tour.advance();
+  assert.ok(tour.rings().length > 0, "step 2 rings what to read");
+  tour.looked(view(src));
+  assert.equal(tour.step, 2, "a look at the layer is step 2");
   step(({ outWire }) => edits.remove_wire(src, outWire.cells[0].row, outWire.cells[0].col));
   step(({ tee, sink }) => edits.connect(src, tee.row, tee.col, sink.row, sink.col));
   step(({ node }) => edits.remove_node(src, node.top, node.left));
@@ -585,6 +589,31 @@ test("the tour walks 03-double to the end", () => {
   assert.deepEqual(tour.rings(), []);
 });
 
+test("the tour steps back on undo and forward again on redo", () => {
+  const tour = new Tour(fakeHost(), () => {});
+  tour.start(view(double));
+  tour.advance();
+  tour.looked(view(double));
+  assert.equal(tour.step, 2, "at Cut a wire");
+  const { outWire } = tour.parts;
+  const cut = edits.remove_wire(double, outWire.cells[0].row, outWire.cells[0].col).text;
+  tour.update(view(cut));
+  assert.equal(tour.step, 3, "at Draw it back");
+  tour.undone(view(double));
+  assert.equal(tour.step, 2, "undoing the cut goes back to Cut a wire");
+  tour.update(view(cut));
+  assert.equal(tour.step, 3, "redoing it comes forward again");
+  const { tee, sink } = tour.parts;
+  const drawn = edits.connect(cut, tee.row, tee.col, sink.row, sink.col).text;
+  tour.update(view(drawn));
+  assert.equal(tour.step, 4, "drawing the wire back by hand moves on, whatever text it gives");
+  tour.update(view(`${drawn}\n`));
+  tour.undone(view(drawn));
+  assert.equal(tour.step, 4, "an edit undone on the text a step started on stays there");
+  tour.undone(view(cut));
+  assert.equal(tour.step, 3, "the undo of the redrawn wire goes back to Draw it back");
+});
+
 test("the tour finds main's constant wherever main is moved", () => {
   const main = sheet(double).boxes().find((b) => b.kind === "definition" && b.top === 11);
   // Moved right, the constant shares columns with ·𐑛𐑳𐑚𐑩𐑤's node.
@@ -595,10 +624,25 @@ test("the tour finds main's constant wherever main is moved", () => {
   assert.deepEqual([tour.parts.constant?.row, tour.parts.constant?.col], [14, 10]);
 });
 
-test("the tour's first step rings ·𐑥𐑱𐑯 with its strip and the 𐑐 node, and waits for a look", () => {
+test("the tour's first step shows 𐑐's mirror, with its reading written in, and waits for Next", () => {
   const host = fakeHost();
   const tour = new Tour(host, () => {}, (text) => `${text} [read]`);
   tour.start(view(double));
+  const text = host.querySelector(".tour-text").textContent;
+  assert.match(text, /𐑐 \(p\) adds, and its mirror 𐑚 \(b\) subtracts/);
+  assert.doesNotMatch(text, /\[read\]/);
+  assert.equal(host.querySelector(".tour-next").textContent, "Next");
+  const [primitive] = tour.rings();
+  assert.deepEqual([primitive.top, primitive.left, primitive.bottom, primitive.right], [4, 10, 7, 14]);
+  tour.update(view(edits.remove_wire(double, 14, 18).text));
+  assert.equal(tour.step, 0, "an edit isn't Next");
+});
+
+test("the tour's second step rings ·𐑥𐑱𐑯 with its strip and the 𐑐 node, and waits for a look", () => {
+  const host = fakeHost();
+  const tour = new Tour(host, () => {}, (text) => `${text} [read]`);
+  tour.start(view(double));
+  tour.advance();
   const [title, primitive] = tour.rings();
   assert.deepEqual({ ...title }, { top: 11, left: 3, bottom: 11, right: 6, under: true });
   assert.deepEqual([primitive.top, primitive.left, primitive.bottom, primitive.right], [4, 10, 7, 14]);
@@ -606,9 +650,9 @@ test("the tour's first step rings ·𐑥𐑱𐑯 with its strip and the 𐑐 nod
   assert.match(text(), /·𐑥𐑱𐑯 reads mayn/);
   assert.doesNotMatch(text(), /\[read\]/, "it writes its readings itself");
   tour.update(view(edits.remove_wire(double, 14, 18).text));
-  assert.equal(tour.step, 0, "an edit isn't a look");
+  assert.equal(tour.step, 1, "an edit isn't a look");
   tour.looked(view(double));
-  assert.equal(tour.step, 1);
+  assert.equal(tour.step, 2);
   assert.match(text(), /\[read\]$/, "the steps after it are shown through the layer");
 });
 

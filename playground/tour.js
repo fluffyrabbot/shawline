@@ -1,30 +1,43 @@
-// The guided tour on 03-double: how to read the sheet, then six moves that
-// show the drawing is an editor. Each step names what to do, rings the
-// cells to look at or press on, and advances by itself once the step was
-// done: a look at the gloss layer, or a sheet that shows the move, so it
-// reads the program's state rather than the clicks that got there. It only
-// moves forward: an undo that happens to satisfy a later step just skips
-// ahead.
+// The guided tour on 03-double: why the alphabet is Shavian, how to read
+// the sheet, then six moves that show the drawing is an editor. Each step
+// names what to do, rings the cells to look at or press on, and advances by
+// itself once the step was done: a look at the readings, or a sheet that
+// shows the move, so it reads the program's state rather than the clicks
+// that got there. It also follows undo: an undo back to the text a step
+// started on takes the tour back to that step, and redo moves it forward
+// again. Only an undo goes back, since redrawing a cut wire by hand can give
+// back the very text the cut started on.
 
 export const TOUR_EXAMPLE = "03-double";
 
 const STEPS = [
   {
-    // Written with its readings, so it is never annotated.
+    // The steps that teach reading write their readings in, so they are
+    // never annotated and read the same with the readings off.
     plain: true,
-    text: "Read the sheet. Under each word is how it sounds: ·𐑥𐑱𐑯 reads mayn, and a primitive shows " +
-      "its name, so 𐑐 is add. Hover a word for the keys that type it. Hold Alt (⌥ on a Mac) by itself to flip the readings " +
-      "until you let go; the Readings switch sets them for good.",
+    next: true,
+    text: "Shawline is written in Shavian, an alphabet with one letter per sound. Many letters come in mirrored " +
+      "pairs, and Shawline names opposite operations with them: 𐑐 (p) adds, and its mirror 𐑚 (b) subtracts. " +
+      "Mirrored letters are paired sounds too: p and b.",
+    rings: (m) => [m.primitive].filter(Boolean),
+    done: () => false,
+  },
+  {
+    plain: true,
+    text: "Read the sheet. Under each word is its reading, how it sounds: ·𐑥𐑱𐑯 reads mayn, and a primitive shows " +
+      "its name, so 𐑐 shows add. Hover a word for the keys that type it. Hold Alt (⌥ on a Mac) by itself to flip " +
+      "the readings until you let go; the Readings switch sets them for good.",
     rings: (m) => [m.title, m.primitive].filter(Boolean),
     done: (m, event) => event === "looked",
   },
   {
-    text: "Cut a wire. Click the wire that runs into ▶ 𐑬 at the right of ·𐑥𐑱𐑯, then press Delete.",
+    text: "Cut a wire. Click the wire that runs into the ▶ 𐑬 arrowhead at the right of ·𐑥𐑱𐑯, then press Delete.",
     rings: (m) => (m.outWire ? runs(m.outWire.cells) : []),
     done: (m) => m.sink && !m.sink.wired,
   },
   {
-    text: "Draw it back. Press on the ├ notch at the right of the 𐑛𐑳𐑚𐑩𐑤 box and drag to the glowing ▶.",
+    text: "Draw it back. A wire starts at a source: press on the ├ source at the right of the 𐑛𐑳𐑚𐑩𐑤 box and " +
+      "drag to the glowing arrowhead.",
     rings: (m) => [m.tee, m.sink].filter(Boolean).map(cell),
     done: (m) => m.sink?.wired,
   },
@@ -34,17 +47,19 @@ const STEPS = [
     done: (m) => m.box && !m.node,
   },
   {
-    text: "Add one back. Press on 21, drag into the empty space to its right, let go, and pick 𐑛𐑳𐑚𐑩𐑤, the palette’s last entry.",
+    text: "Add one back. Press on the source 21, drag into the empty space to its right and let go. Then type its " +
+      "keys, dub, to find 𐑛𐑳𐑚𐑩𐑤, and pick it.",
     rings: (m) => (m.constant ? [cell(m.constant)] : []),
     done: (m) => m.node && m.constant?.wired,
   },
   {
-    text: "Finish the wire. Drag from the new box’s ├ notch to ▶ 𐑬.",
+    text: "Finish the wire. Drag from the new box’s ├ source to the ▶ 𐑬 arrowhead.",
     rings: (m) => [m.tee, m.sink].filter(Boolean).map(cell),
     done: (m) => m.sink?.wired,
   },
   {
-    text: "Press Run. Every gesture rewrote the source text, so ⌘Z undoes any of them.",
+    text: "Press Run to see what ·𐑥𐑱𐑯 returns; the value on each wire is already showing. Every gesture rewrote " +
+      "the text, so Undo (⌘Z or Ctrl+Z) takes any of them back, and the tour steps back with it.",
     rings: () => [],
     done: (m, event) => event === "ran",
   },
@@ -71,7 +86,7 @@ const inside = (r, { row, col }) => row > r.top && row < r.bottom && col > r.lef
 /**
  * What the tour needs of ·𐑥𐑱𐑯: its title with the strip under it, its box,
  * its output arrowhead and the wire into it, its first node with that
- * node's output tee, and its constant; and the sheet's first node that
+ * node's source, and its constant; and the sheet's first node that
  * calls a primitive, 𐑐. Anything missing is undefined, and its step rings
  * nothing.
  */
@@ -111,6 +126,10 @@ export class Tour {
     this.message = message;
     this.step = -1;
     this.parts = {};
+    /** The text each step reached so far started on, by step. */
+    this.entered = [];
+    /** The text last read. */
+    this.src = null;
     this.counter = host.querySelector(".tour-count");
     this.text = host.querySelector(".tour-text");
     this.next = host.querySelector(".tour-next");
@@ -128,6 +147,7 @@ export class Tour {
 
   start(view) {
     this.step = 0;
+    this.entered = [view.src];
     this.host.hidden = false;
     this.update(view);
   }
@@ -139,14 +159,33 @@ export class Tour {
   }
 
   /**
-   * Reads a fresh sheet, advancing past every step it shows done. `event`
-   * is what just happened besides: `"ran"` or `"looked"`.
+   * Reads a fresh sheet and advances past every step it shows done.
+   * `event` is what just happened besides: `"ran"`, `"looked"`, or
+   * `"undone"`, which first goes back to the latest earlier step that
+   * started on this text, unless the current step started on it too.
    */
   update(view, event = null) {
     if (!this.active) return;
     this.parts = mainOf(view);
-    while (!this.finished && STEPS[this.step].done(this.parts, event)) this.step++;
+    this.src = view.src;
+    if (event === "undone" && this.step > 0 && !this.finished && this.entered[this.step] !== view.src) {
+      const back = this.entered.lastIndexOf(view.src, this.step - 1);
+      if (back >= 0) this.step = back;
+    }
+    while (!this.finished && STEPS[this.step].done(this.parts, event)) this.enter(this.step + 1);
     this.show();
+  }
+
+  /** An undo moved the text; a redo is an ordinary update. */
+  undone(view) {
+    this.update(view, "undone");
+  }
+
+  /** Makes `step` current, as started on the text last read. */
+  enter(step) {
+    this.step = step;
+    this.entered.length = step;
+    this.entered.push(this.src);
   }
 
   /** A run finished cleanly. */
@@ -160,7 +199,7 @@ export class Tour {
   }
 
   advance() {
-    this.step++;
+    this.enter(this.step + 1);
     this.show();
   }
 
@@ -169,7 +208,7 @@ export class Tour {
     this.counter.textContent = this.finished ? "Done" : `${this.step + 1} of ${total}`;
     const step = STEPS[this.step];
     this.text.textContent = this.finished ? this.message(FINISHED) : step.plain ? step.text : this.message(step.text);
-    this.next.textContent = this.finished ? "Close" : "Skip";
+    this.next.textContent = this.finished ? "Close" : step.next ? "Next" : "Skip";
     this.changed();
   }
 
