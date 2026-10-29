@@ -251,11 +251,10 @@ main {
 
 /* The drawing */
 
-/* Drawn at the editor's scale and pulled up and left by the renderer's
-   margin, so each column of the drawing sits under its source column, and
-   with the gloss layer off each row sits level with its source row. */
+/* Drawn at the drawing's zoom, sized by wasm's Geometry, so a wide sheet
+   scrolls rather than shrinks. */
 #drawing { position: relative; overflow: auto; font: var(--cell)/0 var(--mono); }
-#drawing svg { display: block; margin: -0.5em 0 0 -1ch; max-width: calc(100% + 1ch); height: auto; cursor: text; }
+#drawing > svg { display: block; cursor: text; }
 #drawing svg.stale { opacity: 0.35; transition: opacity 0.2s; }
 #drawing .cell { fill: var(--ink); opacity: 0.22; transition: opacity 0.15s; }
 #drawing .cell.hot { opacity: 0.45; }
@@ -271,6 +270,84 @@ main {
   stroke-dasharray: 150 110;
 }
 #drawing .refused { fill: var(--error); opacity: 0.3; }
+/* A move that would be refused: the ghost turns the error's colour. */
+#drawing .ghost.refused {
+  fill: color-mix(in srgb, var(--error) 12%, transparent);
+  stroke: var(--error);
+  opacity: 1;
+}
+#drawing.panning svg { cursor: move; }
+/* The cell cursor, while the drawing has focus. */
+#drawing .cursor {
+  fill: none;
+  stroke: var(--text);
+  stroke-width: 60;
+  stroke-dasharray: 120 90;
+  opacity: 0.6;
+}
+#drawing .selected-text {
+  fill: color-mix(in srgb, var(--wire) 14%, transparent);
+  stroke: var(--wire);
+  stroke-width: 60;
+}
+/* A selected number scrubs: dragged sideways, its value steps. */
+#drawing .selected-text.scrub { stroke-dasharray: 60 60; }
+#drawing svg.over-scrub, #drawing svg.can-scrub.over-scrub { cursor: ew-resize; }
+#drawing .glow.chosen { opacity: 0.6; stroke: var(--wire); stroke-width: 80; animation: none; }
+#drawing .badges.stale { opacity: 0.4; }
+/* Make room: offered by the refused cell, with the roomier sheet as a ghost. */
+#drawing .make-room {
+  position: absolute;
+  z-index: 2;
+  margin-top: 6px;
+  padding: 4px 10px;
+  font: 13px/1.4 var(--sans);
+  border: 1px solid var(--wire);
+  border-radius: 6px;
+  background: var(--background);
+  color: var(--text);
+  cursor: pointer;
+}
+#drawing .room-ghost { position: absolute; z-index: 1; pointer-events: none; opacity: 0; transition: opacity 0.15s; }
+#drawing .room-ghost.shown { opacity: 0.45; }
+#drawing .inline-text {
+  position: absolute;
+  z-index: 3;
+  padding: 0 2px;
+  font-family: var(--mono);
+  border: 1px solid var(--wire);
+  border-radius: 3px;
+  background: var(--background);
+  color: var(--text);
+}
+.zoom { display: flex; align-items: center; gap: 2px; }
+.zoom .meta { min-width: 3.5em; text-align: center; font-variant-numeric: tabular-nums; }
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+.keys-help {
+  margin: 8px 0;
+  padding: 10px 14px;
+  font: 13px/1.5 var(--sans);
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+}
+.keys-help h3 { margin: 0 0 6px; font-size: 14px; }
+.keys-help dl { display: grid; grid-template-columns: max-content 1fr; gap: 2px 16px; margin: 0 0 8px; }
+.keys-help dt { font-family: var(--mono); color: var(--text); }
+.keys-help dd { margin: 0; color: var(--comment); }
+.inspector { margin-top: 8px; font: 13px/1.5 var(--sans); color: var(--comment); }
+.inspector p { margin: 0 0 4px; }
+.inspector .what { color: var(--text); }
+.inspector code { font-family: var(--mono); }
+.inspector .field { display: flex; gap: 8px; align-items: center; margin-top: 6px; }
+.inspector .field .scrub { cursor: ew-resize; text-decoration: underline dotted; }
+.inspector .field input { font: 15px var(--mono); padding: 2px 6px; }
 .refusal {
   position: absolute;
   z-index: 1;
@@ -419,7 +496,7 @@ main {
   border-radius: 5px;
   cursor: pointer;
 }
-.palette li:hover, .palette li.first { background: var(--wash); }
+.palette li:hover, .palette li.chosen { background: var(--wash); }
 .palette .word { font: 20px/1.2 var(--mono); color: var(--text); }
 .palette .reading { display: block; font: 11px/1.3 var(--sans); color: var(--comment); }
 .palette .gloss { color: var(--text); }

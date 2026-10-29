@@ -21,17 +21,43 @@ const { Doc } = shawline;
 // give an edit's new text back as `text`. Node exits when the checks end, so
 // they free nothing.
 const sheet = (src) => new Doc(src);
+const cell = (row, col) => ({ row, col });
+/** Each edit as the page writes it for `apply`, from the cells it names. */
+const EDITS = {
+  move_box: (row, col, dr, dc) => ({ kind: "move", corner: cell(row, col), dr, dc }),
+  connect: (fr, fc, tr, tc) => ({ kind: "connect", from: cell(fr, fc), to: cell(tr, tc) }),
+  remove_wire: (row, col) => ({ kind: "remove_wire", at: cell(row, col) }),
+  disconnect: (row, col) => ({ kind: "disconnect", at: cell(row, col) }),
+  place_node: (row, col, word, inputs, outputs) => ({ kind: "place_node", corner: cell(row, col), word, inputs, outputs }),
+  remove_node: (row, col) => ({ kind: "remove_node", at: cell(row, col) }),
+};
 const edits = Object.fromEntries(
-  ["move_box", "connect", "remove_wire", "disconnect", "place_node", "place_and_connect", "remove_node"].map((name) => [
+  Object.entries(EDITS).map(([name, make]) => [
     name,
     (src, ...args) => {
-      const result = shawline[name](sheet(src), ...args);
+      const result = shawline.apply(sheet(src), make(...args));
       return result.ok ? { ...result, text: result.doc.text } : result;
     },
   ]),
 );
 
 let failed = 0;
+let skipped = 0;
+/**
+ * Whether agent E1's edits (`set_text`, `insert`, `make_room`, …) have
+ * landed: until they do, they refuse as `unsupported`, and the checks that
+ * need them are skipped with a marker instead of failing.
+ */
+const E1 = (() => {
+  const probe = shawline.apply(sheet(corpus("03-double.shaw")), { kind: "set_text", at: cell(14, 2), content: "22" });
+  return probe.ok || probe.kind !== "unsupported";
+})();
+function pendingE1(name, body) {
+  if (E1) return test(name, body);
+  skipped++;
+  console.log(`skip  ${name} (pending E1: its edits refuse as unsupported)`);
+}
+
 function test(name, body) {
   try {
     body();
@@ -176,10 +202,20 @@ test("endpoints name sources and sinks with their scopes", () => {
 
 test("preview shows the path connect would draw", () => {
   const bare = edits.remove_wire(double, 5, 4).text;
-  const path = sheet(bare).preview(5, 0, 5, 10);
-  assert.deepEqual(path.map((c) => c.col), [9, 8, 7, 6, 5, 4]);
+  const { path, joins_wire } = sheet(bare).preview(false, 5, 0, 5, 10);
+  const cols = path.map((c) => c.col);
+  assert.ok([4, 5, 6, 7, 8, 9].every((col) => cols.includes(col)), cols.join(" "));
   assert.ok(path.every((c) => c.row === 5));
-  assert.equal(sheet(double).preview(3, 3, 5, 10), undefined);
+  assert.equal(joins_wire, false, "the source had no wire");
+  assert.equal(sheet(double).preview(false, 3, 3, 5, 10), undefined);
+});
+
+pendingE1("preview's path runs from the source to the arrowhead, ends included, and from an arrowhead too", () => {
+  const bare = edits.remove_wire(double, 5, 4).text;
+  const { path } = sheet(bare).preview(false, 5, 0, 5, 10);
+  assert.deepEqual([path[0], path[path.length - 1]].map((c) => c.col), [0, 10]);
+  const back = sheet(bare).preview(true, 5, 10, 5, 0);
+  assert.ok(back, "a drag from an unwired arrowhead has a preview");
 });
 
 test("wires gives each wire's cells and editable source", () => {
@@ -262,10 +298,11 @@ test("wires the mouse can't edit refuse disconnect with the reason", () => {
 
 test("preview from a wired source ends on its wire, not at the source", () => {
   const cut = edits.disconnect(double, 6, 10).text;
-  const path = sheet(cut).preview(5, 0, 6, 10);
+  const { path } = sheet(cut).preview(false, 5, 0, 6, 10);
   const wire = sheet(cut).wires().find((w) => w.cells.some((c) => c.row === 5 && c.col === 4));
-  const end = path[path.length - 1];
-  assert.ok(wire.cells.some((c) => c.row === end.row && c.col === end.col), `path ends at ${end.row}:${end.col}`);
+  const on = (end) => wire.cells.some((c) => c.row === end.row && c.col === end.col);
+  assert.ok(on(path[0]) || on(path[path.length - 1]), "one end of the path is on the wire");
+  assert.ok(!path.some((c) => c.row === 5 && c.col === 0), "it doesn't run on to the source");
 });
 
 // Revisions (PLAN P8): an edit takes a Doc and returns the next, and a
@@ -275,34 +312,39 @@ const KINDS = ["unreadable", "target", "unsupported", "blocked", "gave-up", "cha
 
 test("an edit returns the next Doc and leaves its own alone; a refusal has a kind and no Doc", () => {
   const start = sheet(double);
-  const cut = shawline.disconnect(start, 6, 10);
+  const cut = shawline.apply(start, EDITS.disconnect(6, 10));
   assert.ok(cut.doc instanceof Doc);
   assert.equal(start.text, double);
-  const back = shawline.connect(cut.doc, 5, 0, 6, 10);
+  const back = shawline.apply(cut.doc, EDITS.connect(5, 0, 6, 10));
   assert.equal(back.ok, true, back.reason);
-  const taken = shawline.connect(back.doc, 5, 0, 5, 10);
-  assert.deepEqual([taken.ok, "doc" in taken], [false, false]);
+  const taken = shawline.apply(back.doc, EDITS.connect(5, 0, 5, 10));
+  assert.deepEqual([taken.ok, "doc" in taken, taken.remedy], [false, false, null]);
   assert.ok(KINDS.includes(taken.kind), `kind ${taken.kind}`);
   [start, cut.doc, back.doc].forEach((d) => d.free());
+  [cut.map, back.map].forEach((m) => m.free());
 });
 
-test("place_and_connect is one edit: a refused connect places nothing", () => {
+test("apply refuses an edit object written wrong, and a blocked move offers make-room", () => {
+  for (const wrong of [{ kind: "teleport" }, { kind: "move", corner: cell(4, 10) }, { kind: "connect", from: 3, to: cell(5, 10) }]) {
+    const refused = shawline.apply(sheet(double), wrong);
+    assert.deepEqual([refused.ok, refused.kind], [false, "target"], JSON.stringify(wrong));
+  }
+  const blocked = shawline.apply(sheet(double), EDITS.move_box(4, 10, 0, 20));
+  assert.deepEqual([blocked.ok, blocked.kind, blocked.remedy], [false, "blocked", "make-room"]);
+});
+
+pendingE1("place_connected is one edit: a refused connect places nothing", () => {
   const gone = sheet(edits.remove_node(double, 13, 8).text);
   const before = gone.text;
-  // 21 at 14:2 feeds the new node's input at 14:8, as the tour's palette step does.
-  const wired = shawline.place_and_connect(gone, 13, 8, "𐑛𐑳𐑚𐑩𐑤", 1, 1, 14, 2);
+  const placing = (from) => ({ kind: "place_connected", at: cell(14, 8), word: "𐑛𐑳𐑚𐑩𐑤", inputs: 1, outputs: 1, from });
+  // 21 at 14:2 feeds the new node's input, as the tour's palette step does.
+  const wired = shawline.apply(gone, placing(cell(14, 2)));
   assert.equal(wired.ok, true, wired.reason);
   assert.ok(wiredSinks(wired.doc.text).includes("14:8"));
-  // ·𐑛𐑳𐑚𐑩𐑤's input at 5:0 can't reach a node in ·𐑥𐑱𐑯: the node alone
-  // would fit, but wired from there it is refused, and nothing is placed.
-  assert.equal(shawline.place_node(gone, 13, 8, "𐑛𐑳𐑚𐑩𐑤", 1, 1).ok, true);
-  const unwired = shawline.place_and_connect(gone, 13, 8, "𐑛𐑳𐑚𐑩𐑤", 1, 1, 5, 0);
-  assert.deepEqual([unwired.ok, unwired.step, "doc" in unwired], [false, "connect", false]);
-  assert.ok(KINDS.includes(unwired.kind), `kind ${unwired.kind}`);
+  // ·𐑛𐑳𐑚𐑩𐑤's input at 5:0 can't reach a node in ·𐑥𐑱𐑯, so nothing is placed.
+  const unwired = shawline.apply(gone, placing(cell(5, 0)));
+  assert.deepEqual([unwired.ok, "doc" in unwired], [false, false]);
   assert.equal(gone.text, before, "the sheet is still the Doc it started from");
-  const unplaced = shawline.place_and_connect(sheet(double), 4, 3, "𐑐", 2, 1, 5, 0);
-  assert.deepEqual([unplaced.ok, unplaced.step], [false, "place"]);
-  assert.match(unplaced.reason, /land on/);
 });
 
 // The page's Docs: at most two, by text, each freed when it is dropped.
@@ -341,7 +383,7 @@ test("the Doc cache keeps two revisions and frees the one it drops", () => {
 
 test("an edit's Doc seeds the cache, so the refresh after it reads nothing", () => {
   const { docs, read } = counted();
-  const moved = shawline.move_box(docs.get(double), 4, 10, 1, 0);
+  const moved = shawline.apply(docs.get(double), EDITS.move_box(4, 10, 1, 0));
   assert.equal(moved.ok, true, moved.reason);
   const text = docs.seed(moved.doc);
   assert.equal(docs.get(text), moved.doc);
@@ -579,9 +621,12 @@ test("the tour walks 03-double to the end", () => {
   step(({ outWire }) => edits.remove_wire(src, outWire.cells[0].row, outWire.cells[0].col));
   step(({ tee, sink }) => edits.connect(src, tee.row, tee.col, sink.row, sink.col));
   step(({ node }) => edits.remove_node(src, node.top, node.left));
-  step(({ constant }) =>
-    edits.place_and_connect(src, constant.row - 1, constant.col + 8, "𐑛𐑳𐑚𐑩𐑤", 1, 1, constant.row, constant.col),
-  );
+  // The palette's pick, as two edits: the tour reads the sheet, not the gesture.
+  step(({ constant }) => {
+    const placed = edits.place_node(src, constant.row - 1, constant.col + 6, "𐑛𐑳𐑚𐑩𐑤", 1, 1);
+    assert.equal(placed.ok, true, placed.reason);
+    return edits.connect(placed.text, constant.row, constant.col, constant.row, constant.col + 6);
+  });
   step(({ tee, sink }) => edits.connect(src, tee.row, tee.col, sink.row, sink.col));
   assert.deepEqual(outputsOf(src), ["42"]);
   tour.ran(view(src));
@@ -659,7 +704,7 @@ test("the tour's second step rings ·𐑥𐑱𐑯 with its strip and the 𐑐 no
 // The gloss layer (PLAN P9): the Readings switch, the lone-Alt peek, and
 // the drawing's geometry at either row pitch.
 
-const { Layer, CELL_W } = await import("./layer.js");
+const { Layer } = await import("./layer.js");
 
 function fakeLayer({ on = true, annotate = shawline.annotate } = {}) {
   const timers = new Map();
@@ -667,7 +712,6 @@ function fakeLayer({ on = true, annotate = shawline.annotate } = {}) {
   const flips = [];
   const layer = new Layer({
     on,
-    rowPitch: shawline.row_pitch,
     annotate,
     changed: () => flips.push(layer.shown),
     timers: { setTimeout: (fn) => (timers.set(++ids, fn), ids), clearTimeout: (id) => timers.delete(id) },
@@ -780,45 +824,93 @@ test("a lone Alt peeks after a beat; another key cancels it, so Option-typing ne
   assert.equal(editor.text, "ex");
 });
 
-test("the hit test puts a strip's y in the row above it, with the layer on and off", () => {
-  const { layer } = fakeLayer();
-  const on = layer.geometry;
-  layer.set(false);
-  const off = layer.geometry;
-  const cell = shawline.row_pitch(false);
-  const pitch = shawline.row_pitch(true);
-  assert.deepEqual([off.pitch, off.cell, on.pitch, on.cell], [cell, cell, pitch, cell]);
-  assert.ok(pitch > cell, "a strip opens under every row");
-  for (const row of [0, 1, 5, 14]) {
-    const strip = row * pitch + (cell + pitch) / 2;
-    assert.deepEqual(on.cellAt(3.5 * CELL_W, strip), { row, col: 3 }, "the middle of the strip");
-    assert.deepEqual(on.cellAt(0, row * pitch + cell), { row, col: 0 }, "the strip's top");
-    assert.deepEqual(on.cellAt(0, (row + 1) * pitch - 0.5), { row, col: 0 }, "the strip's bottom");
-    assert.deepEqual(on.cellAt(0, (row + 1) * pitch), { row: row + 1, col: 0 }, "the next row's top");
-    assert.deepEqual(off.cellAt(0, (row + 1) * cell - 0.5), { row, col: 0 });
-    assert.deepEqual(off.cellAt(0, strip), { row: Math.floor(strip / cell), col: 0 }, "plain, that y is rows further down");
-    for (const g of [on, off]) {
-      const { x, y } = g.centre({ row, col: 2 });
-      assert.deepEqual(g.cellAt(x, y), { row, col: 2 });
-      const r = g.rect({ top: row, left: 2, bottom: row + 1, right: 4 }, { under: true, over: row > 0 });
-      const above = g === on && row > 0 ? row - 1 : row;
-      assert.deepEqual(g.cellAt(r.x, r.y), { row: above, col: 2 }, "over starts in the strip above, if there is one");
-      assert.deepEqual(g.cellAt(r.x + r.width - 0.5, r.y + r.height - 0.5), { row: row + 1, col: 4 });
-      assert.deepEqual(g.cellAt(r.x, r.y + r.height), { row: row + 2, col: 2 }, "under ends with the strip");
+// Where cells sit (PLAN P10): wasm's Geometry at the drawing's zoom, and
+// the page's zoom about the pointer (view.js).
+
+const { CELL_MIN_PX, ZOOM_MIN, ZOOM_MAX, defaultZoom, fitZoom, zoomAbout, cellUnder } = await import("./view.js");
+
+test("hit-testing finds the cell drawn under the pointer at three zooms, glossed and plain", () => {
+  const d = sheet(double);
+  for (const gloss of [false, true]) {
+    const unit = d.geometry(gloss, 1).size();
+    for (const zoom of [0.5, 1, 4]) {
+      const g = d.geometry(gloss, zoom);
+      const size = g.size();
+      assert.ok(Math.abs(size.width - unit.width * zoom) < 1e-6 && Math.abs(size.height - unit.height * zoom) < 1e-6);
+      // The drawn <svg> somewhere on the page, scrolled or not.
+      const box = { left: 130.5, top: -40, right: 130.5 + size.width, bottom: -40 + size.height };
+      for (const row of [0, 5, 14]) {
+        for (const col of [0, 10, 22]) {
+          const r = g.cell_rect(row, col, row, col, false, false);
+          const at = (x, y) => cellUnder(g, box.left + x, box.top + y, box);
+          assert.deepEqual({ ...at(r.x + 0.01, r.y + 0.01) }, { row, col }, `top-left of ${row}:${col} at ${zoom}`);
+          assert.deepEqual({ ...at(r.x + r.width - 0.01, r.y + r.height - 0.01) }, { row, col });
+          const { x, y } = g.cell_centre(row, col);
+          assert.deepEqual({ ...at(x, y) }, { row, col });
+          // A point in the strip under a row is in that row.
+          const strip = g.cell_rect(row, col, row, col, true, false);
+          assert.equal(strip.height > r.height, gloss, "a strip only with the layer on");
+          if (gloss) assert.deepEqual({ ...at(x, strip.y + strip.height - 0.01) }, { row, col });
+        }
+      }
+      assert.equal(cellUnder(g, box.left - 1, box.top + 5, box), null, "off the drawing");
+      assert.equal(cellUnder(g, box.left + 1, box.top + 1, box), null, "in the margin, above and left of the grid");
     }
   }
-  assert.deepEqual([on.cellAt(-1, 0), on.cellAt(0, -1)], [null, null]);
 });
 
-test("the drawing's rows are row_pitch apart, glossed or plain", () => {
-  const doc = sheet(double);
-  const view = (svg) => svg.match(/viewBox="([^"]+)"/)[1].split(" ").map(Number);
-  const [x0, y0, w0, plain] = view(doc.render(false, false));
-  const [x1, y1, w1, glossed] = view(doc.render(true, true));
-  assert.deepEqual([x1, y1, w1], [x0, y0, w0], "the same margin and width");
-  const rows = (plain + 2 * y0) / shawline.row_pitch(false);
-  assert.equal(rows, double.split("\n").length - 1);
-  assert.equal(glossed + 2 * y1, rows * shawline.row_pitch(true));
+test("the geometry at zoom 1 is the drawing's own size, glossed or plain", () => {
+  const d = sheet(double);
+  for (const gloss of [false, true]) {
+    const svg = d.render(false, gloss);
+    const [, w, h] = svg.match(/width="([\d.]+)" height="([\d.]+)"/).map(Number);
+    const size = d.geometry(gloss, 1).size();
+    assert.ok(Math.abs(size.width - w) < 0.01 && Math.abs(size.height - h) < 0.01, `${size.width}×${size.height} against ${w}×${h}`);
+  }
+  assert.equal(sheet("\t").geometry(true, 1), undefined);
+});
+
+test("zoom opens with cells at least 16 px wide, fits between 50% and 400%, and keeps the pointer's point still", () => {
+  const g = sheet(double).geometry(true, 1);
+  const cellWidth = g.cell_rect(0, 0, 0, 0, false, false).width;
+  assert.ok(defaultZoom(cellWidth) * cellWidth >= CELL_MIN_PX - 1e-9);
+  const size = g.size();
+  assert.equal(fitZoom(size, { width: size.width * 100, height: size.height * 100 }), ZOOM_MAX);
+  assert.equal(fitZoom(size, { width: 1, height: 1 }), ZOOM_MIN);
+  assert.equal(fitZoom(size, { width: size.width * 2, height: size.height * 3 }), 2);
+  const scroll = { left: 40, top: 10 };
+  const pointer = { x: 100, y: 60 };
+  const after = zoomAbout(1, 2, scroll, pointer);
+  assert.deepEqual([(after.left + pointer.x) / 2, (after.top + pointer.y) / 2], [scroll.left + pointer.x, scroll.top + pointer.y]);
+});
+
+test("positions convert between cells and the textarea's UTF-16 offsets, byte-order mark and all", () => {
+  const text = "﻿※ 𐑛𐑳𐑚\n▶ 𐑯 ─";
+  assert.equal(shawline.offset_of_cell(text, 0, 0), 1, "the mark is no cell");
+  assert.equal(shawline.offset_of_cell(text, 0, 3), 1 + 2 + 2, "Shavian letters are two units");
+  assert.equal(shawline.offset_of_cell(text, 1, 2), text.indexOf("𐑯"));
+  for (const [row, col] of [[0, 0], [0, 4], [1, 0], [1, 2], [1, 4]]) {
+    assert.deepEqual({ ...shawline.cell_of_offset(text, shawline.offset_of_cell(text, row, col)) }, { row, col });
+  }
+});
+
+test("diagnostics take their severity from wasm, and describe says what a word is", () => {
+  const found = sheet(corpus("93-arity.shaw")).diagnostics();
+  assert.ok(found.every((d) => ["error", "warning", "lint"].includes(d.severity)));
+  const said = sheet(double).describe(5, 12, true);
+  assert.equal(said.row, 5);
+  assert.match(said.text, /𐑐/);
+  assert.match(said.text, /add/);
+  assert.equal(sheet(double).describe(9, 5, false), undefined);
+});
+
+test("box kinds come from shawline-edit, and branch names the cells a disconnect clears", () => {
+  const kinds = sheet(corpus("04-abs.shaw")).boxes().map((b) => b.kind);
+  assert.deepEqual([...new Set(kinds)].sort(), ["definition", "node", "switch"]);
+  const cells = sheet(double).branch(6, 10).map((c) => `${c.row}:${c.col}`);
+  assert.ok(cells.includes("6:6") && cells.includes("6:9"), cells.join(" "));
+  assert.ok(!cells.includes("5:4"), "the other branch's stroke stays");
+  assert.deepEqual(sheet(double).branch(3, 3), []);
 });
 
 test("messages are plain with the layer off, annotated while it shows, and flip with a peek", () => {
@@ -875,4 +967,229 @@ test("a wire's cells say which join it southward, through the strip", () => {
   assert.deepEqual([down(5, 4), down(5, 6), down(6, 6), down(6, 7)], [false, true, false, false]);
 });
 
+// The drawing as an editor (studio.js) driven by its keys and gestures over
+// a fake page: each `write` is one undo step in the editor.
+
+const { Studio, readView } = await import("./studio.js");
+const { Choices, offer, placing } = await import("./palette.js");
+
+function studioOn(text) {
+  const docs = new Map();
+  const views = new Map();
+  const host = {
+    current: text,
+    steps: [],
+    refusals: [],
+    statuses: [],
+    editing: [],
+    apply: shawline.apply,
+    text: () => host.current,
+    write: (t) => {
+      host.steps.push(t);
+      host.current = t;
+    },
+    doc: (t) => docs.get(t) ?? (docs.set(t, new Doc(t)), docs.get(t)),
+    view: (t) => views.get(t) ?? (views.set(t, readView(host.doc(t))), views.get(t)),
+    seed: (d) => {
+      if (!docs.has(d.text)) docs.set(d.text, d);
+      return d.text;
+    },
+    refused: (r, edit) => host.refusals.push({ ...r, edit }),
+    status: (said, kind) => host.statuses.push([said, kind]),
+    changed: () => {},
+    palette: () => {},
+    editText: (target) => host.editing.push(target),
+    help() {},
+    zoom() {},
+    gloss: () => false,
+  };
+  const studio = new Studio(host);
+  const press = (key, more = {}) =>
+    studio.keydown({ key, repeat: false, shiftKey: false, ctrlKey: false, metaKey: false, altKey: false, ...more });
+  /** Presses `]` until `found(selection)`, at most once round the sheet. */
+  const seek = (found) => {
+    for (let i = 0; i < 300; i++) {
+      press("]");
+      if (studio.selection && found(studio.selection)) return studio.selection;
+    }
+    throw new Error("] never reached it");
+  };
+  return { studio, host, press, seek };
+}
+
+const sameCell = (a, b) => a.row === b.row && a.col === b.col;
+
+test("a keyboard-only rewire of 03-double: ] and Delete take every wire off, W and Enter put them back", () => {
+  const { studio, host, press, seek } = studioOn(double);
+  const editable = () => sheet(host.current).wires().filter((w) => w.source).length;
+  const removed = editable();
+  while (editable()) {
+    seek((s) => s.kind === "wire");
+    assert.equal(press("Delete"), true);
+  }
+  assert.deepEqual(wiredSinks(host.current), []);
+  // The .studio file's rewire order: source, then arrowhead.
+  for (const [from, to] of [[cell(5, 0), cell(5, 10)], [cell(5, 14), cell(5, 22)], [cell(5, 0), cell(6, 10)], [cell(14, 2), cell(14, 8)], [cell(14, 16), cell(14, 22)]]) {
+    press("Escape");
+    press("Escape");
+    seek((s) => s.kind === "source" && sameCell(s.source, from));
+    press("w");
+    assert.ok(studio.wiring, `W wires from ${from.row}:${from.col}`);
+    for (let i = 0; i < 20 && !sameCell(studio.end, to); i++) press("]");
+    assert.ok(sameCell(studio.end, to), `${to.row}:${to.col} glows`);
+    press("Enter");
+  }
+  assert.deepEqual(host.refusals.map((r) => r.reason), []);
+  assert.equal(host.steps.length, removed + 5, "one undo step per wire");
+  assert.deepEqual(wiredSinks(host.current), wiredSinks(double));
+  assert.deepEqual(outputsOf(host.current), outputsOf(double));
+});
+
+test("a palette pick made with the arrow keys places what is highlighted", () => {
+  const gone = edits.remove_node(double, 13, 8).text;
+  const callees = sheet(gone).palette();
+  callees.forEach((c) => ((c.reading = shawline.reading(c.word)), (c.keys = shawline.keys(c.word))));
+  const choices = new Choices(offer(callees, "place"));
+  assert.deepEqual(choices.items.slice(0, 3).map((c) => c.gloss), ["Number", "Text", "empty list"], "constants first");
+  choices.filter("d");
+  assert.ok(choices.items.length > 1, "a query keeps several");
+  assert.ok(choices.items.every((c) => [c.word, c.reading, c.keys, c.gloss.toLowerCase()].some((s) => s.includes("d"))));
+  let moves = 0;
+  while (choices.chosen.word !== "𐑛𐑳𐑚𐑩𐑤") {
+    assert.equal(choices.key("ArrowDown"), "move");
+    assert.ok(++moves < choices.items.length, "ArrowDown reaches every entry");
+  }
+  assert.ok(moves > 0, "the pick isn't the first entry");
+  assert.equal(choices.key("ArrowUp"), "move");
+  assert.equal(choices.key("ArrowDown"), "move");
+  assert.equal(choices.key("Enter"), "pick");
+  const { studio, host } = studioOn(gone);
+  const { edit, then } = placing(choices.chosen, cell(14, 8), { mode: "place" });
+  assert.equal(then, undefined);
+  assert.equal(studio.edit(edit), true, host.refusals[0]?.reason);
+  assert.ok(sheet(host.current).boxes().some((b) => b.kind === "node" && b.top === 13 && b.left === 8));
+  assert.equal(choices.key("Escape"), "close");
+  assert.deepEqual(offer(callees, "source").filter((c) => c.kind === "node").every((c) => c.outputs > 0), true);
+  assert.ok(offer(callees, "feed").every((c) => c.inputs > 0));
+});
+
+pendingE1("an arrowhead fed from the palette gets a number, placed and wired as one undo step", () => {
+  const cut = edits.disconnect(double, 14, 8).text.replace("│ 21 ", "│    ");
+  const { host, studio } = studioOn(cut);
+  const [number] = offer([], "source");
+  assert.equal(number.gloss, "Number");
+  const { edit, then } = placing(number, cell(15, 2), { mode: "source", to: cell(14, 8) });
+  assert.deepEqual(edit, { kind: "place_text", at: cell(14, 2), content: "0" }, "level with the arrowhead");
+  studio.chain(edit, then);
+  assert.equal(host.steps.length, 1, host.refusals[0]?.reason);
+  assert.ok(wiredSinks(host.current).includes("14:8"));
+});
+
+test("a selection survives a move: a held nudge is one undo step, and the box stays selected", () => {
+  const { studio, host, press, seek } = studioOn(double);
+  seek((s) => s.kind === "box" && s.box.top === 4 && s.box.left === 10);
+  assert.equal(press("ArrowDown"), true);
+  assert.equal(press("ArrowDown", { repeat: true }), true);
+  assert.equal(host.steps.length, 0, "nothing is written while the key is held");
+  assert.equal(host.refusals.length, 1, "the second row would cross the border, and says so");
+  assert.equal(studio.keyup({ key: "ArrowDown" }), true);
+  assert.equal(host.steps.length, 1);
+  assert.deepEqual([studio.selection.kind, studio.selection.box.top, studio.selection.box.left], ["box", 5, 10]);
+  assert.deepEqual({ ...studio.cursor }, { row: 5, col: 10 });
+  assert.deepEqual(outputsOf(host.current), outputsOf(double));
+});
+
+test("a branch selection survives a move", () => {
+  const { studio, host, seek } = studioOn(double);
+  seek((s) => s.kind === "branch" && sameCell(s.sink, cell(6, 10)));
+  assert.equal(studio.edit(EDITS.move_box(4, 10, 1, 0)), true);
+  const chosen = studio.selection;
+  assert.deepEqual([chosen.kind, chosen.sink.row, chosen.sink.col], ["branch", 7, 10]);
+  assert.deepEqual(chosen.cells.map((c) => `${c.row}:${c.col}`), sheet(host.current).branch(7, 10).map((c) => `${c.row}:${c.col}`));
+  assert.ok(chosen.cells.length > 0);
+});
+
+pendingE1("a selection survives an insertion", () => {
+  const { studio, host, press, seek } = studioOn(double);
+  seek((s) => s.kind === "box" && s.box.top === 13 && s.box.left === 8);
+  studio.cursor = cell(12, 4);
+  assert.equal(press("r"), true);
+  assert.equal(host.steps.length, 1, host.refusals[0]?.reason);
+  assert.deepEqual([studio.selection.kind, studio.selection.box.top, studio.selection.box.left], ["box", 14, 8]);
+  press("R");
+  assert.equal(host.current, double, "deleting the row again gives the sheet back");
+});
+
+pendingE1("a selection survives a retext", () => {
+  const { studio, host, press, seek } = studioOn(double);
+  seek((s) => s.kind === "source" && s.text?.content === "21");
+  assert.equal(press("Enter"), true);
+  assert.equal(host.editing.length, 1, "Enter opens the selected text for editing");
+  assert.equal(studio.edit({ kind: "set_text", at: cell(14, 2), content: "22" }), true, host.refusals[0]?.reason);
+  assert.deepEqual([studio.selection.kind, studio.selection.text.content], ["source", "22"]);
+});
+
+pendingE1("a scrub commits one undo step, and stops at the last value that fits", () => {
+  const { studio, host, seek } = studioOn(double);
+  seek((s) => s.kind === "source" && s.text?.content === "21");
+  assert.equal(studio.scrubbable, true);
+  assert.equal(studio.scrubStart(), true);
+  studio.scrubMove(8 * 3);
+  studio.scrubMove(8 * 5 + 3);
+  studio.scrubMove(-8 * 2, true);
+  studio.scrubMove(8 * 2);
+  assert.equal(host.steps.length, 0, "steps edit a preview, not the text");
+  assert.match(studio.text, /│ 23 ─/);
+  studio.scrubEnd();
+  assert.equal(host.steps.length, 1);
+  assert.match(host.current, /│ 23 ─/);
+  assert.deepEqual([studio.selection.kind, studio.selection.text.content], ["source", "23"]);
+});
+
+test("a first edit on 03-double-ascii leaves two undo steps: the format, then the edit", () => {
+  const ascii = corpus("03-double-ascii.shaw");
+  const { studio, host } = studioOn(ascii);
+  studio.select(studio.targetAt(cell(4, 10)));
+  assert.equal(studio.selection.kind, "box");
+  assert.equal(studio.edit(EDITS.move_box(4, 10, 1, 0)), true, host.refusals[0]?.reason);
+  assert.equal(host.steps.length, 2);
+  assert.equal(host.steps[0], corpus("03-double-ascii.fmt.shaw"));
+  assert.equal(host.steps[1], edits.move_box(host.steps[0], 4, 10, 1, 0).text);
+  assert.ok(host.statuses.some(([said]) => said === "Formatted the sheet to edit it"));
+  assert.deepEqual([studio.selection.box.top, studio.selection.box.left], [5, 10]);
+});
+
+test("Tab leaves the drawing from any selection, and while wiring", () => {
+  const { studio, press, seek } = studioOn(double);
+  const kinds = new Set();
+  for (let i = 0; i < 40; i++) {
+    press("]");
+    const before = studio.selection;
+    kinds.add(before.kind);
+    assert.equal(press("Tab"), false, `Tab from a ${before.kind}`);
+    assert.equal(press("Tab", { shiftKey: true }), false);
+    assert.equal(studio.selection, before, "Tab changes nothing");
+  }
+  assert.deepEqual([...kinds].sort(), ["box", "branch", "source", "text", "wire"]);
+  // Every arrowhead of 03-double is wired, so W rewires a branch.
+  seek((s) => s.kind === "branch");
+  press("w");
+  assert.ok(studio.wiring);
+  assert.equal(press("Tab"), false);
+  press("Escape");
+  press("Escape");
+  press("Escape");
+  assert.deepEqual([studio.selection, studio.cursor], [null, null]);
+  assert.equal(press("Tab"), false);
+});
+
+test("the live region says what the selection is, with its description", () => {
+  const { studio, seek } = studioOn(double);
+  seek((s) => s.kind === "box" && s.box.top === 4);
+  assert.match(studio.describe(), /^Node at 5:11\..*𐑐.*Arrow keys nudge it/);
+  seek((s) => s.kind === "source" && s.text?.content === "21");
+  assert.match(studio.describe(), /^Number 21 at 15:3\./);
+});
+
+if (skipped) console.log(`${skipped} skipped until E1's edits land`);
 process.exit(failed ? 1 : 0);

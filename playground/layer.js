@@ -1,11 +1,9 @@
-// The gloss layer (PLAN P9): the Readings switch, a peek while Alt is held
-// by itself, and where cells sit in a drawing, whose rows are further apart
-// while the layer shows. The layer changes how the sheet and its messages
-// are shown and never the text: nothing here edits, and the only key it
-// holds back is the release of an Alt that peeked.
-
-/** One cell's width in the renderer's SVG units (shawline-glyph CELL_WIDTH). */
-export const CELL_W = 600;
+// The gloss layer (PLAN P9): the Readings switch, and a peek while Alt is
+// held by itself. A drawing's rows are further apart while the layer shows,
+// and wasm's `Geometry`, made with `shown`, says where its cells sit. The
+// layer changes how the sheet and its messages are shown and never the
+// text: nothing here edits, and the only key it holds back is the release
+// of an Alt that peeked.
 
 /**
  * How long Alt must be held alone before the layer flips. Option-typing on
@@ -14,55 +12,15 @@ export const CELL_W = 600;
  */
 export const PEEK_MS = 250;
 
-/**
- * Where cells sit in a drawing whose rows are `pitch` apart, in the
- * renderer's SVG units. A row's cell is `cell` high, at the top of its
- * pitch; the rest of the pitch is the gloss strip under it.
- */
-export class Geometry {
-  constructor(pitch, cell) {
-    this.pitch = pitch;
-    this.cell = cell;
-  }
-
-  /**
-   * The cell under a point, or null left of or above the sheet. A point in
-   * a strip is in the row above it, whose words the strip glosses.
-   */
-  cellAt(x, y) {
-    return x >= 0 && y >= 0 ? { row: Math.floor(y / this.pitch), col: Math.floor(x / CELL_W) } : null;
-  }
-
-  /**
-   * An inclusive cell rectangle's area, from its top row's top to its
-   * bottom row's cell. `under` takes it on through the strip below, and
-   * `over` back up through the strip above, so a highlight of cells that
-   * join vertically doesn't break at the strip between them.
-   */
-  rect({ top, left, bottom, right }, { under = false, over = false } = {}) {
-    const strip = this.pitch - this.cell;
-    const y = top * this.pitch - (over ? strip : 0);
-    const end = bottom * this.pitch + this.cell + (under ? strip : 0);
-    return { x: left * CELL_W, y, width: (right - left + 1) * CELL_W, height: end - y };
-  }
-
-  /** A cell's centre. */
-  centre({ row, col }) {
-    return { x: col * CELL_W + CELL_W / 2, y: row * this.pitch + this.cell / 2 };
-  }
-}
-
 export class Layer {
   /**
    * - `on` is the Readings switch.
-   * - `rowPitch(gloss)` and `annotate(text)` are the wasm exports.
+   * - `annotate(text)` is the wasm export.
    * - `changed()` hears every flip of what is shown.
    * - `timers` stands in for the page's in tests.
    */
-  constructor({ on = true, rowPitch, annotate, changed = () => {}, timers = globalThis }) {
+  constructor({ on = true, annotate, changed = () => {}, timers = globalThis }) {
     Object.assign(this, { on, annotate, changed, timers });
-    const cell = rowPitch(false);
-    this.geometries = [new Geometry(cell, cell), new Geometry(rowPitch(true), cell)];
     this.peeking = false;
     /** The timer that starts a peek, while a lone Alt is held. */
     this.hold = null;
@@ -71,11 +29,6 @@ export class Layer {
   /** Whether the layer shows: the switch, flipped while a peek lasts. */
   get shown() {
     return this.on !== this.peeking;
-  }
-
-  /** Where cells sit in a drawing made as the layer now shows. */
-  get geometry() {
-    return this.geometries[Number(this.shown)];
   }
 
   /** Sets the switch. A peek ends, so what shows is what the switch says. */
