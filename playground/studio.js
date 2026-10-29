@@ -403,6 +403,9 @@ export class Studio {
     const next = { dr: this.nudging.dr + dr, dc: this.nudging.dc + dc };
     const edit = { kind: "move", corner: { row: box.top, col: box.left }, ...next };
     const refusal = this.try(edit);
+    // Kept until the key comes up, when Make room can be offered from
+    // where the box stopped.
+    this.nudging.refused = refusal ? { refusal, dr, dc } : null;
     if (refusal) return void this.host.refused(refusal, edit);
     Object.assign(this.nudging, next);
   }
@@ -517,8 +520,15 @@ export class Studio {
   /** A key came up: the end of a held nudge. */
   keyup(e) {
     if (this.nudging && e.key === this.nudging.key) {
+      const blocked = this.nudging.refused;
       this.nudging = null;
       this.release();
+      // The last step was refused: say so again from where the box is now,
+      // with the one step that didn't fit, so Make room can be offered.
+      const box = this.selection?.box;
+      if (blocked && box) {
+        this.host.refused(blocked.refusal, { kind: "move", corner: { row: box.top, col: box.left }, dr: blocked.dr, dc: blocked.dc });
+      }
       return true;
     }
     return false;

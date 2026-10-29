@@ -1130,6 +1130,18 @@ test("a selection survives a move: a held nudge is one undo step, and the box st
   assert.deepEqual(outputsOf(host.current), outputsOf(double));
 });
 
+test("a held nudge refused at the end offers its last step again on release, for Make room", () => {
+  const { studio, host, press, seek } = studioOn(double);
+  seek((s) => s.kind === "box" && s.box.top === 4 && s.box.left === 10);
+  for (let k = 0; k < 12 && host.refusals.length === 0; k++) press("ArrowRight", { repeat: k > 0 });
+  assert.ok(host.refusals.length > 0, "the box runs out of room");
+  studio.keyup({ key: "ArrowRight" });
+  const last = host.refusals.at(-1);
+  const box = studio.selection.box;
+  assert.deepEqual([last.edit.kind, last.edit.corner.row, last.edit.corner.col, last.edit.dr, last.edit.dc], ["move", box.top, box.left, 0, 1]);
+  assert.equal(host.steps.length, 1, "the steps that fit are one undo step");
+});
+
 test("a branch selection survives a move", () => {
   const { studio, host, seek } = studioOn(double);
   seek((s) => s.kind === "branch" && sameCell(s.sink, cell(6, 10)));

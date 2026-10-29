@@ -1041,6 +1041,35 @@ Five read-only audits (interaction mechanics, product legibility, conceptual int
   - `Geometry::new(grid, gloss, scale)` takes `scale` in shown units per glyph unit, with the zoom multiplied in. Its points are measured from the drawing's top-left corner, margin included. It has `size`, `cell_at`, `cell_rect(rect, under, over) -> Area` and `cell_centre`.
 - **Gate:** the workspace tests pass with no `.studio` change, clippy is clean on host and wasm, and the playground build and its Node checks pass.
 
+**Wave 1 gate** ✅. E1 and W1 both merged by fast-forward, with one second round each for `Feed`.
+- **Contract added at the gate:** `Edit::Feed { to, source: NewSource }` and `feed`, which places a constant or node and wires it into an unwired arrowhead as one edit. W1 had chained `place_text` and `connect`, but `place_text` rightly refuses a constant in front of an arrowhead. A constant goes on the arrowhead's row as `21 ───▶`, trying wire lengths 3, 2, 1, 4, 5 and 6.
+- **Gate fixes:**
+  - `studio_room` compares an ASCII twin's round trips with its canonical text, since edits return canonical text.
+  - Two W1 checks had wrong expectations. A preview starts at the source's own cell (an input's name, not its arrowhead). After an insertion the cursor follows the selected box, so the check moves it back before deleting the row.
+  - A held nudge refused at its last step now offers that step again on release, so Make room appears after a keyboard nudge as it does after a drag. A new Node check covers it.
+- **`.studio`:** re-blessed after reading the diff. Only `room`, `insert`, `retext` and `build` lines changed:
+  - 112 inserts and 112 deletes ok, every delete restoring the original;
+  - 153 retexts ok;
+  - 11 of 36 `make_room` ok, the rest still `blocked`;
+  - in `build`, the first `place_text` is now ok in 16 files, with `place_definition` refused `unsupported` after it. That is expected until wave 2.
+- **Decisions recorded from the agents:**
+  - `Edge` also covers a parent's top or left side, a divider above, and landing on something above or to the left, because inserting room there can't help.
+  - `make_room` also tries "just past the box" for moves down or right.
+  - `place_text` outside a definition on untidy text refuses with `Format`.
+  - W1 added keys: `R` and `C` insert a row or column, and with Shift delete one; `+`, `−` and `0` zoom; Space-drag pans.
+- **Checks:**
+  - the workspace tests pass, clippy is clean on host and wasm, and all 68 Node checks pass with none skipped;
+  - `studio_room` passes, with 388 successful steps over 199 sequences.
+- **By hand, in the browser:**
+  - Make room after dragging `03-double`'s 𐑐 node past its definition: the button sits by the refused cell, and one click widened the definition by two columns and kept the node selected;
+  - scrubbing `03-double`'s `21` to `29`: the values followed in both definitions (58), and one undo brought back `21`;
+  - no console errors.
+- **Timing:** the p95 of a scrub step on `11-even-odd` (edit, trace and render) is 6.4 ms in Node over 200 steps, with a maximum of 26.8 ms. That is under 16 ms, so scrubbing stays on the main thread.
+- **Found, not fixed:**
+  - the refusal tip covers the Make room button until it fades (2.8 s);
+  - after `make_room move 12:18 1 0` on `04-abs`, the re-routed wires hug the moved node (`0 ┐┌───┐┌──▶`). This is the move router's routing, not new in this wave;
+  - `place_connected` retries rows, while `feed` retries wire lengths. Both search positions in private, as `make_room` does.
+
 **Wave 2: the whole language by mouse.**
 - **Contracts (lead):**
   - `place_definition`, `place_switch`, `add_port`, `remove_port`, `add_arm`, `remove_arm`, `remove_box`, `set_ports` and `place_inline`;
