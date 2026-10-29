@@ -23,12 +23,14 @@
 
 mod canon;
 mod check;
+mod compound;
 mod cut;
 mod describe;
 mod mapped;
 mod model;
 mod mover;
 mod retext;
+mod room;
 mod router;
 mod sheet;
 mod wiring;
@@ -497,8 +499,7 @@ pub struct Roomed {
 /// budget are private. Refused, with the original refusal's cell, when no
 /// insertion within the budget lets `edit` succeed.
 pub fn make_room(doc: &Doc, edit: &Edit) -> Result<Roomed, Refusal> {
-    let _ = doc;
-    Err(pending(edit.at()))
+    room::make_room(doc, edit)
 }
 
 /// Replaces the content of the text through `at` (any of its cells). A
@@ -588,8 +589,7 @@ impl Edit {
 /// `from`, as one edit: [`disconnect`] then [`connect`], refused whole when
 /// either is.
 pub fn rewire(doc: &Doc, from: Pos, to: Pos) -> Result<Edited, Refusal> {
-    let _ = (doc, from);
-    Err(pending(to))
+    compound::rewire(doc, from, to)
 }
 
 /// The palette's gesture after a wire from source `from` is dropped on
@@ -605,8 +605,7 @@ pub fn place_connected(
     outputs: u16,
     from: Pos,
 ) -> Result<Edited, Refusal> {
-    let _ = (doc, word, inputs, outputs, from);
-    Err(pending(at))
+    compound::place_connected(doc, at, word, inputs, outputs, from)
 }
 
 /// What a box is, by how recognition reads it.
@@ -643,20 +642,23 @@ pub fn box_kind(doc: &Doc, corner: Pos) -> Option<BoxKind> {
 /// The cells [`disconnect`] would clear for sink `to`, in the text as
 /// given, row-major. Empty when it would be refused.
 pub fn branch(doc: &Doc, to: Pos) -> Vec<Pos> {
-    // The cells that change, read off the result; exact while the given
-    // text is canonical.
+    // The cells that change, read off the result on the canonical sheet
+    // the edit drew on, then carried back to the text as given by their
+    // place in the box around them.
     let Ok(cut) = disconnect(doc, to) else { return Vec::new() };
-    let (Ok(before), Ok(after)) = (doc.grid(), cut.doc.grid()) else { return Vec::new() };
+    let Ok(sheets) = canon::Sheets::read(doc, to) else { return Vec::new() };
+    let (before, _) = sheets.canon();
+    let Ok(after) = cut.doc.grid() else { return Vec::new() };
     let mut cells = Vec::new();
     for row in 0..before.height() {
         for col in 0..before.width() {
             let p = Pos::new(row, col);
-            let gone = row >= after.height() || col >= after.width() || after.get(p) != before.get(p);
-            if gone && before.get(p) != ' ' {
-                cells.push(p);
+            if before.get(p) != ' ' && after.get(p) != before.get(p) {
+                cells.extend(sheets.shown(p));
             }
         }
     }
+    cells.sort();
     cells
 }
 
@@ -755,11 +757,7 @@ pub struct Preview {
 /// released at `to`: a free endpoint of the other kind in the same scope,
 /// or a blank cell. `None` when nothing fits.
 pub fn preview(doc: &Doc, anchor: Anchor, to: Pos) -> Option<Preview> {
-    match anchor {
-        // Today's path leaves out the ends; wave 1 adds them and sinks.
-        Anchor::Source(from) => wiring::preview(doc, from, to).map(|path| Preview { path, joins_wire: false }),
-        Anchor::Sink(_) => None,
-    }
+    wiring::preview(doc, anchor, to)
 }
 
 /// For each wire of the recognized diagram (`Diagram::wires` order), the

@@ -30,7 +30,15 @@ const OTHER_CHAIN: u32 = 2;
 /// never preferred.
 const TIGHT: u32 = 4;
 
-pub(crate) fn move_box(doc: &Doc, corner: Pos, dr: isize, dc: isize) -> Result<Doc, Refusal> {
+/// A move's result, and the text it drew before tidying: the formatter
+/// keeps every box and text in order, so a map runs through `drawn`.
+#[derive(Debug)]
+pub(crate) struct Moved {
+    pub doc: Doc,
+    pub drawn: Doc,
+}
+
+pub(crate) fn move_box(doc: &Doc, corner: Pos, dr: isize, dc: isize) -> Result<Moved, Refusal> {
     move_within(doc, corner, dr, dc, BUDGET)
 }
 
@@ -41,7 +49,7 @@ pub(crate) fn move_within(
     dr: isize,
     dc: isize,
     budget: usize,
-) -> Result<Doc, Refusal> {
+) -> Result<Moved, Refusal> {
     // The box is found on the text as given, then carried over to the
     // canonical text the move draws on (`crate::canon`). Refusals point at
     // canonical cells, so they're carried back.
@@ -66,16 +74,16 @@ fn moved(
     dr: isize,
     dc: isize,
     budget: usize,
-) -> Result<Doc, Refusal> {
+) -> Result<Moved, Refusal> {
     let canon = sheets.doc();
     if dr == 0 && dc == 0 {
-        return Ok(Doc::new(canon.text()));
+        return Ok(Moved { doc: Doc::new(canon.text()), drawn: Doc::new(canon.text()) });
     }
     let (grid, diagram) = sheets.canon();
     let rect = diagram.boxes[index].rect;
     let at = Pos::new(rect.top, rect.left);
     let changed = |why: &str| {
-        Refusal::new(at, RefusalKind::Changed, format!("the box can't go there: {why}"))
+        Refusal::new(at, RefusalKind::Changed, format!("the box can't go there: {why}; try another spot"))
     };
 
     let drawn = Doc::new(Mover::new(grid, diagram, index, dr, dc)?.run(budget)?);
@@ -91,13 +99,14 @@ fn moved(
     }
     // The formatter tidies what the edit left loose (a constant pulled up to
     // its shortened wire). It keeps the structure, but not necessarily the box.
-    let result = tidy(drawn).map_err(changed)?;
+    let result = tidy(Doc::new(drawn.text())).map_err(changed)?;
     let moved = shift.rect(rect);
     let boxes = &result.diagram().expect("a canonical sheet is on the grid").boxes;
     if !boxes.iter().any(|b| b.rect == moved) {
-        return Err(Refusal::new(at, RefusalKind::Changed, "formatting would undo this move"));
+        let why = "the box wouldn't stay there once the sheet is tidied; try one cell further";
+        return Err(Refusal::new(at, RefusalKind::Changed, why));
     }
-    Ok(result)
+    Ok(Moved { doc: result, drawn })
 }
 
 /// Non-lint diagnostic codes, sorted: positions move with the box.
@@ -281,8 +290,8 @@ impl<'a> Mover<'a> {
         let (Some(tl), Some(br)) =
             (shifted(Pos::new(rect.top, rect.left)), shifted(Pos::new(rect.bottom, rect.right)))
         else {
-            let why = "the box can't move past the edge of the sheet";
-            return Err(refuse(RefusalKind::Blocked(Blockage::NoRoom), why));
+            let why = "the box is at the edge of the sheet; it can't go further this way";
+            return Err(refuse(RefusalKind::Blocked(Blockage::Edge), why));
         };
         let new_rect = Rect { top: tl.row, left: tl.col, bottom: br.row, right: br.col };
 
@@ -297,8 +306,8 @@ impl<'a> Mover<'a> {
                     right: grid.width() + rect.right + 2,
                 };
                 if new_rect.bottom > region.bottom || new_rect.right > region.right {
-                    let why = "the box can't move that far past the end of the sheet";
-                    return Err(refuse(RefusalKind::Blocked(Blockage::NoRoom), why));
+                    let why = "that's too far past the end of the sheet; move the box in smaller steps";
+                    return Err(refuse(RefusalKind::Blocked(Blockage::Edge), why));
                 }
                 region
             }
@@ -306,7 +315,14 @@ impl<'a> Mover<'a> {
                 let parent = &diagram.boxes[p];
                 let what = if parent.parent.is_none() { "definition" } else { "switch" };
                 if !parent.rect.encloses(&new_rect) {
-                    let why = format!("the box would leave its {what}");
+                    // Inserting room pushes a parent's bottom and right
+                    // edges away, never its top or left.
+                    let r = parent.rect;
+                    if new_rect.top <= r.top || new_rect.left <= r.left {
+                        let why = format!("the box is at the edge of its {what}; it can't go further this way");
+                        return Err(refuse(RefusalKind::Blocked(Blockage::Edge), &why));
+                    }
+                    let why = format!("the box would leave its {what}; try Make room to grow it");
                     return Err(refuse(RefusalKind::Blocked(Blockage::NoRoom), &why));
                 }
                 let r = parent.rect;
@@ -315,8 +331,12 @@ impl<'a> Mover<'a> {
                     parent.dividers.iter().map(|d| d.row).filter(|&d| d > rect.bottom).min();
                 let top = above.unwrap_or(r.top) + 1;
                 let bottom = below.unwrap_or(r.bottom) - 1;
-                if new_rect.top < top || new_rect.bottom > bottom {
-                    let why = "the box would cross into another arm of the switch";
+                if new_rect.top < top {
+                    let why = "the box is at the top of its arm; it can't cross into the arm above";
+                    return Err(refuse(RefusalKind::Blocked(Blockage::Edge), why));
+                }
+                if new_rect.bottom > bottom {
+                    let why = "the box would cross into the next arm; try Make room to grow its arm";
                     return Err(refuse(RefusalKind::Blocked(Blockage::NoRoom), why));
                 }
                 Rect { top, left: r.left + 1, bottom, right: r.right - 1 }
@@ -339,8 +359,8 @@ impl<'a> Mover<'a> {
                 let chain = walk(grid, diagram, &border, &texts, e.pos, e.facing);
                 let new_port = shifted(port).expect("on the moved box");
                 let Some(target) = new_port.step(side) else {
-                    let why = "the wire at this port would leave the sheet";
-                    return Err(Refusal::new(port, RefusalKind::Blocked(Blockage::NoRoom), why));
+                    let why = "the wire at this port would run off the sheet; move the box the other way";
+                    return Err(Refusal::new(port, RefusalKind::Blocked(Blockage::Edge), why));
                 };
                 ends.push(End {
                     wire: w,
@@ -411,7 +431,14 @@ impl<'a> Mover<'a> {
                 } else {
                     "a wire"
                 };
-                return Err(refuse(RefusalKind::Blocked(Blockage::NoRoom), &format!("the box would land on {what}")));
+                // Room is inserted below and to the right of a cell, so it
+                // can't clear what lies above or to the left of the box.
+                if dr < 0 || dc < 0 {
+                    let why = format!("the box would land on {what}; move that out of the way first");
+                    return Err(refuse(RefusalKind::Blocked(Blockage::Edge), &why));
+                }
+                let why = format!("the box would land on {what}; try Make room or another spot");
+                return Err(refuse(RefusalKind::Blocked(Blockage::NoRoom), &why));
             }
             footprint.insert(q);
             if ch != ' ' {
@@ -509,19 +536,19 @@ impl<'a> Mover<'a> {
                 return Err(Refusal::new(
                     corner,
                     RefusalKind::Blocked(Blockage::NoRoom),
-                    "no free path for a wire; make room around the box first",
+                    "no free path for a wire; try Make room or a shorter move",
                 ));
             };
             let reason = match (miss, &end.chain.open) {
-                (Miss::GaveUp, _) => "the search for a path for the wire at this port gave up; \
-                     try a shorter move or make room around the box first"
-                    .to_owned(),
+                (Miss::GaveUp, _) => {
+                    "the search for a path for the wire at this port gave up; try a shorter move".to_owned()
+                }
                 (Miss::NoPath, Some(open)) => format!(
-                    "no room for the wire from {}; move {} or make room around the box first",
+                    "no room for the wire from {}; move {} or try Make room",
                     open.text, open.text
                 ),
                 (Miss::NoPath, None) => {
-                    "no free path for the wire at this port; make room around the box first"
+                    "no free path for the wire at this port; try Make room or a shorter move"
                         .to_owned()
                 }
             };

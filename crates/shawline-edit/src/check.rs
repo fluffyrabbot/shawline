@@ -13,7 +13,7 @@ use shawline_shape::Diagram;
 use shawline_shape::structure::{Mapping, Part, Routing, Structure};
 
 /// Why an edit is refused when its result's diagnostics differ.
-pub(crate) const DIAGNOSTICS: &str = "it would change the sheet's diagnostics";
+pub(crate) const DIAGNOSTICS: &str = "it would change what the program means";
 
 /// What a move shifts: some boxes with everything inside them, plus a few
 /// texts outside (a definition's output names).

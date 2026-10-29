@@ -42,7 +42,8 @@ impl<'a> Sheets<'a> {
         })?;
         let diagram = doc.diagram().expect("a sheet on the grid is recognized");
         let untidy = || {
-            Refusal::new(at, RefusalKind::Unreadable, "the sheet can't be tidied for editing")
+            let why = "the sheet can't be tidied for editing; fix the drawing in the text pane first";
+            Refusal::new(at, RefusalKind::Unreadable, why)
         };
         let canonical = doc.canonical().ok_or_else(untidy)?;
         if std::ptr::eq(canonical, doc) {
@@ -120,6 +121,16 @@ impl<'a> Sheets<'a> {
         rebase(p, self.corner(b), corner(self.given().1, b))
     }
 
+    /// Canonical cell `p` as a cell of the given text, by its place in the
+    /// innermost box around it. `None` outside every box.
+    pub(crate) fn shown(&self, p: Pos) -> Option<Pos> {
+        let canon = self.canon().1;
+        let b = (0..canon.boxes.len())
+            .filter(|&b| canon.boxes[b].rect.contains(p))
+            .min_by_key(|&b| canon.boxes[b].rect.area())?;
+        self.back(b, p)
+    }
+
     /// The canonical index of wire `w` of the given sheet, which passes
     /// through given cell `at`. `given` and `canon` model the two sheets.
     ///
@@ -149,7 +160,7 @@ impl<'a> Sheets<'a> {
             .collect();
         match here[..] {
             [v] => Ok(v),
-            _ => Err("this wire can't be told apart from another until the sheet is formatted"),
+            _ => Err(LOOK_ALIKE),
         }
     }
 }
@@ -192,6 +203,9 @@ fn rebase(p: Pos, from: Pos, to: Pos) -> Option<Pos> {
         p.col.checked_add(to.col)?.checked_sub(from.col)?,
     ))
 }
+
+/// Why a wire on untidy text can't be named: formatting tells it apart.
+pub(crate) const LOOK_ALIKE: &str = "format the sheet first: this wire looks like another one until then";
 
 /// Why an edit's drawing can't be read back.
 pub(crate) const STRAY: &str = "it would write a stray character";

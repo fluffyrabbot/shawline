@@ -56,8 +56,10 @@ pub(crate) fn kept(old: &Doc, new: Doc) -> Edited {
 }
 
 /// The box at given cell `corner` moved by `dr`, `dc`, with what it holds
-/// and the names that follow its outputs.
-pub(crate) fn moved(old: &Doc, corner: Pos, dr: isize, dc: isize, new: Doc) -> Edited {
+/// and the names that follow its outputs. Boxes and texts are found by
+/// place in the drawing the move made, then by order in its tidied form,
+/// which the formatter keeps.
+pub(crate) fn moved(old: &Doc, corner: Pos, dr: isize, dc: isize, moved: crate::mover::Moved) -> Edited {
     let sheets = crate::canon::Sheets::read(old, corner).expect("the move read this sheet");
     let index = sheets
         .given()
@@ -71,8 +73,11 @@ pub(crate) fn moved(old: &Doc, corner: Pos, dr: isize, dc: isize, new: Doc) -> E
     let trailing: std::collections::HashSet<Pos> =
         shift.texts.iter().flat_map(|&t| diagram.texts[t].cells()).collect();
     let cell = |p: Pos| Some(if shift.rect.contains(p) || trailing.contains(&p) { shift.pos(p) } else { p });
-    let map = map(before(old), read(&new), cell);
-    Edited { doc: new, map, tidied: tidied(old) }
+    let drawn = read(&moved.drawn);
+    let mut map = map(before(old), drawn, cell);
+    let new = read(&moved.doc);
+    map.wires = wires(before(old), new, &map, &cell);
+    Edited { doc: moved.doc, map, tidied: tidied(old) }
 }
 
 /// Wires found by what they join, for a step whose boxes and texts `map`

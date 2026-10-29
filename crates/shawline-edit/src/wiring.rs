@@ -22,7 +22,6 @@ use shawline_shape::{BoxStyle, Diagram, EndKind, PortKind, TextKind};
 use shawline_vm::bytecode::Prim;
 
 use crate::canon::{Sheets, tidy};
-use crate::check::DIAGNOSTICS;
 use crate::BoxKind;
 use crate::model::{Model, NIL, Sink, Source, Term, no_sink, no_source};
 use crate::router::{self, BEND, BUDGET, CLEARANCE, Cell, Found, Miss, Start, TEE, Terrain, toward};
@@ -91,10 +90,10 @@ fn finish(
     let found = Structure::of(grid, diagram);
     expected(&map).expect(&found, Routing::Ignored).map_err(|part| {
         refuse(match part {
-            Part::Boxes => "it would change a box",
-            Part::Texts => "it would change the text on the sheet",
-            Part::Wires => "it would change what another wire connects",
-            Part::Codes => DIAGNOSTICS,
+            Part::Boxes => "it would disturb a box; try another route or spot",
+            Part::Texts => "it would disturb a text; try another route or spot",
+            Part::Wires => "it would change what another wire connects; try another route or spot",
+            Part::Codes => "it would change what the program means; try another route or spot",
         })
     })?;
     Ok(doc)
@@ -205,9 +204,10 @@ pub(crate) fn remove_wire(doc: &Doc, at: Pos) -> Result<Doc, Refusal> {
     })?;
     let (grid, diagram) = sheets.canon();
     let model = Model::new(grid, diagram);
-    let w = sheets
-        .wire(&given, &model, w, at)
-        .map_err(|why| Refusal::new(at, RefusalKind::Unreadable, why))?;
+    let w = sheets.wire(&given, &model, w, at).map_err(|why| Refusal {
+        remedy: Some(crate::Remedy::Format),
+        ..Refusal::new(at, RefusalKind::Unreadable, why)
+    })?;
     let mut canvas = Canvas::new(grid);
     erase_wire(&mut canvas, &model, w);
     let mut expected = Structure::of(grid, diagram);
@@ -308,7 +308,7 @@ pub(crate) fn remove_node(doc: &Doc, corner: Pos) -> Result<Doc, Refusal> {
 /// The rectangle of a canonical node box for `word` (SPEC §6, as the corpus
 /// draws them): one space either side of the word, which sits on the first
 /// port row, and one row per port.
-fn node_rect(corner: Pos, word: &str, inputs: u16, outputs: u16) -> Rect {
+pub(crate) fn node_rect(corner: Pos, word: &str, inputs: u16, outputs: u16) -> Rect {
     let rows = inputs.max(outputs).max(1) as usize;
     Rect {
         top: corner.row,
@@ -352,7 +352,8 @@ pub(crate) fn place_node(
     // The corner is in a box, so the node reaches past a definition's
     // border.
     let Some(holder) = holder else {
-        return Err(refuse(RefusalKind::Blocked(Blockage::NoRoom), "the node would stick out of its definition"));
+        let why = "the node would stick out of its definition; try Make room or a spot further in";
+        return Err(refuse(RefusalKind::Blocked(Blockage::NoRoom), why));
     };
     match model.kind(holder) {
         BoxKind::Node => {
@@ -361,7 +362,7 @@ pub(crate) fn place_node(
         BoxKind::Switch => {
             let dividers = &diagram.boxes[holder].dividers;
             if dividers.iter().any(|d| (rect.top..=rect.bottom).contains(&d.row)) {
-                let why = "the node would cross from one arm of the switch into another";
+                let why = "the node would cross from one arm of the switch into another; try Make room";
                 return Err(refuse(RefusalKind::Blocked(Blockage::NoRoom), why));
             }
         }
@@ -371,7 +372,8 @@ pub(crate) fn place_node(
         && !b.rect.encloses(&rect)
         && b.rect != diagram.boxes[holder].rect)
     {
-        return Err(refuse(RefusalKind::Blocked(Blockage::NoRoom), "the node would overlap another box"));
+        let why = "the node would overlap another box; find a clear spot";
+        return Err(refuse(RefusalKind::Blocked(Blockage::NoRoom), why));
     }
     // Clear in the text the caller sees as well as in the canonical one,
     // where formatting may have moved text or wire out of the way.
@@ -623,17 +625,15 @@ pub(crate) fn connect(doc: &Doc, from: Pos, to: Pos) -> Result<Doc, Refusal> {
         model.editable(w).map_err(|why| Refusal::new(from, RefusalKind::Unsupported, why))?;
     }
     if sink.target().is_none_or(|t| grid.get(t) != ' ') {
-        let why = "the cell before this arrowhead is taken";
+        let why = "the cell before this arrowhead is taken; move what's there or try Make room";
         return Err(Refusal::new(to, RefusalKind::Blocked(Blockage::NoRoom), why));
     }
     let wiring = Wiring::new(&model, &source, Some(&sink));
     let found = search_from_sink(&wiring, &sink).map_err(|miss| {
         let name = &source.name;
         let why = match miss {
-            Miss::NoPath => format!("no free path for a wire from {name}; make room first"),
-            Miss::GaveUp => {
-                format!("the search for a wire from {name} gave up; make room or bring them closer")
-            }
+            Miss::NoPath => format!("no free path for a wire from {name}; try Make room or move them closer"),
+            Miss::GaveUp => format!("the search for a wire from {name} gave up; move them closer"),
         };
         Refusal::new(to, miss.kind(), why)
     })?;
@@ -646,46 +646,161 @@ pub(crate) fn connect(doc: &Doc, from: Pos, to: Pos) -> Result<Doc, Refusal> {
     finish(canvas.render(), diagram, to, "the wire can't go there", |map| expected.relabel(map))
 }
 
-/// The cells a wire from `from` would take if released at `to`: exactly
-/// what [`connect`] would draw when `to` is a free sink, or a route to the
-/// blank cell `to` otherwise. `None` when nothing fits.
-///
-/// The route is found on the canonical sheet and given back as cells of the
-/// text as given, by their place in the source's box.
-pub(crate) fn preview(doc: &Doc, from: Pos, to: Pos) -> Option<Vec<Pos>> {
-    let sheets = Sheets::read(doc, from).ok()?;
+/// Where a dragged wire is released: a free sink, or a blank cell.
+enum Release {
+    Sink(Sink),
+    Cell(Pos),
+}
+
+/// The router's view while drawing a wire from a sink to a blank cell,
+/// with no source yet: [`Wiring`]'s ground, ending at `to`.
+struct Loose<'a> {
+    wiring: Wiring<'a>,
+    to: Pos,
+}
+
+impl Terrain for Loose<'_> {
+    fn cell(&self, p: Pos) -> Cell {
+        self.wiring.cell(p)
+    }
+
+    fn extra(&self, p: Pos) -> u32 {
+        self.wiring.extra(p)
+    }
+
+    fn goal(&self, p: Pos, _heading: Dir) -> Option<u32> {
+        (p == self.to).then_some(0)
+    }
+
+    fn bend_extra(&self, p: Pos) -> u32 {
+        self.wiring.bend_extra(p)
+    }
+}
+
+/// What [`connect`] would draw from `source` to `release`, on the canonical
+/// sheet: the polyline from the source's own cell (a port, or a text's last
+/// cell) or the tee joining its wire, to the sink or the blank cell.
+fn polyline(model: &Model, source: &Source, release: &Release) -> Option<crate::Preview> {
+    let found = match release {
+        Release::Sink(sink) => {
+            if model.wire_of(sink.term()).is_some() || sink.scope != source.scope {
+                return None;
+            }
+            let wiring = Wiring::new(model, source, Some(sink));
+            (search_from_sink(&wiring, sink).ok()?, wiring.wire.is_some())
+        }
+        Release::Cell(to) => {
+            let wiring = Wiring::new(model, source, None);
+            if wiring.cell(*to) != Cell::Free {
+                return None;
+            }
+            let start = Start { pos: *to, heading: None, straight: false };
+            (router::search(&wiring, start, &mut { BUDGET }).ok()?, wiring.wire.is_some())
+        }
+    };
+    let (found, joins_wire) = found;
+    let mut path: Vec<Pos> = found.path.into_iter().rev().collect();
+    let own = match source.term {
+        Term::Text(p, _) => {
+            let width = source.text.map_or(1, |t| model.diagram.texts[t].width);
+            Some(Pos::new(p.row, p.col + width - 1))
+        }
+        Term::Port(p, _) => Some(p),
+        _ => None,
+    };
+    if !joins_wire && let Some(own) = own.filter(|&own| path.first() != Some(&own)) {
+        path.insert(0, own);
+    }
+    Some(crate::Preview { path, joins_wire })
+}
+
+/// The cells, as given, of a wire dragged from `anchor` and released at
+/// `to` (see [`crate::preview`]).
+pub(crate) fn preview(doc: &Doc, anchor: crate::Anchor, to: Pos) -> Option<crate::Preview> {
+    let at = match anchor {
+        crate::Anchor::Source(p) | crate::Anchor::Sink(p) => p,
+    };
+    let sheets = Sheets::read(doc, at).ok()?;
     let (grid, diagram) = sheets.canon();
     let model = Model::new(grid, diagram);
-    let source = model.source(sheets.entity(from)?).ok()?;
-    if let Some(w) = model.wire_of(source.term) {
-        model.editable(w).ok()?;
-    }
-    let back = |cells: &[Pos]| -> Option<Vec<Pos>> {
-        cells.iter().map(|&p| sheets.back(source.scope.0, p)).collect()
+    let editable_source = |source: &Source| match model.wire_of(source.term) {
+        Some(w) => model.editable(w).is_ok(),
+        None => true,
     };
-    if let Some(sink) = sheets.entity(to).and_then(|p| model.sink(p).ok()) {
-        if model.wire_of(sink.term()).is_some() || sink.scope != source.scope {
+    let released = |scope: (usize, usize)| -> Option<Release> {
+        if let Some(sink) = sheets.entity(to).and_then(|p| model.sink(p).ok()) {
+            return Some(Release::Sink(sink));
+        }
+        if sheets.given().0.get(to) != ' ' {
             return None;
         }
-        let wiring = Wiring::new(&model, &source, Some(&sink));
-        let found = search_from_sink(&wiring, &sink).ok()?;
-        let n = found.path.len();
-        let last = if wiring.wire.is_some() { n } else { n - 1 };
-        return back(&found.path[1..last]);
-    }
-    if sheets.given().0.get(to) != ' ' {
+        let cell = sheets.place(to)?;
+        model.region(scope).contains(cell).then_some(Release::Cell(cell))
+    };
+    let (source, release) = match anchor {
+        crate::Anchor::Source(from) => {
+            let source = model.source(sheets.entity(from)?).ok()?;
+            let release = released(source.scope)?;
+            (source, release)
+        }
+        crate::Anchor::Sink(sink) => {
+            let sink = model.sink(sheets.entity(sink)?).ok()?;
+            if model.wire_of(sink.term()).is_some() {
+                return None;
+            }
+            match source_under(&sheets, &model, to) {
+                Some(source) => (source, Release::Sink(sink)),
+                None => {
+                    if sheets.given().0.get(to) != ' ' {
+                        return None;
+                    }
+                    let to = sheets.place(to)?;
+                    if !model.region(sink.scope).contains(to) {
+                        return None;
+                    }
+                    // No source yet: a route from the sink to the cell.
+                    let stand_in = Source {
+                        term: Term::Loose(to, Dir::W, false),
+                        scope: sink.scope,
+                        goal: to,
+                        text: None,
+                        name: String::new(),
+                    };
+                    let terrain = Loose { wiring: Wiring::new(&model, &stand_in, Some(&sink)), to };
+                    let start = Start { pos: sink.at, heading: Some(sink.dir.opposite()), straight: true };
+                    let found = router::search(&terrain, start, &mut { BUDGET }).ok()?;
+                    let path: Vec<Pos> = found.path.into_iter().rev().collect();
+                    let back: Option<Vec<Pos>> = path.iter().map(|&p| sheets.back(sink.scope.0, p)).collect();
+                    return Some(crate::Preview { path: back?, joins_wire: false });
+                }
+            }
+        }
+    };
+    if !editable_source(&source) {
         return None;
     }
-    let to = sheets.place(to)?;
-    let wiring = Wiring::new(&model, &source, None);
-    if wiring.cell(to) != Cell::Free {
-        return None;
+    let found = polyline(&model, &source, &release)?;
+    let path: Option<Vec<Pos>> = found.path.iter().map(|&p| sheets.back(source.scope.0, p)).collect();
+    Some(crate::Preview { path: path?, ..found })
+}
+
+/// The source a drag anchored on a sink would connect to when released at
+/// given cell `to`: the source there, or the source of the editable wire
+/// through it.
+fn source_under(sheets: &Sheets, model: &Model, to: Pos) -> Option<Source> {
+    if let Some(source) = sheets.entity(to).and_then(|p| model.source(p).ok()) {
+        return Some(source);
     }
-    let start = Start { pos: to, heading: None, straight: false };
-    let found = router::search(&wiring, start, &mut { BUDGET }).ok()?;
-    let n = found.path.len();
-    let last = if wiring.wire.is_some() { n } else { n - 1 };
-    back(&found.path[..last])
+    let cell = sheets.place(to)?;
+    let w = (0..model.diagram.wires.len()).find(|&w| model.diagram.wires[w].cells.contains(&cell))?;
+    model.editable(w).ok()?;
+    model.terms[w].iter().find_map(|&term| {
+        let p = match term {
+            Term::Port(p, Dir::W) | Term::Text(p, Dir::W) => p,
+            _ => return None,
+        };
+        model.source(p).ok().filter(|s| s.term == term)
+    })
 }
 
 // ---------------------------------------------------------------------------

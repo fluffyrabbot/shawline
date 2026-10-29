@@ -687,7 +687,8 @@ fn a_move_far_past_the_sheet_is_refused_before_the_sheet_grows() {
     for (dr, dc) in [(1 << 40, 0), (0, 1 << 40), (isize::MAX, isize::MAX)] {
         let far = move_box(DOUBLE, Pos::new(2, 0), dr, dc).unwrap_err();
         assert_eq!(far.at, Pos::new(2, 0));
-        assert!(far.reason.contains("that far past"), "{far:?}");
+        assert!(far.reason.contains("too far past"), "{far:?}");
+        assert_eq!(far.kind, RefusalKind::Blocked(Blockage::Edge));
     }
     let before = move_box(DOUBLE, Pos::new(2, 0), -3, 0).unwrap_err();
     assert!(before.reason.contains("edge"), "{before:?}");

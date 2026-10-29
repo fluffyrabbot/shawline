@@ -81,7 +81,7 @@ impl Sink {
 }
 
 /// Why a wire at an inline node is refused ([`RefusalKind::Unsupported`]).
-const INLINE: &str = "wires at an inline node can't be edited by mouse yet; edit the text";
+const INLINE: &str = "wires at an inline node can't be edited by mouse yet; edit them in the text pane";
 
 /// The refusal for a cell that is neither a port nor text, as a source.
 pub(crate) fn no_source(at: Pos) -> Refusal {
@@ -254,7 +254,7 @@ impl<'a> Model<'a> {
             return Err(Refusal::new(
                 text.pos,
                 RefusalKind::Blocked(Blockage::NoRoom),
-                format!("{} needs a space after it before a wire can start", text.content),
+                format!("{} needs a space after it before a wire can start; try Make room", text.content),
             ));
         }
         Ok(Source {
@@ -297,7 +297,7 @@ impl<'a> Model<'a> {
                 (BoxKind::Switch, _, Dir::E) => Err(Refusal::new(
                     at,
                     RefusalKind::Unsupported,
-                    "a switch's merged output can't be wired by mouse yet; draw it in the text",
+                    "a switch's merged output can't be wired by mouse yet; draw it in the text pane",
                 )),
                 _ => Err(Refusal::new(
                     at,
@@ -377,7 +377,7 @@ impl<'a> Model<'a> {
                         self.kind(b) == BoxKind::Switch && port.side == Dir::E
                     }) =>
                 {
-                    return Err("a switch's merged output can't be edited by mouse yet; edit the text");
+                    return Err("a switch's merged output can't be edited by mouse yet; edit it in the text pane");
                 }
                 _ => {}
             }
