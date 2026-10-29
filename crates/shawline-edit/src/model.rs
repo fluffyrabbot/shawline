@@ -13,18 +13,12 @@ use shawline_shape::stroke::Kind;
 use shawline_shape::structure::{self, Across, End};
 use shawline_shape::{Diagram, EndKind, Port, PortKind, TextKind};
 
-use crate::{Refusal, RefusalKind};
+use crate::{BoxKind, Blockage, Refusal, RefusalKind};
 use crate::sheet::{across, borders, text_cells};
 
 /// The empty list's word (SPEC §9), the one constant written as a word.
 pub(crate) const NIL: &str = "𐑯𐑦𐑤";
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum BoxKind {
-    Definition,
-    Switch,
-    Node,
-}
 
 /// Where a wire may run: a box's interior (a definition) or one arm of a
 /// switch, as (box index, arm index).
@@ -259,7 +253,7 @@ impl<'a> Model<'a> {
         if self.grid.get(goal) != ' ' {
             return Err(Refusal::new(
                 text.pos,
-                RefusalKind::Blocked,
+                RefusalKind::Blocked(Blockage::NoRoom),
                 format!("{} needs a space after it before a wire can start", text.content),
             ));
         }

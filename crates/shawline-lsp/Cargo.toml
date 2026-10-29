@@ -15,6 +15,8 @@ path = "src/main.rs"
 
 [dependencies]
 shawline-doc.workspace = true
+# Hover text, shared with Studio.
+shawline-edit.workspace = true
 shawline-grid.workspace = true
 shawline-shape.workspace = true
 shawline-syntax.workspace = true

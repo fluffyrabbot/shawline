@@ -23,10 +23,11 @@ use shawline_vm::bytecode::Prim;
 
 use crate::canon::{Sheets, tidy};
 use crate::check::DIAGNOSTICS;
-use crate::model::{BoxKind, Model, NIL, Sink, Source, Term, no_sink, no_source};
+use crate::BoxKind;
+use crate::model::{Model, NIL, Sink, Source, Term, no_sink, no_source};
 use crate::router::{self, BEND, BUDGET, CLEARANCE, Cell, Found, Miss, Start, TEE, Terrain, toward};
 use crate::sheet::{glyph, keep_clear};
-use crate::{Candidate, Placed, Refusal, RefusalKind};
+use crate::{Blockage, Candidate, Placed, Refusal, RefusalKind};
 
 /// The most ports `place_node` draws on one side.
 const MAX_PORTS: u16 = 16;
@@ -351,7 +352,7 @@ pub(crate) fn place_node(
     // The corner is in a box, so the node reaches past a definition's
     // border.
     let Some(holder) = holder else {
-        return Err(refuse(RefusalKind::Blocked, "the node would stick out of its definition"));
+        return Err(refuse(RefusalKind::Blocked(Blockage::NoRoom), "the node would stick out of its definition"));
     };
     match model.kind(holder) {
         BoxKind::Node => {
@@ -361,7 +362,7 @@ pub(crate) fn place_node(
             let dividers = &diagram.boxes[holder].dividers;
             if dividers.iter().any(|d| (rect.top..=rect.bottom).contains(&d.row)) {
                 let why = "the node would cross from one arm of the switch into another";
-                return Err(refuse(RefusalKind::Blocked, why));
+                return Err(refuse(RefusalKind::Blocked(Blockage::NoRoom), why));
             }
         }
         BoxKind::Definition => {}
@@ -370,7 +371,7 @@ pub(crate) fn place_node(
         && !b.rect.encloses(&rect)
         && b.rect != diagram.boxes[holder].rect)
     {
-        return Err(refuse(RefusalKind::Blocked, "the node would overlap another box"));
+        return Err(refuse(RefusalKind::Blocked(Blockage::NoRoom), "the node would overlap another box"));
     }
     // Clear in the text the caller sees as well as in the canonical one,
     // where formatting may have moved text or wire out of the way.
@@ -380,7 +381,7 @@ pub(crate) fn place_node(
             for col in r.left..=r.right {
                 if sheet.get(Pos::new(row, col)) != ' ' {
                     let why = "the node would land on something; find a clear spot";
-                    return Err(refuse(RefusalKind::Blocked, why));
+                    return Err(refuse(RefusalKind::Blocked(Blockage::NoRoom), why));
                 }
             }
         }
@@ -452,7 +453,9 @@ pub(crate) fn place_node(
         expected
     };
     let doc = finish(canvas.render(), diagram, corner, "the node can't go there", expected)?;
-    Ok(Placed { doc, inputs: arrows, outputs: tees })
+    // `crate::place_node` maps it.
+    let map = crate::Mapping { boxes: Vec::new(), texts: Vec::new(), wires: Vec::new() };
+    Ok(Placed { doc, map, tidied: false, inputs: arrows, outputs: tees })
 }
 
 // ---------------------------------------------------------------------------
@@ -621,7 +624,7 @@ pub(crate) fn connect(doc: &Doc, from: Pos, to: Pos) -> Result<Doc, Refusal> {
     }
     if sink.target().is_none_or(|t| grid.get(t) != ' ') {
         let why = "the cell before this arrowhead is taken";
-        return Err(Refusal::new(to, RefusalKind::Blocked, why));
+        return Err(Refusal::new(to, RefusalKind::Blocked(Blockage::NoRoom), why));
     }
     let wiring = Wiring::new(&model, &source, Some(&sink));
     let found = search_from_sink(&wiring, &sink).map_err(|miss| {

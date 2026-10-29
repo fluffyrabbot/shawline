@@ -23,7 +23,12 @@ fn after(doc: &Doc) -> &Diagram {
 /// Every box and text that is still there stays where it was.
 pub(crate) fn kept(old: &Doc, new: Doc) -> Edited {
     let map = Mapping::by_place(before(old), after(&new), |_, r| r, |_, p| p);
-    Edited { doc: new, map }
+    Edited { doc: new, map, tidied: tidied(old) }
+}
+
+/// The edit drew on the formatted text, not the one given.
+fn tidied(doc: &Doc) -> bool {
+    doc.canonical().is_some_and(|c| c.text() != doc.text())
 }
 
 /// The box at given cell `corner` moved by `dr`, `dc`, with what it holds.
@@ -38,7 +43,8 @@ pub(crate) fn moved(old: &Doc, corner: Pos, dr: isize, dc: isize, new: Doc) -> E
         .expect("the move found this box");
     let held = sheets.canon().1.boxes[index].rect;
     let shift = |p: Pos| Pos::new(p.row.wrapping_add_signed(dr), p.col.wrapping_add_signed(dc));
-    let map = Mapping::by_place(
+    let shifted = |p: Pos| if held.contains(p) { shift(p) } else { p };
+    let mut map = Mapping::by_place(
         before(old),
         after(&new),
         |_, r| {
@@ -49,7 +55,8 @@ pub(crate) fn moved(old: &Doc, corner: Pos, dr: isize, dc: isize, new: Doc) -> E
                 r
             }
         },
-        |_, p| if held.contains(p) { shift(p) } else { p },
+        |_, p| shifted(p),
     );
-    Edited { doc: new, map }
+    map.map_wires(before(old), after(&new), shifted);
+    Edited { doc: new, map, tidied: tidied(old) }
 }

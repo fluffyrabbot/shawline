@@ -597,6 +597,7 @@ dependencies = [
  "shawline-shape",
  "shawline-syntax",
  "shawline-vm",
+ "shawline-word",
 ]
 
 [[package]]
@@ -651,6 +652,7 @@ dependencies = [
  "lsp-types",
  "serde_json",
  "shawline-doc",
+ "shawline-edit",
  "shawline-grid",
  "shawline-shape",
  "shawline-syntax",

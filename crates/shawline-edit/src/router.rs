@@ -10,7 +10,7 @@ use std::collections::{BinaryHeap, HashMap};
 
 use shawline_grid::{Dir, Pos};
 
-use crate::RefusalKind;
+use crate::{Blockage, RefusalKind};
 
 /// Every cost is in half cells, so clearance can cost less than a cell.
 ///
@@ -81,7 +81,7 @@ impl Miss {
     /// The kind of refusal a miss makes: no path means no room.
     pub(crate) fn kind(self) -> RefusalKind {
         match self {
-            Miss::NoPath => RefusalKind::Blocked,
+            Miss::NoPath => RefusalKind::Blocked(Blockage::NoRoom),
             Miss::GaveUp => RefusalKind::GaveUp,
         }
     }

@@ -222,8 +222,9 @@ impl Doc {
     /// would take if released at `to_row`, `to_col`, as an array of `{ row,
     /// col }`; `undefined` when nothing fits. Nothing is edited.
     pub fn preview(&self, from_row: u32, from_col: u32, to_row: u32, to_col: u32) -> Option<Array> {
-        let path = shawline_edit::preview(&self.0, at(from_row, from_col), at(to_row, to_col))?;
-        Some(path.into_iter().map(cell).collect())
+        let anchor = shawline_edit::Anchor::Source(at(from_row, from_col));
+        let preview = shawline_edit::preview(&self.0, anchor, at(to_row, to_col))?;
+        Some(preview.path.into_iter().map(cell).collect())
     }
 }
 
@@ -363,10 +364,10 @@ pub fn place_and_connect(
     };
     let Some(&sink) = placed.inputs.first() else {
         let reason = format!("{word} has no input to wire the source into");
-        return stepped(Refusal { at: corner, kind: RefusalKind::Target, reason }, "connect");
+        return stepped(Refusal::new(corner, RefusalKind::Target, reason), "connect");
     };
     match shawline_edit::connect(&placed.doc, at(from_row, from_col), sink) {
-        Ok(wired) => made(wired),
+        Ok(wired) => made(wired.doc),
         Err(refusal) => stepped(refusal, "connect"),
     }
 }
@@ -378,9 +379,9 @@ pub fn remove_node(doc: &Doc, row: u32, col: u32) -> Object {
     edited(shawline_edit::remove_node(&doc.0, at(row, col)))
 }
 
-fn edited(result: Result<shawline_doc::Doc, Refusal>) -> Object {
+fn edited(result: Result<shawline_edit::Edited, Refusal>) -> Object {
     match result {
-        Ok(doc) => made(doc),
+        Ok(edited) => made(edited.doc),
         Err(refusal) => refused(refusal),
     }
 }

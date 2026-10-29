@@ -12,6 +12,8 @@
 //!                    └─────► formatted, fixed ─► canonical
 //! ```
 
+pub mod position;
+
 use std::cell::OnceCell;
 use std::fmt;
 

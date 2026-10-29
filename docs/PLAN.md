@@ -1027,6 +1027,20 @@ Five read-only audits (interaction mechanics, product legibility, conceptual int
   - **by hand:** Make room on a blocked move in the browser, and scrubbing `03-double`'s `21` with the badges following;
   - **timing:** the p95 of a scrub step (edit and refresh) on `11-even-odd` is recorded here. Over 16 ms, scrubbing moves to a worker.
 
+**Wave 1 contracts landed** ✅. E1 and W1 can start.
+- **Decisions made while landing them:**
+  - `RefusalKind::Blocked` carries a `Blockage` (`NoRoom`, `Edge`, `Spacing`), and all three are named `blocked` in dumps, so the split changes no `.studio` line. Every existing refusal is `NoRoom` until E1 classifies it. `Refusal::new` sets `remedy` from the kind (`MakeRoom` for `NoRoom`), and an edit may set it otherwise.
+  - The six P7 edits return `Edited`, and `Placed` carries `map` and `tidied`. Their maps come from the adapters in `mapped.rs`, which E1 replaces with exact maps.
+  - `Mapping` gains `wires`. `by_place` maps a wire to the one with the same cells, and `map_wires` takes a cell shift. A re-routed wire maps to `None` until E1's maps are exact. Structure ignores wires.
+  - `preview(doc, Anchor, to) -> Option<Preview>`. `Anchor::Source` returns today's path (ends not yet included, `joins_wire` always false), and `Anchor::Sink` returns `None`. E1 fills in both.
+  - `Edit::Rewire { from, to }` and `Edit::PlaceConnected { at, word, inputs, outputs, from }`, where `at` is the cell the wire was dropped on and the edit chooses the corner. Both are stubs refusing as `unsupported`.
+  - `branch` reads the cells `disconnect` would clear off its result. That is exact on canonical text, and E1 may replace it.
+  - `describe(doc, at, gloss) -> Option<Description { at, width, text }>`, where `text` is Markdown. The language server's hover over every cell of every corpus program, with and without gloss, is byte-identical to before (4,833 hovers). Semantic tokens keep their own primitive test.
+  - `shawline_doc::position` holds the conversions in units of an `Encoding` (`Utf32`, `Utf16`), plus `offset_of_cell` and `cell_of_offset` over the whole text for the page. The language server wraps them in `lsp_types`.
+  - `Diagnostic::severity()` returns `Severity::{Error, Warning, Lint}`. The language server now sends lints as hints.
+  - `Geometry::new(grid, gloss, scale)` takes `scale` in shown units per glyph unit, with the zoom multiplied in. Its points are measured from the drawing's top-left corner, margin included. It has `size`, `cell_at`, `cell_rect(rect, under, over) -> Area` and `cell_centre`.
+- **Gate:** the workspace tests pass with no `.studio` change, clippy is clean on host and wasm, and the playground build and its Node checks pass.
+
 **Wave 2: the whole language by mouse.**
 - **Contracts (lead):**
   - `place_definition`, `place_switch`, `add_port`, `remove_port`, `add_arm`, `remove_arm`, `remove_box`, `set_ports` and `place_inline`;

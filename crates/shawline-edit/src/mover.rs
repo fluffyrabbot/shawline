@@ -21,7 +21,7 @@ use crate::canon::{Sheets, tidy};
 use crate::check::{DIAGNOSTICS, Shift, same};
 use crate::router::{self, BEND, BUDGET, CLEARANCE, Cell, Found, Miss, Start, TEE, Terrain, toward};
 use crate::sheet::{across, borders, glyph, is_corner, keep_clear, perimeter, text_cells};
-use crate::{Refusal, RefusalKind};
+use crate::{Blockage, Refusal, RefusalKind};
 
 /// Using a cell of another pending wire's chain: it may want it back.
 const OTHER_CHAIN: u32 = 2;
@@ -282,7 +282,7 @@ impl<'a> Mover<'a> {
             (shifted(Pos::new(rect.top, rect.left)), shifted(Pos::new(rect.bottom, rect.right)))
         else {
             let why = "the box can't move past the edge of the sheet";
-            return Err(refuse(RefusalKind::Blocked, why));
+            return Err(refuse(RefusalKind::Blocked(Blockage::NoRoom), why));
         };
         let new_rect = Rect { top: tl.row, left: tl.col, bottom: br.row, right: br.col };
 
@@ -298,7 +298,7 @@ impl<'a> Mover<'a> {
                 };
                 if new_rect.bottom > region.bottom || new_rect.right > region.right {
                     let why = "the box can't move that far past the end of the sheet";
-                    return Err(refuse(RefusalKind::Blocked, why));
+                    return Err(refuse(RefusalKind::Blocked(Blockage::NoRoom), why));
                 }
                 region
             }
@@ -307,7 +307,7 @@ impl<'a> Mover<'a> {
                 let what = if parent.parent.is_none() { "definition" } else { "switch" };
                 if !parent.rect.encloses(&new_rect) {
                     let why = format!("the box would leave its {what}");
-                    return Err(refuse(RefusalKind::Blocked, &why));
+                    return Err(refuse(RefusalKind::Blocked(Blockage::NoRoom), &why));
                 }
                 let r = parent.rect;
                 let above = parent.dividers.iter().map(|d| d.row).filter(|&d| d < rect.top).max();
@@ -317,7 +317,7 @@ impl<'a> Mover<'a> {
                 let bottom = below.unwrap_or(r.bottom) - 1;
                 if new_rect.top < top || new_rect.bottom > bottom {
                     let why = "the box would cross into another arm of the switch";
-                    return Err(refuse(RefusalKind::Blocked, why));
+                    return Err(refuse(RefusalKind::Blocked(Blockage::NoRoom), why));
                 }
                 Rect { top, left: r.left + 1, bottom, right: r.right - 1 }
             }
@@ -340,7 +340,7 @@ impl<'a> Mover<'a> {
                 let new_port = shifted(port).expect("on the moved box");
                 let Some(target) = new_port.step(side) else {
                     let why = "the wire at this port would leave the sheet";
-                    return Err(Refusal::new(port, RefusalKind::Blocked, why));
+                    return Err(Refusal::new(port, RefusalKind::Blocked(Blockage::NoRoom), why));
                 };
                 ends.push(End {
                     wire: w,
@@ -411,7 +411,7 @@ impl<'a> Mover<'a> {
                 } else {
                     "a wire"
                 };
-                return Err(refuse(RefusalKind::Blocked, &format!("the box would land on {what}")));
+                return Err(refuse(RefusalKind::Blocked(Blockage::NoRoom), &format!("the box would land on {what}")));
             }
             footprint.insert(q);
             if ch != ' ' {
@@ -508,7 +508,7 @@ impl<'a> Mover<'a> {
             let Some((end, miss)) = failure.map(|(i, miss)| (&self.ends[i], miss)) else {
                 return Err(Refusal::new(
                     corner,
-                    RefusalKind::Blocked,
+                    RefusalKind::Blocked(Blockage::NoRoom),
                     "no free path for a wire; make room around the box first",
                 ));
             };

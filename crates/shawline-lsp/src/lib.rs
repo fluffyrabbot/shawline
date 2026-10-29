@@ -35,6 +35,7 @@ use lsp_types::{
     TextDocumentSyncKind, TextEdit, Uri,
 };
 use shawline_doc::Doc;
+use shawline_grid::Severity;
 
 use position::Encoding;
 use typing::Typing;
@@ -51,7 +52,7 @@ pub fn run(connection: &Connection) -> Result<(), BoxError> {
         .as_ref()
         .and_then(|g| g.position_encodings.as_deref());
     let mut server = Server {
-        enc: Encoding::negotiate(offered),
+        enc: position::negotiate(offered),
         docs: HashMap::new(),
         gloss: params
             .initialization_options
@@ -90,7 +91,7 @@ pub fn capabilities(enc: Encoding) -> ServerCapabilities {
     let mut triggers = typing::trigger_characters().into_iter();
     let first = triggers.next().expect("the key table is not empty");
     ServerCapabilities {
-        position_encoding: Some(enc.kind()),
+        position_encoding: Some(position::kind(enc)),
         text_document_sync: Some(TextDocumentSyncCapability::Kind(TextDocumentSyncKind::FULL)),
         hover_provider: Some(HoverProviderCapability::Simple(true)),
         document_formatting_provider: Some(OneOf::Left(true)),
@@ -220,10 +221,10 @@ impl Server {
             .iter()
             .map(|d| lsp_types::Diagnostic {
                 range: position::cells_range(doc.text(), self.enc, d.at, 1),
-                severity: Some(if d.is_warning() {
-                    DiagnosticSeverity::WARNING
-                } else {
-                    DiagnosticSeverity::ERROR
+                severity: Some(match d.severity() {
+                    Severity::Error => DiagnosticSeverity::ERROR,
+                    Severity::Warning => DiagnosticSeverity::WARNING,
+                    Severity::Lint => DiagnosticSeverity::HINT,
                 }),
                 code: Some(NumberOrString::String(d.code.to_string())),
                 source: Some("shawline".into()),

@@ -132,24 +132,33 @@ pub enum Part {
     Codes,
 }
 
-/// Where each box and text of one diagram went in another: an index in the
-/// other diagram, or `None` when it has none there. Distinct entries map
-/// to distinct indices.
+/// Where each box, text and wire of one diagram went in another: an index
+/// in the other diagram, or `None` when it has none there. Distinct entries
+/// map to distinct indices.
+///
+/// Structure ignores `wires`, since it names wires by their terms; Studio
+/// carries a selected wire through it (PLAN P10).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Mapping {
     pub boxes: Vec<Option<usize>>,
     pub texts: Vec<Option<usize>>,
+    pub wires: Vec<Option<usize>>,
 }
 
 impl Mapping {
     /// Every box and text of `d` to itself.
     pub fn identity(d: &Diagram) -> Self {
-        Self { boxes: (0..d.boxes.len()).map(Some).collect(), texts: (0..d.texts.len()).map(Some).collect() }
+        Self {
+            boxes: (0..d.boxes.len()).map(Some).collect(),
+            texts: (0..d.texts.len()).map(Some).collect(),
+            wires: (0..d.wires.len()).map(Some).collect(),
+        }
     }
 
     /// Box `i` of `from` to the box of `to` whose rectangle is `rect(i, r)`,
     /// where `r` is its rectangle in `from`; text `i` to the text of `to`
-    /// that starts at `pos(i, p)`. `None` where nothing is there.
+    /// that starts at `pos(i, p)`; wire `i` to the wire of `to` with the
+    /// same cells. `None` where nothing is there.
     pub fn by_place(
         from: &Diagram,
         to: &Diagram,
@@ -158,13 +167,33 @@ impl Mapping {
     ) -> Self {
         let boxes: HashMap<Rect, usize> = to.boxes.iter().enumerate().map(|(i, b)| (b.rect, i)).collect();
         let texts: HashMap<Pos, usize> = to.texts.iter().enumerate().map(|(i, t)| (t.pos, i)).collect();
-        Self {
+        let mut map = Self {
             boxes: from.boxes.iter().enumerate().map(|(i, b)| boxes.get(&rect(i, b.rect)).copied()).collect(),
             texts: from.texts.iter().enumerate().map(|(i, t)| texts.get(&pos(i, t.pos)).copied()).collect(),
-        }
+            wires: Vec::new(),
+        };
+        map.map_wires(from, to, |p| p);
+        map
     }
 
-    /// Whether every box and text has a place.
+    /// Sets `wires`: wire `i` of `from` to the wire of `to` whose cells are
+    /// exactly `cell` of its own, and `None` where no wire is.
+    pub fn map_wires(&mut self, from: &Diagram, to: &Diagram, cell: impl Fn(Pos) -> Pos) {
+        let key = |cells: &mut Vec<Pos>| {
+            cells.sort_unstable();
+            cells.clone()
+        };
+        let wires: HashMap<Vec<Pos>, usize> =
+            to.wires.iter().enumerate().map(|(i, w)| (key(&mut w.cells.clone()), i)).collect();
+        self.wires = from
+            .wires
+            .iter()
+            .map(|w| wires.get(&key(&mut w.cells.iter().map(|&p| cell(p)).collect())).copied())
+            .collect();
+    }
+
+    /// Whether every box and text has a place. Wires aren't counted: an
+    /// edit may re-route any of them.
     pub fn is_total(&self) -> bool {
         self.boxes.iter().chain(&self.texts).all(Option::is_some)
     }
@@ -572,7 +601,7 @@ mod tests {
     fn relabelling_permutes_every_reference() {
         let s = structure(DOUBLE);
         let reverse = |n: usize| (0..n).rev().map(Some).collect::<Vec<_>>();
-        let map = Mapping { boxes: reverse(s.boxes.len()), texts: reverse(s.texts.len()) };
+        let map = Mapping { boxes: reverse(s.boxes.len()), texts: reverse(s.texts.len()), wires: Vec::new() };
         let turned = s.relabel(&map);
         assert_ne!(turned, s);
         // The first box comes last, and the boxes inside it point at it.

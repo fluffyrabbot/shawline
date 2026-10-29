@@ -15,6 +15,7 @@
 
 mod cells;
 mod chain;
+mod geometry;
 mod gloss;
 mod strip;
 
@@ -27,6 +28,7 @@ use shawline_grid::Grid;
 use cells::{Fill, Ink};
 use chain::Chain;
 
+pub use geometry::{Area, Geometry};
 pub use gloss::{Gloss, Options};
 
 /// Output pixels per glyph unit: a cell is 15 × 30 px.

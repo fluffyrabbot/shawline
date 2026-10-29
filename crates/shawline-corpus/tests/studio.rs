@@ -153,7 +153,7 @@ fn studio_rewire() {
                     None => shawline_edit::remove_wire(&doc, cell),
                     Some(end) => shawline_edit::connect(&doc, cell, end),
                 };
-                doc = result.map_err(|r| (format!("{what} at {at}"), r.reason))?;
+                doc = result.map_err(|r| (format!("{what} at {at}"), r.reason))?.doc;
             }
             Ok(doc.text().to_owned())
         };
@@ -220,12 +220,13 @@ fn studio_rebuild() {
                 // Only the removal sees the shown text.
                 let refused = |step: &'static str| move |r: shawline_edit::Refusal| (step.to_owned(), r.reason);
                 let mut doc = shawline_edit::remove_node(&Doc::new(shown.text.as_str()), shown.at(corner))
-                    .map_err(refused("remove_node"))?;
+                    .map_err(refused("remove_node"))?
+                    .doc;
                 doc = shawline_edit::place_node(&doc, corner, &word, arity.0, arity.1)
                     .map_err(refused("place_node"))?
                     .doc;
                 for &(from, to) in &connects {
-                    doc = shawline_edit::connect(&doc, from, to).map_err(refused("connect"))?;
+                    doc = shawline_edit::connect(&doc, from, to).map_err(refused("connect"))?.doc;
                 }
                 Ok(doc.text().to_owned())
             };
@@ -306,6 +307,6 @@ fn studio_trace() {
 #[test]
 fn removing_a_wire_that_crosses_itself_leaves_no_stroke() {
     let src = fs::read_to_string(root().join("15-fanout-cross.shaw")).unwrap();
-    let doc = shawline_edit::remove_wire(&Doc::new(src), Pos::new(2, 4)).unwrap_or_else(|r| panic!("{r:?}"));
+    let doc = shawline_edit::remove_wire(&Doc::new(src), Pos::new(2, 4)).unwrap_or_else(|r| panic!("{r:?}")).doc;
     assert!(doc.diagram().unwrap().wires.is_empty(), "a stroke is left:\n{}", doc.text());
 }

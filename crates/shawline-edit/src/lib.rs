@@ -23,6 +23,7 @@
 
 mod canon;
 mod check;
+mod describe;
 mod mapped;
 mod model;
 mod mover;
@@ -48,9 +49,44 @@ pub struct Refusal {
     /// What kind of obstacle it is, so the UI can pick a remedy. The corpus
     /// checks kinds and cells, never wording.
     pub kind: RefusalKind,
-    /// A sentence the UI can show as is, such as "no free path for the wire
-    /// from 𐑐; insert a column?".
+    /// A sentence the UI can show as is. It names only gestures that exist,
+    /// and says what to try rather than which internal rule refused.
     pub reason: String,
+    /// What would let the edit succeed, for the UI to offer. The page acts
+    /// on this, never on the kind's name or the reason's words.
+    pub remedy: Option<Remedy>,
+}
+
+/// What the UI can offer after a refusal (PLAN P10).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum Remedy {
+    /// [`make_room`] for the refused edit may succeed.
+    MakeRoom,
+    /// Formatting the sheet first may let the edit succeed.
+    Format,
+}
+
+impl Remedy {
+    /// Its name in JS: `make-room` or `format`.
+    pub const fn name(self) -> &'static str {
+        match self {
+            Remedy::MakeRoom => "make-room",
+            Remedy::Format => "format",
+        }
+    }
+}
+
+/// Why there is no room, which decides whether inserting room helps.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum Blockage {
+    /// Inserting rows or columns would make room: an overlap, a parent too
+    /// small, or no free path.
+    NoRoom,
+    /// The sheet's edge: a box can't move above row 0 or left of column 0.
+    Edge,
+    /// The spacing rules forbid it whatever room there is: two top-level
+    /// items on one row, or text touching a stroke (SPEC §11).
+    Spacing,
 }
 
 /// What stopped an edit (PLAN P8).
@@ -66,8 +102,9 @@ pub enum RefusalKind {
     /// touching an inline node, a word that isn't Shavian.
     Unsupported,
     /// There is no room: the result would overlap a box, leave its parent,
-    /// or find no free path. Inserting rows or columns may help.
-    Blocked,
+    /// or find no free path. The blockage says whether inserting rows or
+    /// columns may help; every blockage is named `blocked` in dumps.
+    Blocked(Blockage),
     /// The router's search budget ran out before it found a path.
     GaveUp,
     /// The result would change something the edit promises to keep: the
@@ -83,7 +120,7 @@ impl RefusalKind {
             RefusalKind::Unreadable => "unreadable",
             RefusalKind::Target => "target",
             RefusalKind::Unsupported => "unsupported",
-            RefusalKind::Blocked => "blocked",
+            RefusalKind::Blocked(_) => "blocked",
             RefusalKind::GaveUp => "gave-up",
             RefusalKind::Changed => "changed",
         }
@@ -96,9 +133,21 @@ impl fmt::Display for RefusalKind {
     }
 }
 
+impl RefusalKind {
+    /// The remedy a refusal of this kind offers unless its edit knows
+    /// better: [`Remedy::MakeRoom`] for [`Blockage::NoRoom`].
+    pub const fn remedy(self) -> Option<Remedy> {
+        match self {
+            RefusalKind::Blocked(Blockage::NoRoom) => Some(Remedy::MakeRoom),
+            _ => None,
+        }
+    }
+}
+
 impl Refusal {
-    pub(crate) fn new(at: Pos, kind: RefusalKind, reason: impl Into<String>) -> Self {
-        Self { at, kind, reason: reason.into() }
+    /// A refusal with its kind's remedy.
+    pub fn new(at: Pos, kind: RefusalKind, reason: impl Into<String>) -> Self {
+        Self { at, kind, reason: reason.into(), remedy: kind.remedy() }
     }
 }
 
@@ -115,8 +164,9 @@ impl Refusal {
 /// - **Refusals:** no box has its corner at `corner`, the box would overlap
 ///   another box or leave its parent, or a wire can't be re-routed within the
 ///   search budget.
-pub fn move_box(doc: &Doc, corner: Pos, dr: isize, dc: isize) -> Result<Doc, Refusal> {
-    mover::move_box(doc, corner, dr, dc)
+pub fn move_box(doc: &Doc, corner: Pos, dr: isize, dc: isize) -> Result<Edited, Refusal> {
+    let moved = mover::move_box(doc, corner, dr, dc)?;
+    Ok(mapped::moved(doc, corner, dr, dc, moved))
 }
 
 /// The cheapest orthogonal path for a wire from cell `from` to cell `to`,
@@ -173,21 +223,21 @@ pub struct Candidate {
 /// old one plus this pair, and nothing else changes. The result is canonical.
 /// Refused when `to` already has a wire, the cells aren't a source and a sink,
 /// or no route fits within the router's budget.
-pub fn connect(doc: &Doc, from: Pos, to: Pos) -> Result<Doc, Refusal> {
-    wiring::connect(doc, from, to)
+pub fn connect(doc: &Doc, from: Pos, to: Pos) -> Result<Edited, Refusal> {
+    wiring::connect(doc, from, to).map(|d| mapped::kept(doc, d))
 }
 
 /// Removes the whole wire that passes through cell `at`, with every branch.
 /// Refused when no editable wire passes through `at`.
-pub fn remove_wire(doc: &Doc, at: Pos) -> Result<Doc, Refusal> {
-    wiring::remove_wire(doc, at)
+pub fn remove_wire(doc: &Doc, at: Pos) -> Result<Edited, Refusal> {
+    wiring::remove_wire(doc, at).map(|d| mapped::kept(doc, d))
 }
 
 /// Removes only the branch of a wire that reaches sink `to`, back to the tee
 /// it leaves from. A tee left with two arms becomes a plain stroke. When the
 /// wire has no other sink, the whole wire goes, as with [`remove_wire`].
-pub fn disconnect(doc: &Doc, to: Pos) -> Result<Doc, Refusal> {
-    wiring::disconnect(doc, to)
+pub fn disconnect(doc: &Doc, to: Pos) -> Result<Edited, Refusal> {
+    wiring::disconnect(doc, to).map(|d| mapped::kept(doc, d))
 }
 
 /// Places a canonical node box for `word` with its top-left corner at
@@ -204,7 +254,9 @@ pub fn place_node(
     inputs: u16,
     outputs: u16,
 ) -> Result<Placed, Refusal> {
-    wiring::place_node(doc, corner, word, inputs, outputs)
+    let placed = wiring::place_node(doc, corner, word, inputs, outputs)?;
+    let edited = mapped::kept(doc, placed.doc);
+    Ok(Placed { doc: edited.doc, map: edited.map, tidied: edited.tidied, ..placed })
 }
 
 /// A node [`place_node`] placed.
@@ -212,6 +264,10 @@ pub fn place_node(
 pub struct Placed {
     /// The sheet with the node in it.
     pub doc: Doc,
+    /// As [`Edited::map`]: every old box and text maps; the node is new.
+    pub map: Mapping,
+    /// As [`Edited::tidied`].
+    pub tidied: bool,
     /// The node's input arrowheads, top to bottom: sinks for [`connect`].
     pub inputs: Vec<Pos>,
     /// The node's output tees, top to bottom: sources for [`connect`].
@@ -221,8 +277,8 @@ pub struct Placed {
 /// Removes the node box whose top-left corner is `corner`. Every wire it
 /// sources goes too, and only the branches that reach its inputs
 /// ([`disconnect`]).
-pub fn remove_node(doc: &Doc, corner: Pos) -> Result<Doc, Refusal> {
-    wiring::remove_node(doc, corner)
+pub fn remove_node(doc: &Doc, corner: Pos) -> Result<Edited, Refusal> {
+    wiring::remove_node(doc, corner).map(|d| mapped::kept(doc, d))
 }
 
 /// What the context palette offers, in a fixed order: primitives first in
@@ -257,6 +313,10 @@ pub enum Edit {
     PlaceNode { corner: Pos, word: String, inputs: u16, outputs: u16 },
     /// [`remove_node`].
     RemoveNode(Pos),
+    /// [`rewire`].
+    Rewire { from: Pos, to: Pos },
+    /// [`place_connected`].
+    PlaceConnected { at: Pos, word: String, inputs: u16, outputs: u16, from: Pos },
     /// [`insert`].
     Insert(Insertion),
     /// [`delete`].
@@ -296,6 +356,10 @@ impl fmt::Display for Edit {
                 write!(f, "place_node {corner} {word} {inputs} {outputs}")
             }
             Edit::RemoveNode(corner) => write!(f, "remove_node {corner}"),
+            Edit::Rewire { from, to } => write!(f, "rewire {from} {to}"),
+            Edit::PlaceConnected { at, word, inputs, outputs, from } => {
+                write!(f, "place_connected {at} {word} {inputs} {outputs} {from}")
+            }
             Edit::Insert(i) => write!(f, "insert {i}"),
             Edit::Delete(i) => write!(f, "delete {i}"),
             Edit::MakeRoom(edit) => write!(f, "make_room {edit}"),
@@ -324,26 +388,31 @@ impl fmt::Display for Edit {
 #[derive(Debug)]
 pub struct Edited {
     pub doc: Doc,
-    /// From the boxes and texts of the input's canonical revision (the
-    /// input itself when it is canonical) to those of `doc`. A part the
-    /// edit removed maps to `None`.
+    /// From the boxes, texts and wires of the input's canonical revision
+    /// (the input itself when it is canonical) to those of `doc`. A part
+    /// the edit removed maps to `None`, and so does a wire it re-routed
+    /// until its edit maps wires exactly.
     pub map: Mapping,
+    /// The input wasn't canonical, so the edit was made on its formatted
+    /// text. The page applies that text first, as its own undo step, so
+    /// that `map` starts from what it shows.
+    pub tidied: bool,
 }
 
 /// Applies `edit` to `doc`.
 pub fn apply(doc: &Doc, edit: &Edit) -> Result<Edited, Refusal> {
     match edit {
-        Edit::Move { corner, dr, dc } => {
-            let moved = move_box(doc, *corner, *dr, *dc)?;
-            Ok(mapped::moved(doc, *corner, *dr, *dc, moved))
+        Edit::Move { corner, dr, dc } => move_box(doc, *corner, *dr, *dc),
+        Edit::Connect { from, to } => connect(doc, *from, *to),
+        Edit::RemoveWire(at) => remove_wire(doc, *at),
+        Edit::Disconnect(to) => disconnect(doc, *to),
+        Edit::PlaceNode { corner, word, inputs, outputs } => place_node(doc, *corner, word, *inputs, *outputs)
+            .map(|p| Edited { doc: p.doc, map: p.map, tidied: p.tidied }),
+        Edit::RemoveNode(corner) => remove_node(doc, *corner),
+        Edit::Rewire { from, to } => rewire(doc, *from, *to),
+        Edit::PlaceConnected { at, word, inputs, outputs, from } => {
+            place_connected(doc, *at, word, *inputs, *outputs, *from)
         }
-        Edit::Connect { from, to } => connect(doc, *from, *to).map(|d| mapped::kept(doc, d)),
-        Edit::RemoveWire(at) => remove_wire(doc, *at).map(|d| mapped::kept(doc, d)),
-        Edit::Disconnect(to) => disconnect(doc, *to).map(|d| mapped::kept(doc, d)),
-        Edit::PlaceNode { corner, word, inputs, outputs } => {
-            place_node(doc, *corner, word, *inputs, *outputs).map(|p| mapped::kept(doc, p.doc))
-        }
-        Edit::RemoveNode(corner) => remove_node(doc, *corner).map(|d| mapped::kept(doc, d)),
         Edit::Insert(i) => insert(doc, *i),
         Edit::Delete(i) => delete(doc, *i),
         Edit::MakeRoom(edit) => make_room(doc, edit).map(|roomed| roomed.edited),
@@ -501,6 +570,8 @@ impl Edit {
             | Edit::Disconnect(at)
             | Edit::PlaceNode { corner: at, .. }
             | Edit::RemoveNode(at)
+            | Edit::Rewire { to: at, .. }
+            | Edit::PlaceConnected { at, .. }
             | Edit::SetText { at, .. }
             | Edit::PlaceText { at, .. }
             | Edit::RemoveText(at)
@@ -514,6 +585,105 @@ impl Edit {
             }
         }
     }
+}
+
+/// Moves the branch reaching sink `to` off its source and onto source
+/// `from`, as one edit: [`disconnect`] then [`connect`], refused whole when
+/// either is.
+pub fn rewire(doc: &Doc, from: Pos, to: Pos) -> Result<Edited, Refusal> {
+    let _ = (doc, from);
+    Err(pending(to))
+}
+
+/// The palette's gesture after a wire from source `from` is dropped on
+/// blank cell `at`: places a node for `word` near `at` (its first input on
+/// `at`'s row, the corner offset and retried as the page does today) and
+/// connects `from` to its first input, as one edit. Refused whole when no
+/// placement can be wired.
+pub fn place_connected(
+    doc: &Doc,
+    at: Pos,
+    word: &str,
+    inputs: u16,
+    outputs: u16,
+    from: Pos,
+) -> Result<Edited, Refusal> {
+    let _ = (doc, word, inputs, outputs, from);
+    Err(pending(at))
+}
+
+/// What a box is, by how recognition reads it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum BoxKind {
+    /// A top-level box.
+    Definition,
+    /// A box inside a definition with dividers or a selector on its top
+    /// edge.
+    Switch,
+    /// Any other box inside a definition: a call.
+    Node,
+}
+
+impl BoxKind {
+    /// Its name in JS: `definition`, `switch` or `node`.
+    pub const fn name(self) -> &'static str {
+        match self {
+            BoxKind::Definition => "definition",
+            BoxKind::Switch => "switch",
+            BoxKind::Node => "node",
+        }
+    }
+}
+
+/// The kind of the box whose top-left corner is `corner`, in the text as
+/// given. `None` when no box has its corner there.
+pub fn box_kind(doc: &Doc, corner: Pos) -> Option<BoxKind> {
+    let (grid, diagram) = (doc.grid().ok()?, doc.diagram()?);
+    let b = diagram.boxes.iter().position(|b| (b.rect.top, b.rect.left) == (corner.row, corner.col))?;
+    Some(model::Model::new(grid, diagram).kind(b))
+}
+
+/// The cells [`disconnect`] would clear for sink `to`, in the text as
+/// given, row-major. Empty when it would be refused.
+pub fn branch(doc: &Doc, to: Pos) -> Vec<Pos> {
+    // The cells that change, read off the result; exact while the given
+    // text is canonical.
+    let Ok(cut) = disconnect(doc, to) else { return Vec::new() };
+    let (Ok(before), Ok(after)) = (doc.grid(), cut.doc.grid()) else { return Vec::new() };
+    let mut cells = Vec::new();
+    for row in 0..before.height() {
+        for col in 0..before.width() {
+            let p = Pos::new(row, col);
+            let gone = row >= after.height() || col >= after.width() || after.get(p) != before.get(p);
+            if gone && before.get(p) != ' ' {
+                cells.push(p);
+            }
+        }
+    }
+    cells
+}
+
+/// What hover, the inspector, the palette and the drawing's hover title say
+/// about a word.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Description {
+    /// The described cells' first cell.
+    pub at: Pos,
+    /// How many cells are described.
+    pub width: usize,
+    /// Markdown: a call word or definition title is described; with
+    /// `gloss`, a line follows with the word's reading and the keys that
+    /// type it, and a primitive's short name.
+    pub text: String,
+}
+
+/// The description of the word covering `at`, or `None` when there is
+/// nothing to say. Call words and definition titles are described. With
+/// `gloss`, every Shavian word (ports, text and comments too) also gets a
+/// line with its reading and the keys that type it, and a primitive its
+/// short name on that line.
+pub fn describe(doc: &Doc, at: Pos, gloss: bool) -> Option<Description> {
+    describe::describe(doc, at, gloss)
 }
 
 /// The refusal of an edit whose wave hasn't landed.
@@ -563,12 +733,36 @@ pub fn endpoints(doc: &Doc) -> (Vec<Endpoint>, Vec<Endpoint>) {
     (sources, sinks)
 }
 
-/// The cells a wire dragged from source `from` would take if released at
-/// `to`: what [`connect`] would draw when `to` is a free sink in reach, or
-/// a route to the blank cell `to`. `None` when nothing fits. For a live
-/// preview; nothing is edited.
-pub fn preview(doc: &Doc, from: Pos, to: Pos) -> Option<Vec<Pos>> {
-    wiring::preview(doc, from, to)
+/// Where a dragged wire is anchored.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Anchor {
+    /// Dragged out of a source, towards a sink or blank sheet.
+    Source(Pos),
+    /// Dragged back out of an unwired sink's arrowhead, towards a source or
+    /// blank sheet.
+    Sink(Pos),
+}
+
+/// A live preview of a dragged wire. Nothing is edited.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Preview {
+    /// The whole polyline [`connect`] would draw, ends included: from the
+    /// source (or the tee where it joins the source's wire) to the sink, or
+    /// to the blank cell the drag is over.
+    pub path: Vec<Pos>,
+    /// The path starts on the source's existing wire, at a new tee.
+    pub joins_wire: bool,
+}
+
+/// What [`connect`] would draw for a drag anchored at `anchor` and
+/// released at `to`: a free endpoint of the other kind in the same scope,
+/// or a blank cell. `None` when nothing fits.
+pub fn preview(doc: &Doc, anchor: Anchor, to: Pos) -> Option<Preview> {
+    match anchor {
+        // Today's path leaves out the ends; wave 1 adds them and sinks.
+        Anchor::Source(from) => wiring::preview(doc, from, to).map(|path| Preview { path, joins_wire: false }),
+        Anchor::Sink(_) => None,
+    }
 }
 
 /// For each wire of the recognized diagram (`Diagram::wires` order), the

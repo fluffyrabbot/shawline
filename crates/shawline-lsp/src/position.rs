@@ -1,116 +1,63 @@
-//! Grid cells versus LSP positions.
+//! Grid cells versus LSP positions, over `shawline_doc::position`, which
+//! Studio shares.
 //!
 //! A grid column counts characters (SPEC §1.4), but an LSP `character`
 //! counts code units of the negotiated encoding. Shavian letters lie outside
 //! the BMP, so under UTF-16 each one is two units wide while still one cell.
 
 use lsp_types::{Position, PositionEncodingKind, Range};
+use shawline_doc::position as cells;
+pub use shawline_doc::position::{Encoding, line};
 use shawline_grid::Pos;
 
-const BOM: char = '\u{feff}';
-
-/// The position encoding agreed with the client.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Encoding {
-    /// Columns are code points: one unit per grid cell.
-    Utf32,
-    /// The LSP default.
-    Utf16,
-}
-
-impl Encoding {
-    /// Picks UTF-32 when the client offers it, else the mandatory UTF-16.
-    pub fn negotiate(offered: Option<&[PositionEncodingKind]>) -> Encoding {
-        match offered {
-            Some(kinds) if kinds.contains(&PositionEncodingKind::UTF32) => Encoding::Utf32,
-            _ => Encoding::Utf16,
-        }
-    }
-
-    pub fn kind(self) -> PositionEncodingKind {
-        match self {
-            Encoding::Utf32 => PositionEncodingKind::UTF32,
-            Encoding::Utf16 => PositionEncodingKind::UTF16,
-        }
-    }
-
-    fn units(self, c: char) -> u32 {
-        match self {
-            Encoding::Utf32 => 1,
-            Encoding::Utf16 => c.len_utf16() as u32,
-        }
+/// Picks UTF-32 when the client offers it, else the mandatory UTF-16.
+pub fn negotiate(offered: Option<&[PositionEncodingKind]>) -> Encoding {
+    match offered {
+        Some(kinds) if kinds.contains(&PositionEncodingKind::UTF32) => Encoding::Utf32,
+        _ => Encoding::Utf16,
     }
 }
 
-/// Line `row` of `text` without its line ending, as the grid splits it.
-pub fn line(text: &str, row: usize) -> &str {
-    let l = text.split('\n').nth(row).unwrap_or("");
-    l.strip_suffix('\r').unwrap_or(l)
-}
-
-/// The character index on the raw line of grid cell `p`. They differ only
-/// on a first line that starts with a byte-order mark, which the grid drops.
-pub fn raw_col(text: &str, p: Pos) -> usize {
-    p.col + usize::from(p.row == 0 && text.starts_with(BOM))
+/// The LSP name of `enc`.
+pub fn kind(enc: Encoding) -> PositionEncodingKind {
+    match enc {
+        Encoding::Utf32 => PositionEncodingKind::UTF32,
+        Encoding::Utf16 => PositionEncodingKind::UTF16,
+    }
 }
 
 /// The LSP position of character index `col` on line `row`. Columns past the
 /// end of the line count one unit each, like the grid's implicit spaces.
 pub fn to_lsp(text: &str, enc: Encoding, row: usize, col: usize) -> Position {
-    let (mut units, mut seen) = (0u32, 0usize);
-    for c in line(text, row).chars().take(col) {
-        units += enc.units(c);
-        seen += 1;
-    }
-    let past = u32::try_from(col - seen).unwrap_or(u32::MAX);
-    Position::new(row as u32, units.saturating_add(past))
+    Position::new(row as u32, cells::units_before(text, enc, row, col))
 }
 
 /// The LSP position of grid cell `p`.
 pub fn cell_to_lsp(text: &str, enc: Encoding, p: Pos) -> Position {
-    to_lsp(text, enc, p.row, raw_col(text, p))
+    Position::new(p.row as u32, cells::cell_units(text, enc, p))
 }
 
 /// The range covering `width` cells from grid cell `p`.
 pub fn cells_range(text: &str, enc: Encoding, p: Pos, width: usize) -> Range {
-    let col = raw_col(text, p);
-    Range::new(
-        to_lsp(text, enc, p.row, col),
-        to_lsp(text, enc, p.row, col + width),
-    )
+    let col = cells::raw_col(text, p);
+    Range::new(to_lsp(text, enc, p.row, col), to_lsp(text, enc, p.row, col + width))
 }
 
 /// The character index on its raw line of an LSP position. A UTF-16 offset
 /// that splits a surrogate pair rounds down to the start of that character.
-/// Past the end of the line each unit is one column, counted in one step:
-/// a client may send any `u32`.
 pub fn from_lsp(text: &str, enc: Encoding, pos: Position) -> usize {
-    let mut units = 0u32;
-    let mut col = 0usize;
-    for c in line(text, pos.line as usize).chars() {
-        let next = units.saturating_add(enc.units(c));
-        if next > pos.character {
-            return col;
-        }
-        units = next;
-        col += 1;
-    }
-    col.saturating_add((pos.character - units) as usize)
+    cells::col_at(text, enc, pos.line as usize, pos.character)
 }
 
 /// The grid cell of an LSP position.
 pub fn lsp_to_cell(text: &str, enc: Encoding, pos: Position) -> Pos {
-    let row = pos.line as usize;
-    let col = from_lsp(text, enc, pos);
-    let bom = usize::from(row == 0 && text.starts_with(BOM));
-    Pos::new(row, col.saturating_sub(bom))
+    cells::cell_at(text, enc, pos.line as usize, pos.character)
 }
 
 /// The position just past the last character of `text`.
 pub fn end_of(text: &str, enc: Encoding) -> Position {
-    let row = text.split('\n').count() - 1;
-    let last = text.rsplit('\n').next().unwrap_or("");
-    Position::new(row as u32, last.chars().map(|c| enc.units(c)).sum())
+    let (row, units) = cells::end(text, enc);
+    Position::new(row as u32, units)
 }
 
 #[cfg(test)]
@@ -160,13 +107,13 @@ mod tests {
     #[test]
     fn negotiation_prefers_utf32() {
         use PositionEncodingKind as K;
-        assert_eq!(Encoding::negotiate(None), Encoding::Utf16);
+        assert_eq!(negotiate(None), Encoding::Utf16);
         assert_eq!(
-            Encoding::negotiate(Some(&[K::UTF8, K::UTF16])),
+            negotiate(Some(&[K::UTF8, K::UTF16])),
             Encoding::Utf16
         );
         assert_eq!(
-            Encoding::negotiate(Some(&[K::UTF16, K::UTF32])),
+            negotiate(Some(&[K::UTF16, K::UTF32])),
             Encoding::Utf32
         );
     }

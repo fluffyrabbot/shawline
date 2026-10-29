@@ -267,7 +267,40 @@ impl Diagnostic {
 
     /// Warnings and lints don't stop a program from running.
     pub fn is_warning(&self) -> bool {
-        self.code.starts_with(['W', 'L'])
+        self.severity() != Severity::Error
+    }
+
+    /// How serious it is, read from its code. Every surface (the CLI, the
+    /// language server, Studio) asks this rather than reading the letter.
+    pub fn severity(&self) -> Severity {
+        match self.code.chars().next() {
+            Some('W') => Severity::Warning,
+            Some('L') => Severity::Lint,
+            _ => Severity::Error,
+        }
+    }
+}
+
+/// How serious a [`Diagnostic`] is.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum Severity {
+    /// The program doesn't run: every stage's codes but `W` and `L`.
+    Error,
+    /// The program runs, but something is likely wrong (`W`).
+    Warning,
+    /// Style: the text isn't as the formatter would write it (`L`). The
+    /// language server shows it as a hint.
+    Lint,
+}
+
+impl Severity {
+    /// Its name in dumps and in JS: `error`, `warning` or `lint`.
+    pub const fn name(self) -> &'static str {
+        match self {
+            Severity::Error => "error",
+            Severity::Warning => "warning",
+            Severity::Lint => "lint",
+        }
     }
 }
 

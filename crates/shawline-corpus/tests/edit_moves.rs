@@ -59,7 +59,7 @@ fn every_node_box_moves_one_cell_or_is_refused_with_a_reason() {
         for corner in node_corners(&src) {
             for (dr, dc) in [(-1, 0), (1, 0), (0, -1), (0, 1)] {
                 let what = format!("{name}: box at {corner} by ({dr}, {dc})");
-                match shawline_edit::move_box(&doc, corner, dr, dc).map(|moved| moved.text().to_owned()) {
+                match shawline_edit::move_box(&doc, corner, dr, dc).map(|moved| moved.doc.text().to_owned()) {
                     Err(refusal) => {
                         refused += 1;
                         if refusal.reason.trim().is_empty() {

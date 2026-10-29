@@ -212,7 +212,7 @@ pub fn rooms(src: &str) -> Vec<Edit> {
     let doc = Doc::new(src);
     moves(src)
         .into_iter()
-        .filter(|m| apply(&doc, m).is_err_and(|r| r.kind == RefusalKind::Blocked))
+        .filter(|m| apply(&doc, m).is_err_and(|r| matches!(r.kind, RefusalKind::Blocked(_))))
         .map(|m| Edit::MakeRoom(Box::new(m)))
         .collect()
 }

@@ -14,7 +14,7 @@ A dataflow programming language whose source is a drawing: Shavian-alphabet word
 
 ## Rules for agents
 
-- Touch only the crate you were assigned. Contract files named in PLAN.md (`wire.rs`, `structure.rs`, `ast.rs`, `ir.rs`, `bytecode.rs`, the signatures in `shawline-edit/src/lib.rs`, `shawline-vm/src/trace.rs`, `shawline-ir/src/trace.rs`, `shawline-render/src/gloss.rs` with the signatures of `render_with`, `glosses` and `row_pitch`, and the signatures in `shawline-word/src/reading.rs` and `shawline-glyph/src/gloss.rs`) and the whole of `shawline-grid`, `shawline-doc` and `shawline-corpus` are lead-owned.
+- Touch only the crate you were assigned. Contract files named in PLAN.md (`wire.rs`, `structure.rs`, `ast.rs`, `ir.rs`, `bytecode.rs`, the signatures in `shawline-edit/src/lib.rs`, `shawline-vm/src/trace.rs`, `shawline-ir/src/trace.rs`, `shawline-render/src/gloss.rs` with the signatures of `render_with`, `glosses` and `row_pitch`, `shawline-render/src/geometry.rs`, and the signatures in `shawline-word/src/reading.rs` and `shawline-glyph/src/gloss.rs`) and the whole of `shawline-grid`, `shawline-doc` and `shawline-corpus` are lead-owned.
 - Never edit files under `corpus/`. If an expectation looks wrong, stop and report it with a proposed diff.
 - Your oracle is your crate's tests and your corpus stage. Corpus failures in other stages are expected while a wave is in flight.
 - Don't review or test other agents' crates, add harness or mock crates, or introduce snapshot frameworks.
