@@ -1337,11 +1337,9 @@ function openMenu(at, { mode, from = null, to = null }) {
   setTimeout(() => filter.focus({ preventScroll: true }));
 }
 
-/** Places a palette pick: one edit, or a placing and its wire as one undo step. */
+/** Places a palette pick as one edit. */
 function placeChoice(c, at, how) {
-  const { edit, then } = placing(c, at, how);
-  if (then) studio.chain(edit, then);
-  else studio.edit(edit);
+  studio.edit(placing(c, at, how));
 }
 
 /**

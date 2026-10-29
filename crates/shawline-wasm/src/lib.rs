@@ -17,7 +17,7 @@
 use js_sys::{Array, Object, Reflect};
 use shawline_doc::TRACE_STEPS;
 use shawline_doc::position::{self, Encoding};
-use shawline_edit::{Anchor, Axis, Edit, Insertion, Refusal, RefusalKind};
+use shawline_edit::{Anchor, Axis, Edit, Insertion, NewSource, Refusal, RefusalKind};
 use shawline_grid::{Diagnostic, Dir, Pos, Rect};
 use shawline_render::{Options, SCALE, Theme};
 use shawline_shape::{Diagram, TextKind};
@@ -356,6 +356,8 @@ pub fn trace(src: &str) -> Object {
 //   `{ kind: "remove_node", at }`, `{ kind: "remove_text", at }`
 // - `{ kind: "place_node", corner, word, inputs, outputs }`
 // - `{ kind: "place_connected", at, word, inputs, outputs, from }`
+// - `{ kind: "feed", to, source }`, where `source` is `{ kind: "constant",
+//   content }` or `{ kind: "node", word, inputs, outputs }`
 // - `{ kind: "insert" | "delete", axis: "row" | "column", at, count }`
 // - `{ kind: "make_room", edit }`
 // - `{ kind: "set_text" | "place_text", at, content }`
@@ -425,6 +427,19 @@ fn edit_of(value: &JsValue) -> Result<Edit, String> {
             inputs: count(value, "inputs")?,
             outputs: count(value, "outputs")?,
         },
+        "feed" => {
+            let source = field(value, "source")?;
+            let source = match string(&source, "kind")?.as_str() {
+                "constant" => NewSource::Constant(string(&source, "content")?),
+                "node" => NewSource::Node {
+                    word: string(&source, "word")?,
+                    inputs: count(&source, "inputs")?,
+                    outputs: count(&source, "outputs")?,
+                },
+                other => return Err(format!("no source {other}")),
+            };
+            Edit::Feed { to: pos(value, "to")?, source }
+        }
         "place_connected" => Edit::PlaceConnected {
             at: pos(value, "at")?,
             word: string(value, "word")?,

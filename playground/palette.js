@@ -37,31 +37,22 @@ export function matches(entry, query) {
 }
 
 /**
- * The edit a pick makes at blank cell `at`. Fed from the dragged source
- * `from` it is one `place_connected`. Feeding the unwired arrowhead `to`,
- * it is `first` and then the `connect` that `then(view)` names on the
- * placed sheet, which the Studio writes as one undo step (`Studio.chain`):
- * no single `Edit` places a source and wires it onward yet. Otherwise it is
- * the placing alone. A node's first port, or a constant, lands on the drop
- * row; a drop a row or two off the arrowhead's row lands level with it.
+ * The one edit a pick makes at blank cell `at`. Fed from the dragged
+ * source `from` it is `place_connected`; feeding the unwired arrowhead
+ * `to` it is `feed`, which places the source and wires it in (Number,
+ * Text and 𐑯𐑦𐑤 as constants, any other pick as a node); otherwise it
+ * places the pick alone, a node's first port on the drop row.
  */
 export function placing(choice, at, { mode, from = null, to = null }) {
   const { word, inputs, outputs } = choice;
-  if (mode === "feed") return { edit: { kind: "place_connected", at, word, inputs, outputs, from } };
-  const row = to && Math.abs(to.row - at.row) <= 2 ? to.row : at.row;
-  const corner = { row: Math.max(0, row - 1), col: at.col };
-  const first = choice.kind === "node"
-    ? { kind: "place_node", corner, word, inputs, outputs }
-    : { kind: "place_text", at: { row, col: at.col }, content: word };
-  if (!to) return { edit: first };
-  const then = (view) => {
-    const box = choice.kind === "node" && view.boxes.find((b) => b.top === corner.row && b.left === corner.col);
-    const source = box
-      ? view.sources.find((s) => s.col === box.right && s.row > box.top && s.row < box.bottom)
-      : view.sources.find((s) => s.row === row && s.col === at.col);
-    return source ? { kind: "connect", from: { row: source.row, col: source.col }, to: { row: to.row, col: to.col } } : null;
-  };
-  return { edit: first, then };
+  if (mode === "feed") return { kind: "place_connected", at, word, inputs, outputs, from };
+  const constant = choice.kind !== "node" || word === NIL;
+  if (to) {
+    const source = constant ? { kind: "constant", content: word } : { kind: "node", word, inputs, outputs };
+    return { kind: "feed", to: { row: to.row, col: to.col }, source };
+  }
+  if (choice.kind !== "node") return { kind: "place_text", at, content: word };
+  return { kind: "place_node", corner: { row: Math.max(0, at.row - 1), col: at.col }, word, inputs, outputs };
 }
 
 export class Choices {

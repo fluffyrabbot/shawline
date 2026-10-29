@@ -1065,8 +1065,8 @@ test("a palette pick made with the arrow keys places what is highlighted", () =>
   assert.equal(choices.key("ArrowDown"), "move");
   assert.equal(choices.key("Enter"), "pick");
   const { studio, host } = studioOn(gone);
-  const { edit, then } = placing(choices.chosen, cell(14, 8), { mode: "place" });
-  assert.equal(then, undefined);
+  const edit = placing(choices.chosen, cell(14, 8), { mode: "place" });
+  assert.equal(edit.kind, "place_node");
   assert.equal(studio.edit(edit), true, host.refusals[0]?.reason);
   assert.ok(sheet(host.current).boxes().some((b) => b.kind === "node" && b.top === 13 && b.left === 8));
   assert.equal(choices.key("Escape"), "close");
@@ -1074,16 +1074,46 @@ test("a palette pick made with the arrow keys places what is highlighted", () =>
   assert.ok(offer(callees, "feed").every((c) => c.inputs > 0));
 });
 
-pendingE1("an arrowhead fed from the palette gets a number, placed and wired as one undo step", () => {
-  const cut = edits.disconnect(double, 14, 8).text.replace("│ 21 ", "│    ");
-  const { host, studio } = studioOn(cut);
+/**
+ * Whether `feed` has landed: until it does it refuses as `unsupported`,
+ * and the check that needs it is skipped with a marker.
+ */
+const unfed = edits.disconnect(double, 14, 8).text.replace("│ 21 ", "│    ");
+const FEED = (() => {
+  const probe = shawline.apply(sheet(unfed), { kind: "feed", to: cell(14, 8), source: { kind: "constant", content: "0" } });
+  return probe.ok || probe.kind !== "unsupported";
+})();
+function pendingFeed(name, body) {
+  if (FEED) return test(name, body);
+  skipped++;
+  console.log(`skip  ${name} (pending feed: it refuses as unsupported)`);
+}
+
+pendingFeed("an arrowhead fed from the palette gets a number as one feed edit and one undo step", () => {
+  const { host, studio } = studioOn(unfed);
   const [number] = offer([], "source");
   assert.equal(number.gloss, "Number");
-  const { edit, then } = placing(number, cell(15, 2), { mode: "source", to: cell(14, 8) });
-  assert.deepEqual(edit, { kind: "place_text", at: cell(14, 2), content: "0" }, "level with the arrowhead");
-  studio.chain(edit, then);
-  assert.equal(host.steps.length, 1, host.refusals[0]?.reason);
+  const edit = placing(number, cell(15, 2), { mode: "source", to: cell(14, 8) });
+  assert.deepEqual(edit, { kind: "feed", to: cell(14, 8), source: { kind: "constant", content: "0" } });
+  assert.equal(studio.edit(edit), true, host.refusals[0]?.reason);
+  assert.equal(host.steps.length, 1);
   assert.ok(wiredSinks(host.current).includes("14:8"));
+});
+
+test("feed is the one edit for a callee too, 𐑯𐑦𐑤 is fed as a constant, and wasm reads both", () => {
+  const callees = sheet(double).palette().map((c) => ({ ...c, reading: "", keys: "" }));
+  const [nil, show] = ["𐑯𐑦𐑤", "𐑖"].map((w) => offer(callees, "source").find((c) => c.word === w));
+  const to = cell(14, 8);
+  assert.deepEqual(placing(nil, cell(14, 3), { mode: "source", to }).source, { kind: "constant", content: "𐑯𐑦𐑤" });
+  const fed = placing(show, cell(14, 3), { mode: "source", to });
+  assert.deepEqual(fed.source, { kind: "node", word: "𐑖", inputs: 1, outputs: 1 });
+  const unread = /^(no source|the edit has no|.* isn't)/;
+  for (const edit of [fed, placing(nil, cell(14, 3), { mode: "source", to })]) {
+    const result = shawline.apply(sheet(unfed), edit);
+    assert.ok(result.ok || !unread.test(result.reason), result.reason);
+  }
+  const wrong = shawline.apply(sheet(unfed), { kind: "feed", to, source: { kind: "pipe" } });
+  assert.deepEqual([wrong.ok, wrong.kind, wrong.reason], [false, "target", "no source pipe"]);
 });
 
 test("a selection survives a move: a held nudge is one undo step, and the box stays selected", () => {

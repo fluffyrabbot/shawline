@@ -306,26 +306,6 @@ export class Studio {
     if (tidied) this.host.status("Formatted the sheet to edit it", "hint");
   }
 
-  /**
-   * Two edits written as one undo step: `first`, then the edit `next(view)`
-   * names on its result (null when there is none). Refused whole when
-   * either is. For gestures no single `Edit` covers yet.
-   */
-  chain(first, next) {
-    const base = this.host.text();
-    const a = this.host.apply(this.doc(), first);
-    if (!a.ok) return void this.host.refused(a, first);
-    const middle = this.host.seed(a.doc);
-    a.map?.free();
-    const second = next(this.host.view(middle));
-    if (!second) return void this.host.refused({ ...first.at ?? first.corner, reason: "Nothing placed: there was no source to wire.", remedy: null }, null);
-    const b = this.host.apply(this.host.doc(middle), second);
-    if (!b.ok) return void this.host.refused({ ...b, reason: `Nothing placed: it couldn't be wired in (${b.reason})` }, null);
-    // The map runs from the placed sheet, so the selection is dropped.
-    this.selection = null;
-    this.commit({ ...this.settle(b), tidied: a.tidied }, base);
-  }
-
   /** Carries the selection and cursor through an edit's map, into the shown text. */
   follow(map, from = this.selection, cursor = this.cursor) {
     const view = this.view();
