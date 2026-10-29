@@ -134,7 +134,7 @@ fn trailing_texts(grid: &Grid, diagram: &Diagram, index: usize) -> Vec<(usize, V
         .collect()
 }
 
-fn shift_of(grid: &Grid, diagram: &Diagram, index: usize, dr: isize, dc: isize) -> Shift {
+pub(crate) fn shift_of(grid: &Grid, diagram: &Diagram, index: usize, dr: isize, dc: isize) -> Shift {
     Shift {
         dr,
         dc,
