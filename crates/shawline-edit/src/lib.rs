@@ -820,3 +820,5 @@ impl Terrain for Plain<'_> {
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod tests_forgiving;

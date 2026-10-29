@@ -308,6 +308,10 @@ impl<'a> Sheet<'a> {
             if q > 0 && self.meets(Pos::new(row, q - 1), Dir::E) {
                 cells.extend(q..start);
                 bounds.extend(q..=start);
+                // A title or guard has exactly one rule before it (SPEC §11).
+                if t.title_of.is_some() || t.divider_of.is_some() {
+                    bounds.insert(q - 1);
+                }
             }
             let len = self.grid.row(row).len();
             let mut q = end + 1;

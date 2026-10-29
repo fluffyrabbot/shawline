@@ -41,12 +41,7 @@ pub(crate) fn make_room(doc: &Doc, edit: &Edit) -> Result<Roomed, Refusal> {
     let canon = sheets.doc();
     let diagram = mapped::read(canon).1;
 
-    let mut attempts = 0;
-    for candidate in candidates(diagram, &edit, at) {
-        if attempts == ATTEMPTS {
-            break;
-        }
-        attempts += 1;
+    for candidate in candidates(diagram, &edit, at).into_iter().take(ATTEMPTS) {
         if let Some((edited, inserted)) = attempt(canon, diagram, &edit, &candidate) {
             let edited = Edited { tidied: sheets.tidied(), ..edited };
             return Ok(Roomed { edited, inserted });
