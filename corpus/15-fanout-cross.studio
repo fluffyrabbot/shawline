@@ -3,11 +3,17 @@ rewire
   connect 2:2 6:22 ok 9466815b25ba
   connect 2:2 7:22 ok 9cfea41f00dc
 insert 0:0
-  insert row 9:0 1 refused unsupported 9:0
-  insert column 0:22 1 refused unsupported 0:22
-  insert row 4:0 1 refused unsupported 4:0
-  insert column 0:11 1 refused unsupported 0:11
+  insert row 9:0 1 ok 5d9fbbb752f8
+  delete row 9:0 1 ok fae102cac20f
+  insert column 0:22 1 ok fe33e00df24e
+  delete column 0:22 1 ok fae102cac20f
+  insert row 4:0 1 ok 34a4f1369b54
+  delete row 4:0 1 ok fae102cac20f
+  insert column 0:11 1 ok 1cb666e20fa5
+  delete column 0:11 1 ok fae102cac20f
 retext
-  set_text 2:2 2 refused unsupported 2:2
+  set_text 2:2 2 ok 08667ac10d41
+  set_text 2:2 20 ok da4b621c42f0
+  set_text 2:1 1 ok fae102cac20f
 build
   place_definition 0:0-9:22 𐑥𐑱𐑯 refused unsupported 0:0

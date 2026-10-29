@@ -2,7 +2,8 @@
 //! dump's `room`, `insert` and `retext` sequences:
 //!
 //! - inserting and then deleting, or retexting and then setting back,
-//!   returns the original text exactly;
+//!   returns the original text exactly (for an ASCII twin, its canonical
+//!   form, since edits return canonical text);
 //! - every success is canonical, keeps the codes, and matches the original
 //!   structure relabelled through its map at `Routing::Kept` (for retext,
 //!   with that one text's content changed). Insertions and `make_room` also
@@ -98,6 +99,10 @@ fn studio_room() {
         programs_tried += 1;
         let src = fs::read_to_string(&program).unwrap();
         let original = Doc::new(src.as_str());
+        // Edits return canonical text, so an ASCII twin comes back as its
+        // canonical form, and every check compares with that.
+        let canonical = Doc::new(original.canonical().unwrap().text());
+        let home = canonical.text();
 
         for edit in rooms(&src) {
             sequences += 1;
@@ -106,7 +111,7 @@ fn studio_room() {
                 Ok(edited) => {
                     successes += 1;
                     let Edit::MakeRoom(inner) = &edit else { unreachable!() };
-                    if let Err(why) = check_room(&original, &edited, inner) {
+                    if let Err(why) = check_room(&canonical, &edited, inner) {
                         failures.push(format!("{what}: {why}\n{}", edited.doc.text()));
                     }
                 }
@@ -127,11 +132,11 @@ fn studio_room() {
                     }
                 };
                 successes += 1;
-                if let Err(why) = check(&original, &inserted, true, None) {
+                if let Err(why) = check(&canonical, &inserted, true, None) {
                     failures.push(format!("{what}: {why}\n{}", inserted.doc.text()));
                 }
                 match apply(&inserted.doc, &delete) {
-                    Ok(deleted) if deleted.doc.text() == src => successes += 1,
+                    Ok(deleted) if deleted.doc.text() == home => successes += 1,
                     Ok(deleted) => failures.push(format!("{what}, then {delete}: not the original\n{}", deleted.doc.text())),
                     Err(r) => failures.push(format!("{what}, then {delete}: refused {} {}", r.kind, r.at)),
                 }
@@ -156,10 +161,10 @@ fn studio_room() {
                 };
                 successes += 1;
                 let Edit::SetText { content, .. } = step else { unreachable!() };
-                if let Err(why) = check(&doc, &edited, false, Some(content)) {
+                if let Err(why) = check(if k == 0 { &canonical } else { &doc }, &edited, false, Some(content)) {
                     failures.push(format!("{what}: {why}\n{}", edited.doc.text()));
                 }
-                if k == steps.len() - 1 && edited.doc.text() != src {
+                if k == steps.len() - 1 && edited.doc.text() != home {
                     failures.push(format!("{what}: setting back isn't the original\n{}", edited.doc.text()));
                 }
                 doc = edited.doc;

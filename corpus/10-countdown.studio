@@ -60,25 +60,40 @@ move 22:11 1 0 ok 13f78a9d1989
 move 22:11 0 -1 ok c97adefa5298
 move 22:11 0 1 ok 154588526c07
 room
-  make_room move 4:14 1 0 refused unsupported 4:14
-  make_room move 4:14 0 -1 refused unsupported 4:14
-  make_room move 12:17 -1 0 refused unsupported 12:17
-  make_room move 12:17 1 0 refused unsupported 12:17
-  make_room move 12:17 0 -1 refused unsupported 12:17
-  make_room move 12:26 -1 0 refused unsupported 12:26
+  make_room move 4:14 1 0 ok 455a30cd02da
+  make_room move 4:14 0 -1 refused blocked 6:14
+  make_room move 12:17 -1 0 refused blocked 12:17
+  make_room move 12:17 1 0 refused blocked 12:17
+  make_room move 12:17 0 -1 refused blocked 14:17
+  make_room move 12:26 -1 0 refused blocked 12:26
 insert 2:0
-  insert row 18:0 1 refused unsupported 18:0
-  insert column 2:46 1 refused unsupported 2:46
-  insert row 10:0 1 refused unsupported 10:0
-  insert column 2:23 1 refused unsupported 2:23
+  insert row 18:0 1 ok 58421d67d0a5
+  delete row 18:0 1 ok a96f65cf1db3
+  insert column 2:46 1 ok dcea450d1ccc
+  delete column 2:46 1 ok a96f65cf1db3
+  insert row 10:0 1 ok c6f8e3fd1296
+  delete row 10:0 1 ok a96f65cf1db3
+  insert column 2:23 1 ok 8433108cd685
+  delete column 2:23 1 ok a96f65cf1db3
 insert 20:0
-  insert row 26:0 1 refused unsupported 26:0
-  insert column 20:24 1 refused unsupported 20:24
-  insert row 23:0 1 refused unsupported 23:0
-  insert column 20:12 1 refused unsupported 20:12
+  insert row 26:0 1 ok 23255d02974a
+  delete row 26:0 1 ok a96f65cf1db3
+  insert column 20:24 1 ok 2a0eb53c4ccc
+  delete column 20:24 1 ok a96f65cf1db3
+  insert row 23:0 1 ok 1b005258a91e
+  delete row 23:0 1 ok a96f65cf1db3
+  insert column 20:12 1 ok 4b684e7ed88e
+  delete column 20:12 1 ok a96f65cf1db3
 retext
-  set_text 6:11 1 refused unsupported 6:11
-  set_text 14:14 2 refused unsupported 14:14
-  set_text 23:2 100001 refused unsupported 23:2
+  set_text 6:11 1 ok b95ecdea7bc5
+  set_text 6:11 10 ok ce9fd3e46e30
+  set_text 6:10 0 ok a96f65cf1db3
+  set_text 14:14 2 ok 8a7d02463098
+  set_text 14:14 20 ok 4d8311748216
+  set_text 14:13 1 ok a96f65cf1db3
+  set_text 23:2 100001 ok d1369495d2ea
+  set_text 23:2 1000010 ok ce373a083bd1
+  set_text 23:1 100000 ok a96f65cf1db3
 build
-  place_text 0:0 ※ 𐑒𐑬𐑯𐑑𐑛𐑬𐑯 refused unsupported 0:0
+  place_text 0:0 ※ 𐑒𐑬𐑯𐑑𐑛𐑬𐑯 ok 649662288b8a
+  place_definition 2:0-18:46 𐑒𐑬𐑯𐑑 refused unsupported 2:0

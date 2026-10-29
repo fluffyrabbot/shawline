@@ -213,7 +213,8 @@ test("preview shows the path connect would draw", () => {
 pendingE1("preview's path runs from the source to the arrowhead, ends included, and from an arrowhead too", () => {
   const bare = edits.remove_wire(double, 5, 4).text;
   const { path } = sheet(bare).preview(false, 5, 0, 5, 10);
-  assert.deepEqual([path[0], path[path.length - 1]].map((c) => c.col), [0, 10]);
+  // From the source's own cell, the input's name 𐑯, to the arrowhead.
+  assert.deepEqual([path[0], path[path.length - 1]].map((c) => c.col), [2, 10]);
   const back = sheet(bare).preview(true, 5, 10, 5, 0);
   assert.ok(back, "a drag from an unwired arrowhead has a preview");
 });
@@ -1116,6 +1117,8 @@ pendingE1("a selection survives an insertion", () => {
   assert.equal(press("r"), true);
   assert.equal(host.steps.length, 1, host.refusals[0]?.reason);
   assert.deepEqual([studio.selection.kind, studio.selection.box.top, studio.selection.box.left], ["box", 14, 8]);
+  // The cursor followed the box down; the inserted row is still 12.
+  studio.cursor = cell(12, 4);
   press("R");
   assert.equal(host.current, double, "deleting the row again gives the sheet back");
 });

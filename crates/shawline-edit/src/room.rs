@@ -222,6 +222,7 @@ pub(crate) fn readdress(edit: &Edit, f: &impl Fn(Pos) -> Pos) -> Edit {
         Edit::PlaceConnected { at, word, inputs, outputs, from } => {
             Edit::PlaceConnected { at: f(at), word, inputs, outputs, from: f(from) }
         }
+        Edit::Feed { to, source } => Edit::Feed { to: f(to), source },
         Edit::Insert(i) => Edit::Insert(insertion(i)),
         Edit::Delete(i) => Edit::Delete(insertion(i)),
         Edit::MakeRoom(inner) => Edit::MakeRoom(Box::new(readdress(&inner, f))),

@@ -76,28 +76,47 @@ move 25:16 1 0 ok 9d9d0c42597e
 move 25:16 0 -1 ok 00565bbd478c
 move 25:16 0 1 ok 2cfe9f4f5a4d
 room
-  make_room move 4:14 1 0 refused unsupported 4:14
-  make_room move 4:14 0 -1 refused unsupported 4:14
-  make_room move 12:18 -1 0 refused unsupported 12:18
-  make_room move 12:18 1 0 refused unsupported 12:18
-  make_room move 22:6 1 0 refused unsupported 22:6
-  make_room move 22:16 1 0 refused unsupported 22:16
-  make_room move 25:16 -1 0 refused unsupported 25:16
+  make_room move 4:14 1 0 ok 304c2ed8ef82
+  make_room move 4:14 0 -1 refused blocked 6:14
+  make_room move 12:18 -1 0 refused blocked 12:18
+  make_room move 12:18 1 0 ok ad8745a9fcef
+  make_room move 22:6 1 0 ok 47f61c2a7305
+  make_room move 22:16 1 0 ok 32ddbf4788ad
+  make_room move 25:16 -1 0 refused blocked 25:16
 insert 2:0
-  insert row 18:0 1 refused unsupported 18:0
-  insert column 2:34 1 refused unsupported 2:34
-  insert row 10:0 1 refused unsupported 10:0
-  insert column 2:17 1 refused unsupported 2:17
+  insert row 18:0 1 ok 4c71a3cee830
+  delete row 18:0 1 ok 1d0ee8b1c254
+  insert column 2:34 1 ok 4c850172da07
+  delete column 2:34 1 ok 1d0ee8b1c254
+  insert row 10:0 1 ok 13d59c97e933
+  delete row 10:0 1 ok 1d0ee8b1c254
+  insert column 2:17 1 ok 40574dc51aec
+  delete column 2:17 1 ok 1d0ee8b1c254
 insert 20:0
-  insert row 29:0 1 refused unsupported 29:0
-  insert column 20:30 1 refused unsupported 20:30
-  insert row 24:0 1 refused unsupported 24:0
-  insert column 20:15 1 refused unsupported 20:15
+  insert row 29:0 1 ok acdf6ae7fcaf
+  delete row 29:0 1 ok 1d0ee8b1c254
+  insert column 20:30 1 ok d2031c51e851
+  delete column 20:30 1 ok 1d0ee8b1c254
+  insert row 24:0 1 ok 06c8f6a730cc
+  delete row 24:0 1 ok 1d0ee8b1c254
+  insert column 20:15 1 ok 7a2458f44c5d
+  delete column 20:15 1 ok 1d0ee8b1c254
 retext
-  set_text 6:11 1 refused unsupported 6:11
-  set_text 13:15 1 refused unsupported 13:15
-  set_text 23:3 1 refused unsupported 23:3
-  set_text 24:3 8 refused unsupported 24:3
-  set_text 26:3 6 refused unsupported 26:3
+  set_text 6:11 1 ok 9b925a5c4f4b
+  set_text 6:11 10 ok 190df2913219
+  set_text 6:10 0 ok 1d0ee8b1c254
+  set_text 13:15 1 ok 456b34f884f4
+  set_text 13:15 10 ok ace4b995234c
+  set_text 13:14 0 ok 1d0ee8b1c254
+  set_text 23:3 1 ok 79b71fc5e497
+  set_text 23:3 10 ok 69790f143b58
+  set_text 23:2 0 ok 1d0ee8b1c254
+  set_text 24:3 8 ok 62f3fb7eefef
+  set_text 24:3 80 ok a2267cbfee76
+  set_text 24:2 7 ok 1d0ee8b1c254
+  set_text 26:3 6 ok 17e2a2ec7b63
+  set_text 26:3 60 ok a22a3a59396c
+  set_text 26:2 5 ok 1d0ee8b1c254
 build
-  place_text 0:0 ※ 𐑨𐑚𐑕𐑩𐑤𐑵𐑑 refused unsupported 0:0
+  place_text 0:0 ※ 𐑨𐑚𐑕𐑩𐑤𐑵𐑑 ok 52479497f34b
+  place_definition 2:0-18:34 𐑨𐑚𐑕 refused unsupported 2:0

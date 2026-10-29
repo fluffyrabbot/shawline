@@ -10,9 +10,14 @@ move 4:4 1 0 ok 37aeabed3579
 move 4:4 0 -1 ok 4378a969fb22
 move 4:4 0 1 ok 1c95caba6f6a
 insert 2:0
-  insert row 8:0 1 refused unsupported 8:0
-  insert column 2:19 1 refused unsupported 2:19
-  insert row 5:0 1 refused unsupported 5:0
-  insert column 2:9 1 refused unsupported 2:9
+  insert row 8:0 1 ok 45d1fa22b8da
+  delete row 8:0 1 ok 1ed516787413
+  insert column 2:19 1 ok bed5781a951b
+  delete column 2:19 1 ok 1ed516787413
+  insert row 5:0 1 ok b9ce792d87ee
+  delete row 5:0 1 ok 1ed516787413
+  insert column 2:9 1 ok 153268c3380c
+  delete column 2:9 1 ok 1ed516787413
 build
-  place_text 0:0 ※ 𐑯𐑦𐑤 𐑚𐑪𐑒𐑕 refused unsupported 0:0
+  place_text 0:0 ※ 𐑯𐑦𐑤 𐑚𐑪𐑒𐑕 ok cc15f18f8831
+  place_definition 2:0-8:19 𐑥𐑱𐑯 refused unsupported 2:0

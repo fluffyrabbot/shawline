@@ -2,9 +2,14 @@ rewire
   remove_wire 4:14 ok 2a4016bc45d5
   connect 4:2 4:20 ok 9f3fc559d89f
 insert 2:0
-  insert row 6:0 1 refused unsupported 6:0
-  insert column 2:20 1 refused unsupported 2:20
-  insert row 4:0 1 refused unsupported 4:0
-  insert column 2:10 1 refused unsupported 2:10
+  insert row 6:0 1 ok 9c59d79abb61
+  delete row 6:0 1 ok 9f3fc559d89f
+  insert column 2:20 1 ok e77676ee8e9e
+  delete column 2:20 1 ok 9f3fc559d89f
+  insert row 4:0 1 ok ba4e4d4b82a6
+  delete row 4:0 1 ok 9f3fc559d89f
+  insert column 2:10 1 ok e77676ee8e9e
+  delete column 2:10 1 ok 9f3fc559d89f
 build
-  place_text 0:0 ※ 𐑣𐑧𐑤𐑴 refused unsupported 0:0
+  place_text 0:0 ※ 𐑣𐑧𐑤𐑴 ok d031c30981d1
+  place_definition 2:0-6:20 𐑥𐑱𐑯 refused unsupported 2:0

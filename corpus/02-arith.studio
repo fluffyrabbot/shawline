@@ -64,18 +64,39 @@ move 19:8 1 0 ok 90c5c21e88b4
 move 19:8 0 -1 ok eb0587d43109
 move 19:8 0 1 ok 69a43f4ec2d9
 insert 2:0
-  insert row 24:0 1 refused unsupported 24:0
-  insert column 2:18 1 refused unsupported 2:18
-  insert row 13:0 1 refused unsupported 13:0
-  insert column 2:9 1 refused unsupported 2:9
+  insert row 24:0 1 ok ab02df59f278
+  delete row 24:0 1 ok 316e4940cb35
+  insert column 2:18 1 ok ede961393d4c
+  delete column 2:18 1 ok 316e4940cb35
+  insert row 13:0 1 ok 527401ff361f
+  delete row 13:0 1 ok 316e4940cb35
+  insert column 2:9 1 ok de1df6690196
+  delete column 2:9 1 ok 316e4940cb35
 retext
-  set_text 5:3 7 refused unsupported 5:3
-  set_text 6:3 8 refused unsupported 6:3
-  set_text 10:3 8 refused unsupported 10:3
-  set_text 11:2 11 refused unsupported 11:2
-  set_text 15:2 18 refused unsupported 15:2
-  set_text 16:3 6 refused unsupported 16:3
-  set_text 20:2 18 refused unsupported 20:2
-  set_text 21:3 6 refused unsupported 21:3
+  set_text 5:3 7 ok cf60be81d8b9
+  set_text 5:3 70 ok 011490cd113e
+  set_text 5:2 6 ok 316e4940cb35
+  set_text 6:3 8 ok 4da0d32614eb
+  set_text 6:3 80 ok 1ae2cd2c4fa0
+  set_text 6:2 7 ok 316e4940cb35
+  set_text 10:3 8 ok d2106e73c5aa
+  set_text 10:3 80 ok e541f0b3e751
+  set_text 10:2 7 ok 316e4940cb35
+  set_text 11:2 11 ok 2c8a6b9472e8
+  set_text 11:2 110 ok da26e8678b0c
+  set_text 11:1 10 ok 316e4940cb35
+  set_text 15:2 18 ok 55c5f5cf5616
+  set_text 15:2 180 ok e83b95da4770
+  set_text 15:1 17 ok 316e4940cb35
+  set_text 16:3 6 ok 47ab48c0821c
+  set_text 16:3 60 ok 4bc03707defe
+  set_text 16:2 5 ok 316e4940cb35
+  set_text 20:2 18 ok 4eeb30eec1f8
+  set_text 20:2 180 ok 9c5a3ce4fb86
+  set_text 20:1 17 ok 316e4940cb35
+  set_text 21:3 6 ok c8bcd28336da
+  set_text 21:3 60 ok f142fef19ca2
+  set_text 21:2 5 ok 316e4940cb35
 build
-  place_text 0:0 ※ 𐑩𐑮𐑦𐑔𐑥𐑩𐑑𐑦𐑒 refused unsupported 0:0
+  place_text 0:0 ※ 𐑩𐑮𐑦𐑔𐑥𐑩𐑑𐑦𐑒 ok 6c2f6f8c3d6d
+  place_definition 2:0-24:18 𐑥𐑱𐑯 refused unsupported 2:0

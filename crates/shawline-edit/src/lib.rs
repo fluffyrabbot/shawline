@@ -321,6 +321,8 @@ pub enum Edit {
     Rewire { from: Pos, to: Pos },
     /// [`place_connected`].
     PlaceConnected { at: Pos, word: String, inputs: u16, outputs: u16, from: Pos },
+    /// [`feed`].
+    Feed { to: Pos, source: NewSource },
     /// [`insert`].
     Insert(Insertion),
     /// [`delete`].
@@ -364,6 +366,7 @@ impl fmt::Display for Edit {
             Edit::PlaceConnected { at, word, inputs, outputs, from } => {
                 write!(f, "place_connected {at} {word} {inputs} {outputs} {from}")
             }
+            Edit::Feed { to, source } => write!(f, "feed {to} {source}"),
             Edit::Insert(i) => write!(f, "insert {i}"),
             Edit::Delete(i) => write!(f, "delete {i}"),
             Edit::MakeRoom(edit) => write!(f, "make_room {edit}"),
@@ -417,6 +420,7 @@ pub fn apply(doc: &Doc, edit: &Edit) -> Result<Edited, Refusal> {
         Edit::PlaceConnected { at, word, inputs, outputs, from } => {
             place_connected(doc, *at, word, *inputs, *outputs, *from)
         }
+        Edit::Feed { to, source } => feed(doc, *to, source),
         Edit::Insert(i) => insert(doc, *i),
         Edit::Delete(i) => delete(doc, *i),
         Edit::MakeRoom(edit) => make_room(doc, edit).map(|roomed| roomed.edited),
@@ -570,6 +574,7 @@ impl Edit {
             | Edit::RemoveNode(at)
             | Edit::Rewire { to: at, .. }
             | Edit::PlaceConnected { at, .. }
+            | Edit::Feed { to: at, .. }
             | Edit::SetText { at, .. }
             | Edit::PlaceText { at, .. }
             | Edit::RemoveText(at)
@@ -606,6 +611,37 @@ pub fn place_connected(
     from: Pos,
 ) -> Result<Edited, Refusal> {
     compound::place_connected(doc, at, word, inputs, outputs, from)
+}
+
+/// A source [`feed`] places.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum NewSource {
+    /// A constant, as written: a number, a `«»` text, or `𐑯𐑦𐑤`.
+    Constant(String),
+    /// A node for `word`, fed from its first output.
+    Node { word: String, inputs: u16, outputs: u16 },
+}
+
+impl fmt::Display for NewSource {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            NewSource::Constant(content) => write!(f, "constant {content}"),
+            NewSource::Node { word, inputs, outputs } => write!(f, "node {word} {inputs} {outputs}"),
+        }
+    }
+}
+
+/// The palette's gesture after a drag from the unwired arrowhead `to` is
+/// dropped on blank sheet, or the arrowhead is picked and a source chosen:
+/// places `source` and wires it into `to`, as one checked edit. A constant
+/// goes on `to`'s row, left of the arrowhead, as `21 ───▶`; a node goes
+/// left of it with its first output on that row, the corner offset and
+/// retried as [`place_connected`] does. Refused whole when no placement can
+/// be wired; the intermediate sheet, where a constant would meet the
+/// arrowhead unwired, is never returned.
+pub fn feed(doc: &Doc, to: Pos, source: &NewSource) -> Result<Edited, Refusal> {
+    let _ = (doc, source);
+    Err(pending(to))
 }
 
 /// What a box is, by how recognition reads it.
@@ -746,8 +782,9 @@ pub enum Anchor {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Preview {
     /// The whole polyline [`connect`] would draw, ends included: from the
-    /// source (or the tee where it joins the source's wire) to the sink, or
-    /// to the blank cell the drag is over.
+    /// source's own cell (a port, or the last cell of the text a wire
+    /// starts from, such as an input's name) or the tee where it joins the
+    /// source's wire, to the sink or to the blank cell the drag is over.
     pub path: Vec<Pos>,
     /// The path starts on the source's existing wire, at a new tee.
     pub joins_wire: bool,
