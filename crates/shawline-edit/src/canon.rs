@@ -73,6 +73,12 @@ impl<'a> Sheets<'a> {
         self.canon.unwrap_or(self.given)
     }
 
+    /// Whether the given text isn't canonical, so edits draw on its
+    /// formatted text.
+    pub(crate) fn tidied(&self) -> bool {
+        self.canon.is_some()
+    }
+
     /// The canonical revision.
     pub(crate) fn doc(&self) -> &'a Doc {
         self.doc

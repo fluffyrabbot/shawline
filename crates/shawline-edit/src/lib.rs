@@ -23,10 +23,12 @@
 
 mod canon;
 mod check;
+mod cut;
 mod describe;
 mod mapped;
 mod model;
 mod mover;
+mod retext;
 mod router;
 mod sheet;
 mod wiring;
@@ -472,15 +474,13 @@ impl fmt::Display for Insertion {
 /// shift ([`Routing::Kept`](shawline_shape::structure::Routing::Kept)).
 /// Refused where the top-level box doesn't hold `at`.
 pub fn insert(doc: &Doc, insertion: Insertion) -> Result<Edited, Refusal> {
-    let _ = doc;
-    Err(pending(insertion.at))
+    cut::insert(doc, insertion)
 }
 
 /// Deletes rows or columns: [`insert`]'s exact inverse. Refused where a
 /// cell to delete is neither blank nor a plain stretch of stroke.
 pub fn delete(doc: &Doc, deletion: Insertion) -> Result<Edited, Refusal> {
-    let _ = doc;
-    Err(pending(deletion.at))
+    cut::delete(doc, deletion)
 }
 
 /// What [`make_room`] did.
@@ -506,23 +506,20 @@ pub fn make_room(doc: &Doc, edit: &Edit) -> Result<Roomed, Refusal> {
 /// name, title, guard or comment at its right end. The text keeps its role:
 /// a constant stays a literal, a name a word, a title a `·`-word.
 pub fn set_text(doc: &Doc, at: Pos, content: &str) -> Result<Edited, Refusal> {
-    let _ = (doc, content);
-    Err(pending(at))
+    retext::set_text(doc, at, content)
 }
 
 /// Writes a new text starting at `at`. Refused when it would meet a stroke
 /// across spaces: a new constant is stray (`Y012`) until a [`connect`]
 /// wires it.
 pub fn place_text(doc: &Doc, at: Pos, content: &str) -> Result<Edited, Refusal> {
-    let _ = (doc, content);
-    Err(pending(at))
+    retext::place_text(doc, at, content)
 }
 
 /// Removes the text through `at`: a stray text or a comment, or a constant
 /// with its wire. Refused for names, titles and guards.
 pub fn remove_text(doc: &Doc, at: Pos) -> Result<Edited, Refusal> {
-    let _ = doc;
-    Err(pending(at))
+    retext::remove_text(doc, at)
 }
 
 /// Draws an empty definition box at `rect`, titled `·name`. Refused when it

@@ -192,7 +192,7 @@ impl<'a> Model<'a> {
         self.diagram.boxes.iter().position(|b| (b.rect.top, b.rect.left) == (corner.row, corner.col))
     }
 
-    fn text_at(&self, p: Pos) -> Option<usize> {
+    pub(crate) fn text_at(&self, p: Pos) -> Option<usize> {
         self.texts.get(&p).copied()
     }
 
@@ -202,7 +202,7 @@ impl<'a> Model<'a> {
 
     /// True if a free arrowhead points at text `t` across spaces: `t` is an
     /// inline node's word, or the literal after one (SPEC §6).
-    fn after_free_arrow(&self, t: usize) -> bool {
+    pub(crate) fn after_free_arrow(&self, t: usize) -> bool {
         let start = self.diagram.texts[t].pos;
         let (gap, text) = across(self.grid, &self.texts, start, Dir::W);
         if text.is_some() {
@@ -215,7 +215,7 @@ impl<'a> Model<'a> {
 
     /// The scope of text `t` if it can be a constant: a number, a literal
     /// or `𐑯𐑦𐑤`, loose in a definition or an arm.
-    fn constant(&self, t: usize) -> Option<Scope> {
+    pub(crate) fn constant(&self, t: usize) -> Option<Scope> {
         let text = &self.diagram.texts[t];
         let literal = matches!(text.kind, TextKind::Number | TextKind::Literal)
             || (text.kind == TextKind::Word && text.content == NIL);
@@ -230,7 +230,7 @@ impl<'a> Model<'a> {
     }
 
     /// The definition input whose name text `t` is, if any.
-    fn input_named(&self, t: usize) -> Option<(usize, Port)> {
+    pub(crate) fn input_named(&self, t: usize) -> Option<(usize, Port)> {
         let start = self.diagram.texts[t].pos;
         let (gap, text) = across(self.grid, &self.texts, start, Dir::W);
         if text.is_some() {
