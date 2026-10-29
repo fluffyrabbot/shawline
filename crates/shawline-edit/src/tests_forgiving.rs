@@ -396,3 +396,49 @@ fn branch_names_the_cells_of_the_text_as_given() {
     assert_eq!(ascii, canonical);
     assert!(canonical.contains(&Pos::new(6, 6)) && canonical.contains(&Pos::new(5, 6)), "{canonical:?}");
 }
+
+// ---------------------------------------------------------------------------
+// Feeding an unwired arrowhead.
+
+/// A node whose input nothing feeds yet, with room to its left.
+const HUNGRY: &str = "\
+╭─ ·𐑥𐑱𐑯 ──────────────────────╮
+│                             │
+│                ┌───┐        │
+│                ▶ 𐑦 ├────────▶ 𐑢𐑳𐑯
+│                └───┘        │
+│                             │
+╰─────────────────────────────╯
+";
+
+#[test]
+fn feeding_a_constant_writes_it_wired() {
+    // 7's text and wire go; feeding 7 back gives the program back.
+    let cut = ok(remove_text(&Doc::new(ARITH), Pos::new(6, 3)));
+    let fed = ok(crate::feed(&cut.doc, Pos::new(6, 8), &crate::NewSource::Constant("7".to_owned())));
+    assert_eq!(fed.doc.text(), ARITH);
+    assert!(fed.map.is_total());
+    let fed = ok(crate::feed(&Doc::new(HUNGRY), Pos::new(3, 17), &crate::NewSource::Constant("«𐑣𐑦»".to_owned())));
+    assert_eq!(line(fed.doc.text(), 3), "│        «𐑣𐑦» ───▶ 𐑦 ├────────▶ 𐑢𐑳𐑯");
+    assert!(!fed.doc.diagnostics().iter().any(|d| d.code == "Y019" || d.code == "Y012"));
+    // Only a constant, and only into an unwired arrowhead.
+    let word = crate::feed(&Doc::new(HUNGRY), Pos::new(3, 17), &crate::NewSource::Constant("𐑦".to_owned()));
+    assert_eq!(word.unwrap_err().kind, RefusalKind::Target);
+    let wired = crate::feed(&Doc::new(ARITH), Pos::new(6, 8), &crate::NewSource::Constant("7".to_owned()));
+    assert_eq!(wired.unwrap_err().kind, RefusalKind::Target);
+}
+
+#[test]
+fn feeding_a_node_places_it_wired() {
+    let nil = crate::NewSource::Node { word: "𐑯𐑦𐑤".to_owned(), inputs: 0, outputs: 1 };
+    let fed = ok(crate::feed(&Doc::new(HUNGRY), Pos::new(3, 17), &nil));
+    let text = fed.doc.text();
+    assert!(text.contains("│      │ 𐑯𐑦𐑤 ├───▶ 𐑦 ├"), "{text}");
+    assert!(!fed.doc.diagnostics().iter().any(|d| d.code == "Y019"), "{text}");
+    assert!(fed.map.is_total());
+    assert_eq!(fed.doc.diagram().unwrap().boxes.len(), 3);
+    // No room left of the arrowhead: refused whole, offering room.
+    let cut = ok(remove_text(&Doc::new(ARITH), Pos::new(6, 3)));
+    let cramped = crate::feed(&cut.doc, Pos::new(6, 8), &nil).unwrap_err();
+    assert_eq!((cramped.kind, cramped.remedy), (RefusalKind::Blocked(Blockage::NoRoom), Some(Remedy::MakeRoom)));
+}

@@ -640,8 +640,7 @@ impl fmt::Display for NewSource {
 /// be wired; the intermediate sheet, where a constant would meet the
 /// arrowhead unwired, is never returned.
 pub fn feed(doc: &Doc, to: Pos, source: &NewSource) -> Result<Edited, Refusal> {
-    let _ = (doc, source);
-    Err(pending(to))
+    compound::feed(doc, to, source)
 }
 
 /// What a box is, by how recognition reads it.

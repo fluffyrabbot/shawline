@@ -111,7 +111,7 @@ fn output_named(model: &Model, t: usize) -> bool {
 }
 
 /// One text, written on its own: its kind, content and width.
-fn token(content: &str) -> Option<Text> {
+pub(crate) fn token(content: &str) -> Option<Text> {
     if content.is_empty() || content.contains(['\n', '\r']) || content.trim() != content {
         return None;
     }
