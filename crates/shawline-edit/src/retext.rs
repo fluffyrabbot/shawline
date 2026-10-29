@@ -181,7 +181,7 @@ pub(crate) fn set_text(doc: &Doc, at: Pos, content: &str) -> Result<Edited, Refu
     let at_row = |c: usize| Pos::new(row, c);
     let mut lines = rows(grid);
     let no_room = |what: &str| {
-        let why = format!("there's no room for {what} here; make room or move what's beside it");
+        let why = format!("there's no room for {what} here; try Make room or move what's beside it");
         Refusal::new(at, RefusalKind::Blocked(Blockage::NoRoom), why)
     };
     let new_start = if role == Role::Constant {
@@ -222,7 +222,7 @@ pub(crate) fn set_text(doc: &Doc, at: Pos, content: &str) -> Result<Edited, Refu
                     })
                 };
                 if from > q && !(q..=from).all(plain) {
-                    return Err(no_room(&format!("the longer {}", role.name().trim_start_matches("a "))));
+                    return Err(no_room("the longer text"));
                 }
                 for c in start..from.max(q) {
                     put(&mut lines, at_row(c), ' ');
@@ -235,7 +235,7 @@ pub(crate) fn set_text(doc: &Doc, at: Pos, content: &str) -> Result<Edited, Refu
                 if new_end > end {
                     let blank = (end + 1..=new_end).all(|c| grid.get(at_row(c)) == ' ');
                     if !blank || !clear_beside(grid, diagram, &model, Some(at_row(new_end + 1)), Dir::E) {
-                        return Err(no_room(&format!("the longer {}", role.name().trim_start_matches("a "))));
+                        return Err(no_room("the longer text"));
                     }
                 }
                 for c in start..=end {
@@ -278,7 +278,7 @@ fn settle(
     change(&mut expected, &map);
     expected
         .expect(&Structure::of(new.0, new.1), Routing::Kept)
-        .map_err(|part| format!("it would change how the sheet reads ({part:?}); try another place or content"))?;
+        .map_err(|_| "it would change what the sheet means; try another place or content".to_owned())?;
     Ok(Edited { doc: result, map, tidied: sheets.tidied() })
 }
 
@@ -417,8 +417,8 @@ pub(crate) fn remove_text(doc: &Doc, at: Pos) -> Result<Edited, Refusal> {
     };
     let new = mapped::read(&result);
     let expected = Structure::of(grid, diagram_now).relabel(&map);
-    expected.expect(&Structure::of(new.0, new.1), Routing::Kept).map_err(|part| {
-        refuse(RefusalKind::Changed, &format!("removing it would change how the sheet reads ({part:?})"))
+    expected.expect(&Structure::of(new.0, new.1), Routing::Kept).map_err(|_| {
+        refuse(RefusalKind::Changed, "removing it would change what the sheet means; edit it in the text pane")
     })?;
     map.wires = mapped::wires_by_terms((grid, diagram_now), new, &map);
     let map = match first {
