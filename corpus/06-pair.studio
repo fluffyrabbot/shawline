@@ -43,3 +43,13 @@ move 8:30 -1 0 ok 51d95791d8b0
 move 8:30 1 0 ok b31226f84b89
 move 8:30 0 -1 ok a5a3574bf47d
 move 8:30 0 1 ok 1bd8fac072e4
+insert 2:0
+  insert row 13:0 1 refused unsupported 13:0
+  insert column 2:40 1 refused unsupported 2:40
+  insert row 7:0 1 refused unsupported 7:0
+  insert column 2:20 1 refused unsupported 2:20
+retext
+  set_text 5:3 2 refused unsupported 5:3
+  set_text 6:3 3 refused unsupported 6:3
+build
+  place_text 0:0 ※ 𐑐𐑺 refused unsupported 0:0

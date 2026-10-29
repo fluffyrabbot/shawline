@@ -1,7 +1,7 @@
 //! The Studio edit sequences the gates walk, and the `.studio` dump that
-//! records how each step ends (PLAN P8, "Oracle first").
+//! records how each step ends (PLAN P8 and P10, "Oracle first").
 //!
-//! Three sequences per valid program, all from the canonical text:
+//! Per valid program, all from the canonical text:
 //!
 //! - **rewire:** remove every wire the mouse can edit, then connect each
 //!   original (source, sink) pair again, sinks in row-major order;
@@ -9,7 +9,13 @@
 //!   place it again at its corner, and reconnect its wires, incoming
 //!   branches first;
 //! - **move,** per node box: one cell up, down, left and right, each from
-//!   the original text.
+//!   the original text;
+//! - **room:** each move refused as blocked, retried with `make_room`;
+//! - **insert,** per definition: a row before its bottom border, a column at
+//!   its right border, and a row and a column through its middle, each
+//!   inserted and deleted again;
+//! - **retext,** per number constant: +1, then ×10, then set back;
+//! - **build:** the whole program from an empty sheet.
 //!
 //! A sequence stops at its first refusal. The dump has one line per step:
 //! the step, then `ok` with a hash of the resulting text, or `refused` with
@@ -17,12 +23,12 @@
 //! as with diagnostics. The hash makes a refactor that should change nothing prove
 //! it: any different text, even an equally good route, shows as a diff.
 
-use std::fmt::{self, Write};
+use std::fmt::Write;
 
 use shawline_doc::Doc;
-use shawline_edit::Refusal;
+use shawline_edit::{Axis, Edit, Insertion, RefusalKind, apply};
 use shawline_grid::{Dir, Grid, Pos};
-use shawline_shape::{PortKind, recognize};
+use shawline_shape::{PortKind, TextKind, recognize};
 use shawline_syntax::ast::{Endpoint, Graph, NodeKind, Sheet};
 
 /// One wire, named by cells as the edit contract names endpoints.
@@ -137,65 +143,26 @@ pub fn node_corners(src: &str) -> Vec<Pos> {
         .collect()
 }
 
-/// One checked edit, as a gate or the dump applies it.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum Step {
-    RemoveWire(Pos),
-    Connect(Pos, Pos),
-    RemoveNode(Pos),
-    PlaceNode { corner: Pos, word: String, inputs: u16, outputs: u16 },
-    Move { corner: Pos, dr: isize, dc: isize },
-}
-
-impl Step {
-    /// Applies the step to `doc`.
-    pub fn apply(&self, doc: &Doc) -> Result<Doc, Refusal> {
-        match self {
-            Step::RemoveWire(at) => shawline_edit::remove_wire(doc, *at),
-            Step::Connect(from, to) => shawline_edit::connect(doc, *from, *to),
-            Step::RemoveNode(corner) => shawline_edit::remove_node(doc, *corner),
-            Step::PlaceNode { corner, word, inputs, outputs } => {
-                shawline_edit::place_node(doc, *corner, word, *inputs, *outputs).map(|placed| placed.doc)
-            }
-            Step::Move { corner, dr, dc } => shawline_edit::move_box(doc, *corner, *dr, *dc),
-        }
-    }
-}
-
-impl fmt::Display for Step {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Step::RemoveWire(at) => write!(f, "remove_wire {at}"),
-            Step::Connect(from, to) => write!(f, "connect {from} {to}"),
-            Step::RemoveNode(corner) => write!(f, "remove_node {corner}"),
-            Step::PlaceNode { corner, word, inputs, outputs } => {
-                write!(f, "place_node {corner} {word} {inputs} {outputs}")
-            }
-            Step::Move { corner, dr, dc } => write!(f, "move {corner} {dr} {dc}"),
-        }
-    }
-}
-
 /// The rewire sequence for `src`, or `None` when it has no editable wire.
 /// Wires never move when others are removed, so each removal's cell stays
 /// valid.
-pub fn rewire(src: &str, sheet: &Sheet) -> Option<Vec<Step>> {
+pub fn rewire(src: &str, sheet: &Sheet) -> Option<Vec<Edit>> {
     let editable: Vec<Link> = links(sheet).into_iter().filter(|l| l.editable).collect();
     if editable.is_empty() {
         return None;
     }
     let diagram = recognize(&Grid::parse(src).expect("a valid program"));
-    let mut steps: Vec<Step> =
-        editable.iter().map(|l| Step::RemoveWire(diagram.wires[l.wire].cells[0])).collect();
+    let mut steps: Vec<Edit> =
+        editable.iter().map(|l| Edit::RemoveWire(diagram.wires[l.wire].cells[0])).collect();
     let mut connects: Vec<(Pos, Pos)> =
         editable.iter().flat_map(|l| l.to.iter().map(|&to| (l.from, to))).collect();
     connects.sort_by_key(|&(_, to)| to);
-    steps.extend(connects.into_iter().map(|(from, to)| Step::Connect(from, to)));
+    steps.extend(connects.into_iter().map(|(from, to)| Edit::Connect { from, to }));
     Some(steps)
 }
 
 /// The rebuild sequence for each node box whose wires are all editable.
-pub fn rebuilds(sheet: &Sheet) -> Vec<(Call, Vec<Step>)> {
+pub fn rebuilds(sheet: &Sheet) -> Vec<(Call, Vec<Edit>)> {
     let all = links(sheet);
     let mut out = Vec::new();
     for call in calls(sheet) {
@@ -207,8 +174,8 @@ pub fn rebuilds(sheet: &Sheet) -> Vec<(Call, Vec<Step>)> {
             continue;
         }
         let mut steps = vec![
-            Step::RemoveNode(call.corner),
-            Step::PlaceNode {
+            Edit::RemoveNode(call.corner),
+            Edit::PlaceNode {
                 corner: call.corner,
                 word: call.word.clone(),
                 inputs: call.inputs.len() as u16,
@@ -218,11 +185,11 @@ pub fn rebuilds(sheet: &Sheet) -> Vec<(Call, Vec<Step>)> {
         // Incoming branches first, then everything the node feeds.
         for l in &touching {
             for &to in l.to.iter().filter(|t| call.inputs.contains(t)) {
-                steps.push(Step::Connect(l.from, to));
+                steps.push(Edit::Connect { from: l.from, to });
             }
         }
         for l in touching.iter().filter(|l| call.outputs.contains(&l.from)) {
-            steps.extend(l.to.iter().map(|&to| Step::Connect(l.from, to)));
+            steps.extend(l.to.iter().map(|&to| Edit::Connect { from: l.from, to }));
         }
         out.push((call, steps));
     }
@@ -230,23 +197,248 @@ pub fn rebuilds(sheet: &Sheet) -> Vec<(Call, Vec<Step>)> {
 }
 
 /// One move per node box and direction: up, down, left, right.
-pub fn moves(src: &str) -> Vec<Step> {
+pub fn moves(src: &str) -> Vec<Edit> {
     node_corners(src)
         .into_iter()
         .flat_map(|corner| {
-            [(-1, 0), (1, 0), (0, -1), (0, 1)].map(|(dr, dc)| Step::Move { corner, dr, dc })
+            [(-1, 0), (1, 0), (0, -1), (0, 1)].map(|(dr, dc)| Edit::Move { corner, dr, dc })
         })
         .collect()
 }
 
+/// Each move [`moves`] lists that is refused as blocked, retried with
+/// `make_room`.
+pub fn rooms(src: &str) -> Vec<Edit> {
+    let doc = Doc::new(src);
+    moves(src)
+        .into_iter()
+        .filter(|m| apply(&doc, m).is_err_and(|r| r.kind == RefusalKind::Blocked))
+        .map(|m| Edit::MakeRoom(Box::new(m)))
+        .collect()
+}
+
+/// Per definition, by its corner: a row before its bottom border, a column
+/// at its right border, and a row and a column through its middle, each
+/// inserted and deleted again.
+pub fn insertions(sheet: &Sheet) -> Vec<(Pos, Vec<[Edit; 2]>)> {
+    sheet
+        .definitions
+        .iter()
+        .map(|def| {
+            let r = def.rect;
+            let (middle_row, middle_col) = ((r.top + r.bottom) / 2, (r.left + r.right) / 2);
+            let pairs = [
+                (Axis::Row, Pos::new(r.bottom, r.left)),
+                (Axis::Column, Pos::new(r.top, r.right)),
+                (Axis::Row, Pos::new(middle_row, r.left)),
+                (Axis::Column, Pos::new(r.top, middle_col)),
+            ]
+            .map(|(axis, at)| {
+                let i = Insertion { axis, at, count: 1 };
+                [Edit::Insert(i), Edit::Delete(i)]
+            });
+            (Pos::new(r.top, r.left), pairs.into())
+        })
+        .collect()
+}
+
+/// Per number constant: +1, then ×10, then set back. Each step names the
+/// text where the step before left it: a constant grows and shrinks at its
+/// left end.
+pub fn retexts(src: &str) -> Vec<Vec<Edit>> {
+    let diagram = recognize(&Grid::parse(src).expect("a valid program"));
+    let doc = Doc::new(src);
+    let mut constants: Vec<Pos> = Vec::new();
+    for def in &doc.sheet().expect("a valid program").definitions {
+        collect_constants(&def.body, &mut constants);
+    }
+    constants.sort();
+    let mut out = Vec::new();
+    for at in constants {
+        let Some(text) = diagram.texts.iter().find(|t| t.pos == at && t.kind == TextKind::Number) else {
+            continue;
+        };
+        let Ok(n) = text.content.parse::<i64>() else { continue };
+        let Some(up) = n.checked_add(1) else { continue };
+        let Some(wide) = up.checked_mul(10) else { continue };
+        let end = at.col + text.width - 1;
+        let mut now = text.content.clone();
+        let mut steps = Vec::new();
+        for content in [up.to_string(), wide.to_string(), text.content.clone()] {
+            let start = Pos::new(at.row, end + 1 - now.chars().count());
+            now.clone_from(&content);
+            steps.push(Edit::SetText { at: start, content });
+        }
+        out.push(steps);
+    }
+    out
+}
+
+fn collect_constants(graph: &Graph, out: &mut Vec<Pos>) {
+    for node in &graph.nodes {
+        match &node.kind {
+            NodeKind::Const(_) => out.push(Pos::new(node.rect.top, node.rect.left)),
+            NodeKind::Switch(switch) => {
+                for arm in &switch.arms {
+                    collect_constants(&arm.body, out);
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+/// The steps that rebuild `src` from an empty sheet (PLAN P10, gate
+/// `studio_build`), each phase in row-major order:
+///
+/// 1. top-level comments;
+/// 2. each definition, then its ports;
+/// 3. the boxes inside definitions: a node, or a switch followed by its
+///    selector and through-ports and a divider per arm after the first;
+/// 4. constants and comments inside boxes;
+/// 5. every connection, sinks in row-major order, with each inline node's
+///    wire connected straight through;
+/// 6. inline nodes, each placed on that wire.
+pub fn build(src: &str, sheet: &Sheet) -> Vec<Edit> {
+    let grid = Grid::parse(src).expect("a valid program");
+    let diagram = recognize(&grid);
+    let raw = |t: &shawline_shape::Text| -> String {
+        (0..t.width).map(|k| grid.get(Pos::new(t.pos.row, t.pos.col + k))).collect()
+    };
+    let mut steps = Vec::new();
+
+    // 1. Top-level comments.
+    let mut texts: Vec<&shawline_shape::Text> = diagram.texts.iter().collect();
+    texts.sort_by_key(|t| t.pos);
+    for t in texts.iter().filter(|t| t.kind == TextKind::Comment && t.owner.is_none()) {
+        steps.push(Edit::PlaceText { at: t.pos, content: raw(t) });
+    }
+
+    // 2. Definitions and their ports.
+    for def in &sheet.definitions {
+        steps.push(Edit::PlaceDefinition { rect: def.rect, name: def.name.text.clone() });
+        let mut ports: Vec<(Pos, String)> =
+            def.inputs.iter().chain(&def.outputs).map(|p| (p.arrow, p.name.text.clone())).collect();
+        ports.sort();
+        steps.extend(ports.into_iter().map(|(at, name)| Edit::AddPort { at, name: Some(name) }));
+    }
+
+    // 3. Boxes inside definitions.
+    let calls = calls(sheet);
+    let mut inner: Vec<usize> = (0..diagram.boxes.len()).filter(|&b| diagram.boxes[b].parent.is_some()).collect();
+    inner.sort_by_key(|&b| (diagram.boxes[b].rect.top, diagram.boxes[b].rect.left));
+    for b in inner {
+        let shape = &diagram.boxes[b];
+        let corner = Pos::new(shape.rect.top, shape.rect.left);
+        let switch = !shape.dividers.is_empty()
+            || shape.ports.iter().any(|p| p.side == Dir::N && p.kind == PortKind::Arrow);
+        if !switch {
+            if let Some(call) = calls.iter().find(|c| c.corner == corner) {
+                steps.push(Edit::PlaceNode {
+                    corner,
+                    word: call.word.clone(),
+                    inputs: call.inputs.len() as u16,
+                    outputs: call.outputs.len() as u16,
+                });
+            }
+            continue;
+        }
+        let guard = |row: Option<usize>| {
+            diagram
+                .texts
+                .iter()
+                .find(|t| match row {
+                    None => t.title_of == Some(b),
+                    Some(row) => t.divider_of == Some(b) && t.pos.row == row,
+                })
+                .map(raw)
+        };
+        steps.push(Edit::PlaceSwitch { rect: shape.rect, guard: guard(None) });
+        steps.extend(shape.ports.iter().map(|p| Edit::AddPort { at: p.pos, name: None }));
+        for d in &shape.dividers {
+            steps.push(Edit::AddArm { at: Pos::new(d.row, shape.rect.left), guard: guard(Some(d.row)) });
+        }
+    }
+
+    // 4. Constants and comments inside boxes.
+    let mut constants = Vec::new();
+    for def in &sheet.definitions {
+        collect_constants(&def.body, &mut constants);
+    }
+    for t in &texts {
+        let inside = t.kind == TextKind::Comment && t.owner.is_some();
+        if inside || constants.contains(&t.pos) {
+            steps.push(Edit::PlaceText { at: t.pos, content: raw(t) });
+        }
+    }
+
+    // 5. Connections, inline nodes connected straight through.
+    let mut inline = Vec::new();
+    for def in &sheet.definitions {
+        collect_inline(&def.body, &mut inline);
+    }
+    let all = links(sheet);
+    let feeds = |sink: Pos| all.iter().find(|l| l.to.contains(&sink)).map(|l| l.from);
+    let resolve = |mut from: Pos| {
+        while let Some(node) = inline.iter().find(|n| n.output == from) {
+            match feeds(node.input) {
+                Some(source) => from = source,
+                None => break,
+            }
+        }
+        from
+    };
+    let mut connects: Vec<(Pos, Pos)> = all
+        .iter()
+        .flat_map(|l| l.to.iter().map(move |&to| (l.from, to)))
+        .filter(|&(_, to)| !inline.iter().any(|n| n.input == to))
+        .map(|(from, to)| (resolve(from), to))
+        .collect();
+    connects.sort_by_key(|&(_, to)| to);
+    steps.extend(connects.into_iter().map(|(from, to)| Edit::Connect { from, to }));
+
+    // 6. Inline nodes.
+    inline.sort_by_key(|n| n.at);
+    steps.extend(inline.into_iter().map(|n| Edit::PlaceInline { at: n.at, word: n.word }));
+    steps
+}
+
+/// An inline node: its word's first cell, the word, and its input and
+/// output cells.
+struct Inline {
+    at: Pos,
+    word: String,
+    input: Pos,
+    output: Pos,
+}
+
+fn collect_inline(graph: &Graph, out: &mut Vec<Inline>) {
+    for node in &graph.nodes {
+        match &node.kind {
+            NodeKind::Inline(name) => out.push(Inline {
+                at: Pos::new(node.rect.top, node.rect.left),
+                word: name.text.clone(),
+                input: node.inputs[0],
+                output: node.outputs[0],
+            }),
+            NodeKind::Switch(switch) => {
+                for arm in &switch.arms {
+                    collect_inline(&arm.body, out);
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
 /// Runs `steps` from `src` until one is refused, writing a line per step.
-fn walk(out: &mut String, indent: &str, src: &str, steps: &[Step]) {
+fn walk(out: &mut String, indent: &str, src: &str, steps: &[Edit]) {
     let mut doc = Doc::new(src);
     for step in steps {
-        match step.apply(&doc) {
+        match apply(&doc, step) {
             Ok(next) => {
-                writeln!(out, "{indent}{step} ok {}", digest(next.text())).unwrap();
-                doc = next;
+                writeln!(out, "{indent}{step} ok {}", digest(next.doc.text())).unwrap();
+                doc = next.doc;
             }
             Err(refusal) => {
                 writeln!(out, "{indent}{step} refused {} {}", refusal.kind, refusal.at).unwrap();
@@ -275,8 +467,33 @@ pub fn dump(src: &str) -> String {
     for step in moves(src) {
         walk(&mut out, "", src, &[step]);
     }
+    let rooms = rooms(src);
+    if !rooms.is_empty() {
+        out.push_str("room\n");
+        for step in rooms {
+            walk(&mut out, "  ", src, &[step]);
+        }
+    }
+    for (corner, pairs) in insertions(sheet) {
+        writeln!(out, "insert {corner}").unwrap();
+        for pair in pairs {
+            walk(&mut out, "  ", src, &pair);
+        }
+    }
+    let retexts = retexts(src);
+    if !retexts.is_empty() {
+        out.push_str("retext\n");
+        for steps in retexts {
+            walk(&mut out, "  ", src, &steps);
+        }
+    }
+    out.push_str("build\n");
+    walk(&mut out, "  ", EMPTY, &build(src, sheet));
     out
 }
+
+/// The sheet `build` starts from.
+pub const EMPTY: &str = "";
 
 /// A short stable hash of a text (64-bit FNV-1a), so a dump line says
 /// which text an edit produced without holding it.

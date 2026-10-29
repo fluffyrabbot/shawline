@@ -23,6 +23,7 @@
 
 mod canon;
 mod check;
+mod mapped;
 mod model;
 mod mover;
 mod router;
@@ -33,8 +34,9 @@ use std::collections::HashSet;
 use std::fmt;
 
 use shawline_doc::Doc;
-use shawline_grid::{Dir, Grid, Pos};
+use shawline_grid::{Dir, Grid, Pos, Rect};
 use shawline_shape::Diagram;
+pub use shawline_shape::structure::Mapping;
 
 use router::{BUDGET, CELL, CLEARANCE, Cell, Start, Terrain};
 
@@ -229,6 +231,294 @@ pub fn remove_node(doc: &Doc, corner: Pos) -> Result<Doc, Refusal> {
 /// candidates with at least one input are offered.
 pub fn palette(doc: &Doc, from: Option<Pos>) -> Vec<Candidate> {
     wiring::palette(doc, from)
+}
+
+// ---------------------------------------------------------------------------
+// P10 contract: edits as data (PLAN P10, "Oracle first"). Lead-owned.
+//
+// Every gesture is one `Edit`, so Make room and repairs can hold an edit and
+// replay it, and the dumps, the gates and the UI name edits the same way.
+// The edits P10 adds are stubs until their wave lands: each refuses as
+// `unsupported` at the cell it names.
+// ---------------------------------------------------------------------------
+
+/// One checked edit, as a value. Its `Display` is the `.studio` step syntax.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Edit {
+    /// [`move_box`].
+    Move { corner: Pos, dr: isize, dc: isize },
+    /// [`connect`].
+    Connect { from: Pos, to: Pos },
+    /// [`remove_wire`].
+    RemoveWire(Pos),
+    /// [`disconnect`].
+    Disconnect(Pos),
+    /// [`place_node`].
+    PlaceNode { corner: Pos, word: String, inputs: u16, outputs: u16 },
+    /// [`remove_node`].
+    RemoveNode(Pos),
+    /// [`insert`].
+    Insert(Insertion),
+    /// [`delete`].
+    Delete(Insertion),
+    /// [`make_room`] for the edit inside.
+    MakeRoom(Box<Edit>),
+    /// [`set_text`].
+    SetText { at: Pos, content: String },
+    /// [`place_text`].
+    PlaceText { at: Pos, content: String },
+    /// [`remove_text`].
+    RemoveText(Pos),
+    /// [`place_definition`].
+    PlaceDefinition { rect: Rect, name: String },
+    /// [`place_switch`].
+    PlaceSwitch { rect: Rect, guard: Option<String> },
+    /// [`add_port`].
+    AddPort { at: Pos, name: Option<String> },
+    /// [`add_arm`].
+    AddArm { at: Pos, guard: Option<String> },
+    /// [`place_inline`].
+    PlaceInline { at: Pos, word: String },
+}
+
+impl fmt::Display for Edit {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let some = |f: &mut fmt::Formatter<'_>, text: &Option<String>| match text {
+            Some(text) => write!(f, " {text}"),
+            None => Ok(()),
+        };
+        match self {
+            Edit::Move { corner, dr, dc } => write!(f, "move {corner} {dr} {dc}"),
+            Edit::Connect { from, to } => write!(f, "connect {from} {to}"),
+            Edit::RemoveWire(at) => write!(f, "remove_wire {at}"),
+            Edit::Disconnect(to) => write!(f, "disconnect {to}"),
+            Edit::PlaceNode { corner, word, inputs, outputs } => {
+                write!(f, "place_node {corner} {word} {inputs} {outputs}")
+            }
+            Edit::RemoveNode(corner) => write!(f, "remove_node {corner}"),
+            Edit::Insert(i) => write!(f, "insert {i}"),
+            Edit::Delete(i) => write!(f, "delete {i}"),
+            Edit::MakeRoom(edit) => write!(f, "make_room {edit}"),
+            Edit::SetText { at, content } => write!(f, "set_text {at} {content}"),
+            Edit::PlaceText { at, content } => write!(f, "place_text {at} {content}"),
+            Edit::RemoveText(at) => write!(f, "remove_text {at}"),
+            Edit::PlaceDefinition { rect, name } => write!(f, "place_definition {rect} {name}"),
+            Edit::PlaceSwitch { rect, guard } => {
+                write!(f, "place_switch {rect}")?;
+                some(f, guard)
+            }
+            Edit::AddPort { at, name } => {
+                write!(f, "add_port {at}")?;
+                some(f, name)
+            }
+            Edit::AddArm { at, guard } => {
+                write!(f, "add_arm {at}")?;
+                some(f, guard)
+            }
+            Edit::PlaceInline { at, word } => write!(f, "place_inline {at} {word}"),
+        }
+    }
+}
+
+/// A checked revision and where the old sheet's parts went in it.
+#[derive(Debug)]
+pub struct Edited {
+    pub doc: Doc,
+    /// From the boxes and texts of the input's canonical revision (the
+    /// input itself when it is canonical) to those of `doc`. A part the
+    /// edit removed maps to `None`.
+    pub map: Mapping,
+}
+
+/// Applies `edit` to `doc`.
+pub fn apply(doc: &Doc, edit: &Edit) -> Result<Edited, Refusal> {
+    match edit {
+        Edit::Move { corner, dr, dc } => {
+            let moved = move_box(doc, *corner, *dr, *dc)?;
+            Ok(mapped::moved(doc, *corner, *dr, *dc, moved))
+        }
+        Edit::Connect { from, to } => connect(doc, *from, *to).map(|d| mapped::kept(doc, d)),
+        Edit::RemoveWire(at) => remove_wire(doc, *at).map(|d| mapped::kept(doc, d)),
+        Edit::Disconnect(to) => disconnect(doc, *to).map(|d| mapped::kept(doc, d)),
+        Edit::PlaceNode { corner, word, inputs, outputs } => {
+            place_node(doc, *corner, word, *inputs, *outputs).map(|p| mapped::kept(doc, p.doc))
+        }
+        Edit::RemoveNode(corner) => remove_node(doc, *corner).map(|d| mapped::kept(doc, d)),
+        Edit::Insert(i) => insert(doc, *i),
+        Edit::Delete(i) => delete(doc, *i),
+        Edit::MakeRoom(edit) => make_room(doc, edit).map(|roomed| roomed.edited),
+        Edit::SetText { at, content } => set_text(doc, *at, content),
+        Edit::PlaceText { at, content } => place_text(doc, *at, content),
+        Edit::RemoveText(at) => remove_text(doc, *at),
+        Edit::PlaceDefinition { rect, name } => place_definition(doc, *rect, name),
+        Edit::PlaceSwitch { rect, guard } => place_switch(doc, *rect, guard.as_deref()),
+        Edit::AddPort { at, name } => add_port(doc, *at, name.as_deref()),
+        Edit::AddArm { at, guard } => add_arm(doc, *at, guard.as_deref()),
+        Edit::PlaceInline { at, word } => place_inline(doc, *at, word),
+    }
+}
+
+/// Rows or columns.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum Axis {
+    Row,
+    Column,
+}
+
+impl Axis {
+    /// Its name in dumps and in JS: `row` or `column`.
+    pub const fn name(self) -> &'static str {
+        match self {
+            Axis::Row => "row",
+            Axis::Column => "column",
+        }
+    }
+}
+
+/// `count` rows or columns at cell `at`.
+///
+/// A row is inserted before row `at.row`, or rows `at.row..` deleted,
+/// between the top and bottom borders of the top-level box that holds `at`.
+/// A column is inserted before column `at.col`, or columns `at.col..`
+/// deleted, across the rows of that box only, so other definitions stay
+/// where they are.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct Insertion {
+    pub axis: Axis,
+    pub at: Pos,
+    pub count: usize,
+}
+
+impl fmt::Display for Insertion {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{} {} {}", self.axis.name(), self.at, self.count)
+    }
+}
+
+/// Inserts blank rows or columns. Each inserted cell continues a stroke
+/// that joins across the cut (`─`, `┄` or `│`) and is blank elsewhere. A
+/// cut never splits a text: where it would fall in the gap between a text
+/// and the stroke it meets, it moves to the stroke's side of the gap. The
+/// result is canonical, and its structure is the old one relabelled by the
+/// shift ([`Routing::Kept`](shawline_shape::structure::Routing::Kept)).
+/// Refused where the top-level box doesn't hold `at`.
+pub fn insert(doc: &Doc, insertion: Insertion) -> Result<Edited, Refusal> {
+    let _ = doc;
+    Err(pending(insertion.at))
+}
+
+/// Deletes rows or columns: [`insert`]'s exact inverse. Refused where a
+/// cell to delete is neither blank nor a plain stretch of stroke.
+pub fn delete(doc: &Doc, deletion: Insertion) -> Result<Edited, Refusal> {
+    let _ = doc;
+    Err(pending(deletion.at))
+}
+
+/// What [`make_room`] did.
+#[derive(Debug)]
+pub struct Roomed {
+    /// The sheet with room made and the edit applied, mapped from `doc`.
+    pub edited: Edited,
+    /// The rows and columns it inserted, in the order it inserted them.
+    pub inserted: Vec<Insertion>,
+}
+
+/// Inserts rows or columns until `edit` fits, then applies it, as one
+/// checked edit. The search is deterministic and bounded; its order and
+/// budget are private. Refused, with the original refusal's cell, when no
+/// insertion within the budget lets `edit` succeed.
+pub fn make_room(doc: &Doc, edit: &Edit) -> Result<Roomed, Refusal> {
+    let _ = doc;
+    Err(pending(edit.at()))
+}
+
+/// Replaces the content of the text through `at` (any of its cells). A
+/// constant grows or shrinks at its left end, so its wire stays put; a
+/// name, title, guard or comment at its right end. The text keeps its role:
+/// a constant stays a literal, a name a word, a title a `·`-word.
+pub fn set_text(doc: &Doc, at: Pos, content: &str) -> Result<Edited, Refusal> {
+    let _ = (doc, content);
+    Err(pending(at))
+}
+
+/// Writes a new text starting at `at`. Refused when it would meet a stroke
+/// across spaces: a new constant is stray (`Y012`) until a [`connect`]
+/// wires it.
+pub fn place_text(doc: &Doc, at: Pos, content: &str) -> Result<Edited, Refusal> {
+    let _ = (doc, content);
+    Err(pending(at))
+}
+
+/// Removes the text through `at`: a stray text or a comment, or a constant
+/// with its wire. Refused for names, titles and guards.
+pub fn remove_text(doc: &Doc, at: Pos) -> Result<Edited, Refusal> {
+    let _ = doc;
+    Err(pending(at))
+}
+
+/// Draws an empty definition box at `rect`, titled `·name`. Refused when it
+/// shares a row with another top-level item.
+pub fn place_definition(doc: &Doc, rect: Rect, name: &str) -> Result<Edited, Refusal> {
+    let _ = (doc, name);
+    Err(pending(Pos::new(rect.top, rect.left)))
+}
+
+/// Draws an empty switch box at `rect` inside a definition or an arm, with
+/// its first arm's guard in the top border (`None` for a default arm).
+pub fn place_switch(doc: &Doc, rect: Rect, guard: Option<&str>) -> Result<Edited, Refusal> {
+    let _ = (doc, guard);
+    Err(pending(Pos::new(rect.top, rect.left)))
+}
+
+/// Adds a port at border cell `at`: a definition's named input or output,
+/// or a switch's selector or through-port, which take no name.
+pub fn add_port(doc: &Doc, at: Pos, name: Option<&str>) -> Result<Edited, Refusal> {
+    let _ = (doc, name);
+    Err(pending(at))
+}
+
+/// Draws a switch divider from left-border cell `at`, with its guard
+/// (`None` for the default arm).
+pub fn add_arm(doc: &Doc, at: Pos, guard: Option<&str>) -> Result<Edited, Refusal> {
+    let _ = (doc, guard);
+    Err(pending(at))
+}
+
+/// Splices a 1→1 call of `word` into the straight stretch of wire through
+/// `at`, its word starting there.
+pub fn place_inline(doc: &Doc, at: Pos, word: &str) -> Result<Edited, Refusal> {
+    let _ = (doc, word);
+    Err(pending(at))
+}
+
+impl Edit {
+    /// The cell the edit names first, where a refusal about it points.
+    pub fn at(&self) -> Pos {
+        match self {
+            Edit::Move { corner: at, .. }
+            | Edit::Connect { to: at, .. }
+            | Edit::RemoveWire(at)
+            | Edit::Disconnect(at)
+            | Edit::PlaceNode { corner: at, .. }
+            | Edit::RemoveNode(at)
+            | Edit::SetText { at, .. }
+            | Edit::PlaceText { at, .. }
+            | Edit::RemoveText(at)
+            | Edit::AddPort { at, .. }
+            | Edit::AddArm { at, .. }
+            | Edit::PlaceInline { at, .. } => *at,
+            Edit::Insert(i) | Edit::Delete(i) => i.at,
+            Edit::MakeRoom(edit) => edit.at(),
+            Edit::PlaceDefinition { rect, .. } | Edit::PlaceSwitch { rect, .. } => {
+                Pos::new(rect.top, rect.left)
+            }
+        }
+    }
+}
+
+/// The refusal of an edit whose wave hasn't landed.
+fn pending(at: Pos) -> Refusal {
+    Refusal::new(at, RefusalKind::Unsupported, "Studio can't make this edit yet")
 }
 
 // ---------------------------------------------------------------------------

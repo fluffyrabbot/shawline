@@ -117,3 +117,36 @@ move 44:8 -1 0 ok 7ee6962a202c
 move 44:8 1 0 ok c685b2069c54
 move 44:8 0 -1 ok 17fca97f4de2
 move 44:8 0 1 ok 3e57946121f2
+room
+  make_room move 12:16 -1 0 refused unsupported 12:16
+  make_room move 12:16 1 0 refused unsupported 12:16
+  make_room move 12:25 -1 0 refused unsupported 12:25
+  make_room move 30:16 -1 0 refused unsupported 30:16
+  make_room move 30:16 1 0 refused unsupported 30:16
+  make_room move 30:25 -1 0 refused unsupported 30:25
+insert 2:0
+  insert row 18:0 1 refused unsupported 18:0
+  insert column 2:46 1 refused unsupported 2:46
+  insert row 10:0 1 refused unsupported 10:0
+  insert column 2:23 1 refused unsupported 2:23
+insert 20:0
+  insert row 36:0 1 refused unsupported 36:0
+  insert column 20:46 1 refused unsupported 20:46
+  insert row 28:0 1 refused unsupported 28:0
+  insert column 20:23 1 refused unsupported 20:23
+insert 38:0
+  insert row 48:0 1 refused unsupported 48:0
+  insert column 38:22 1 refused unsupported 38:22
+  insert row 43:0 1 refused unsupported 43:0
+  insert column 38:11 1 refused unsupported 38:11
+retext
+  set_text 6:11 1 refused unsupported 6:11
+  set_text 10:11 2 refused unsupported 10:11
+  set_text 14:13 2 refused unsupported 14:13
+  set_text 24:11 1 refused unsupported 24:11
+  set_text 28:11 1 refused unsupported 28:11
+  set_text 32:13 2 refused unsupported 32:13
+  set_text 41:3 8 refused unsupported 41:3
+  set_text 45:3 8 refused unsupported 45:3
+build
+  place_text 0:0 ※ 𐑰𐑝𐑩𐑯 𐑪𐑛 refused unsupported 0:0

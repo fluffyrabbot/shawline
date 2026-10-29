@@ -46,3 +46,19 @@ move 26:9 -1 0 ok 1fd29ee0d749
 move 26:9 1 0 ok 98728a6a804c
 move 26:9 0 -1 ok b289e6ed5483
 move 26:9 0 1 ok 1c9f723b602d
+insert 2:0
+  insert row 14:0 1 refused unsupported 14:0
+  insert column 2:26 1 refused unsupported 2:26
+  insert row 8:0 1 refused unsupported 8:0
+  insert column 2:13 1 refused unsupported 2:13
+insert 16:0
+  insert row 30:0 1 refused unsupported 30:0
+  insert column 16:22 1 refused unsupported 16:22
+  insert row 23:0 1 refused unsupported 23:0
+  insert column 16:11 1 refused unsupported 16:11
+retext
+  set_text 19:4 2 refused unsupported 19:4
+  set_text 23:4 3 refused unsupported 23:4
+  set_text 27:4 10 refused unsupported 27:4
+build
+  place_text 0:0 ※ 𐑯𐑱𐑥𐑟 refused unsupported 0:0

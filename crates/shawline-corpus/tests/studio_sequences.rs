@@ -17,10 +17,12 @@ use std::collections::{BTreeSet, HashSet};
 use std::fs;
 
 use shawline_corpus::jitter::{Fired, Rng, jitter};
-use shawline_corpus::studio::{Link, Step, links, rebuilds};
+use shawline_corpus::studio::{Link, links, rebuilds};
 use shawline_corpus::{STAGES, programs, root};
 use shawline_doc::Doc;
-use shawline_grid::{Grid, Pos};
+use shawline_edit::{Edit, Edited, apply};
+use shawline_grid::{Grid, Pos, Rect};
+use shawline_shape::structure::{Part, Routing, Structure};
 
 /// Each wire as its source cell and its sink cells, the sinks row-major.
 type Wiring = BTreeSet<(Pos, Vec<Pos>)>;
@@ -44,7 +46,7 @@ fn codes(doc: &Doc) -> BTreeSet<String> {
 
 /// A step and the wiring it must leave.
 struct Expect {
-    step: Step,
+    step: Edit,
     wiring: Wiring,
 }
 
@@ -69,10 +71,10 @@ fn sequence(src: &str) -> Option<Vec<Expect>> {
     let link = all.iter().find(|l| l.editable)?;
     let diagram = shawline_shape::recognize(&Grid::parse(src).unwrap());
     let mut now: Wiring = whole.iter().filter(|(f, _)| *f != link.from).cloned().collect();
-    out.push(Expect { step: Step::RemoveWire(diagram.wires[link.wire].cells[0]), wiring: now.clone() });
+    out.push(Expect { step: Edit::RemoveWire(diagram.wires[link.wire].cells[0]), wiring: now.clone() });
     for &to in &link.to {
         add(&mut now, link.from, to);
-        out.push(Expect { step: Step::Connect(link.from, to), wiring: now.clone() });
+        out.push(Expect { step: Edit::Connect { from: link.from, to }, wiring: now.clone() });
     }
 
     // Remove a node with its wires, place it again, reconnect it, move it.
@@ -88,7 +90,7 @@ fn sequence(src: &str) -> Option<Vec<Expect>> {
             }
         }
         for step in steps {
-            if let Step::Connect(from, to) = step {
+            if let Edit::Connect { from, to } = step {
                 add(&mut now, from, to);
             }
             out.push(Expect { step, wiring: now.clone() });
@@ -105,14 +107,91 @@ fn sequence(src: &str) -> Option<Vec<Expect>> {
                 (shift(*f), t)
             })
             .collect();
-        out.push(Expect { step: Step::Move { corner: call.corner, dr: 0, dc: 1 }, wiring: moved });
+        out.push(Expect { step: Edit::Move { corner: call.corner, dr: 0, dc: 1 }, wiring: moved });
     }
     Some(out)
 }
 
+/// Whether `edited.map` sends each box and text of `before` (canonical)
+/// where `step` says: a move shifts the moved box and what it holds, a
+/// removed node loses its box and word, and nothing else moves. Mapped
+/// parts keep their content, and only a placed node is new.
+fn check_map(before: &Doc, edited: &Edited, step: &Edit) -> Result<(), String> {
+    let old = before.diagram().unwrap();
+    let new = edited.doc.diagram().unwrap();
+    let map = &edited.map;
+    if map.boxes.len() != old.boxes.len() || map.texts.len() != old.texts.len() {
+        return Err("doesn't cover the old sheet".to_owned());
+    }
+    let (held, shift): (Option<Rect>, (isize, isize)) = match *step {
+        Edit::Move { corner, dr, dc } => {
+            (old.boxes.iter().map(|b| b.rect).find(|r| (r.top, r.left) == (corner.row, corner.col)), (dr, dc))
+        }
+        _ => (None, (0, 0)),
+    };
+    let moved = |p: Pos| match held {
+        Some(r) if r.contains(p) => Pos::new(p.row.wrapping_add_signed(shift.0), p.col.wrapping_add_signed(shift.1)),
+        _ => p,
+    };
+    let removed: Option<Rect> = match *step {
+        Edit::RemoveNode(corner) => old.boxes.iter().map(|b| b.rect).find(|r| (r.top, r.left) == (corner.row, corner.col)),
+        _ => None,
+    };
+    for (i, b) in old.boxes.iter().enumerate() {
+        let gone = removed == Some(b.rect);
+        match (map.boxes[i], gone) {
+            (None, true) => {}
+            (Some(j), false) => {
+                let r = new.boxes[j].rect;
+                if Pos::new(r.top, r.left) != moved(Pos::new(b.rect.top, b.rect.left))
+                    || Pos::new(r.bottom, r.right) != moved(Pos::new(b.rect.bottom, b.rect.right))
+                {
+                    return Err(format!("sends box {} to {}", b.rect, r));
+                }
+            }
+            (to, _) => return Err(format!("sends box {} to {to:?}", b.rect)),
+        }
+    }
+    for (i, t) in old.texts.iter().enumerate() {
+        let gone = removed.is_some_and(|r| r.interior_contains(t.pos));
+        match (map.texts[i], gone) {
+            (None, true) => {}
+            (Some(j), false) => {
+                let u = &new.texts[j];
+                if u.pos != moved(t.pos) || u.content != t.content {
+                    return Err(format!("sends text {} {:?} to {} {:?}", t.pos, t.content, u.pos, u.content));
+                }
+            }
+            (to, _) => return Err(format!("sends text {} {:?} to {to:?}", t.pos, t.content)),
+        }
+    }
+    let mut image: Vec<usize> = map.boxes.iter().flatten().copied().collect();
+    image.sort_unstable();
+    image.dedup();
+    let new_boxes = new.boxes.len() - image.len();
+    let mut image_texts: Vec<usize> = map.texts.iter().flatten().copied().collect();
+    image_texts.sort_unstable();
+    image_texts.dedup();
+    let new_texts = new.texts.len() - image_texts.len();
+    let placed = usize::from(matches!(step, Edit::PlaceNode { .. }));
+    if (new_boxes, new_texts) != (placed, placed) {
+        return Err(format!("leaves {new_boxes} boxes and {new_texts} texts unmapped"));
+    }
+    if placed == 0 {
+        let (old_grid, new_grid) = (before.grid().unwrap(), edited.doc.grid().unwrap());
+        let expected = Structure::of(old_grid, old).relabel(map);
+        let found = Structure::of(new_grid, new);
+        match (step, expected.expect(&found, Routing::Rerouted)) {
+            (_, Ok(())) | (Edit::Connect { .. } | Edit::RemoveWire(_) | Edit::RemoveNode(_), Err(Part::Wires | Part::Codes)) => {}
+            (_, Err(part)) => return Err(format!("relabels the structure wrongly: {part:?} differs")),
+        }
+    }
+    Ok(())
+}
+
 /// How each step went: the revision it produced, or the cell it was refused
 /// at.
-type Trail = Vec<Result<Doc, Pos>>;
+type Trail = Vec<Result<Edited, Pos>>;
 
 /// Walks `expects` from `start`, the first step naming `start`'s cells
 /// through `at`. Stops at the first refusal.
@@ -122,18 +201,18 @@ fn walk(start: &str, at: impl Fn(Pos) -> Pos, expects: &[Expect]) -> Trail {
     for (k, e) in expects.iter().enumerate() {
         // Each step edits the revision the last one returned.
         let doc = match trail.last() {
-            Some(Ok(doc)) => doc,
+            Some(Ok(edited)) => &edited.doc,
             _ => &first,
         };
         let step = if k > 0 {
             e.step.clone()
         } else {
             match &e.step {
-                Step::RemoveWire(p) => Step::RemoveWire(at(*p)),
+                Edit::RemoveWire(p) => Edit::RemoveWire(at(*p)),
                 other => other.clone(),
             }
         };
-        match step.apply(doc) {
+        match apply(doc, &step) {
             Ok(next) => trail.push(Ok(next)),
             Err(r) => {
                 trail.push(Err(r.at));
@@ -161,10 +240,21 @@ fn studio_sequences() {
         programs_tried += 1;
         let base = codes(&Doc::new(src.as_str()));
         let trail = walk(&src, |p| p, &expects);
-        for (e, got) in expects.iter().zip(&trail) {
-            let Ok(doc) = got else { continue };
+        for (k, (e, got)) in expects.iter().zip(&trail).enumerate() {
+            let Ok(edited) = got else { continue };
             steps_checked += 1;
             let what = format!("{name}: {}", e.step);
+            let before = match k {
+                0 => Doc::new(src.as_str()),
+                _ => match &trail[k - 1] {
+                    Ok(prev) => Doc::new(prev.doc.text()),
+                    Err(_) => unreachable!("a walk stops at its first refusal"),
+                },
+            };
+            if let Err(why) = check_map(&before, edited, &e.step) {
+                failures.push(format!("{what}: map {why}\n{}", edited.doc.text()));
+            }
+            let doc = &edited.doc;
             let text = doc.text();
             // A fresh revision, so the formatter really runs.
             if Doc::new(text).formatted() != Some(text) {
@@ -185,6 +275,7 @@ fn studio_sequences() {
             && let Some(Ok(last)) = trail.last()
         {
             finished += 1;
+            let last = &last.doc;
             if codes(last) != base || out(last.text()) != out(&src) {
                 failures.push(format!("{name}: the sequence doesn't end with the same program\n{}", last.text()));
             }
@@ -196,7 +287,7 @@ fn studio_sequences() {
         // Refusals point at the text each start showed, so only which step
         // refused is compared.
         let texts = |t: &Trail| -> Vec<Option<String>> {
-            t.iter().map(|r| r.as_ref().ok().map(|doc| doc.text().to_owned())).collect()
+            t.iter().map(|r| r.as_ref().ok().map(|e| e.doc.text().to_owned())).collect()
         };
         let (want, got) = (texts(&trail), texts(&walk(&shown.text, |p| shown.at(p), &expects)));
         if got != want {

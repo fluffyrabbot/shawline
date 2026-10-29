@@ -9,3 +9,10 @@ move 4:4 -1 0 ok 6d2d08c7ed3c
 move 4:4 1 0 ok 37aeabed3579
 move 4:4 0 -1 ok 4378a969fb22
 move 4:4 0 1 ok 1c95caba6f6a
+insert 2:0
+  insert row 8:0 1 refused unsupported 8:0
+  insert column 2:19 1 refused unsupported 2:19
+  insert row 5:0 1 refused unsupported 5:0
+  insert column 2:9 1 refused unsupported 2:9
+build
+  place_text 0:0 ※ 𐑯𐑦𐑤 𐑚𐑪𐑒𐑕 refused unsupported 0:0

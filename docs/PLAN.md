@@ -986,6 +986,18 @@ Five read-only audits (interaction mechanics, product legibility, conceptual int
   
   Every intermediate state must be canonical. It may gain only codes from an allowance list, measured on the first run as `WHILE_UNWIRED` was. The final sheet must have the original's codes, output and wiring. The gate stays red until wave 2.
 
+**Oracle first landed** ✅:
+- **Decisions made while landing it:**
+  - `Insertion { axis, at, count }` names a cell, not just an index, because a column insertion spans only the rows of the top-level box that holds it. `Roomed.inserted` lists `Insertion`s.
+  - The new edits return `Edited`. The six P7 edits still return `Doc` (wasm calls them), and `apply` wraps them through the adapters in `shawline-edit/src/mapped.rs`. Wave 1's contract switches them to `Edited`.
+  - `Edited.map` starts from the input's canonical revision, which every edit draws on. With `tidied` (wave 1), the page applies the formatted text first, so its selection is in those indices already.
+  - Phases in `build` run sheet-wide, each in row-major order: comments, then definitions with their ports, then boxes, then texts, then connections, then inline nodes. A switch's merged output is connected from its first arm's right through-port. An inline chain is connected from its first source to its final sinks, and its nodes are placed afterwards.
+- **Gate:**
+  - every earlier `.studio` line is byte-identical, and the bless only appended the `room`, `insert`, `retext` and `build` sections (282 lines over 17 files);
+  - `studio_sequences` now checks every success's map, including that a removed node loses exactly its box and word. The check fails if the move adapter is replaced by the unchanged-places one;
+  - `studio_room` runs 199 sequences, every one refused `unsupported` for now;
+  - `studio_build` is `#[ignore]`d until wave 2, and with `--ignored` it fails at each program's first step.
+
 **Wave 1: room, text and the keyboard model.**
 - **Contracts (lead):**
   - `Edit` and `Edited`, as above;

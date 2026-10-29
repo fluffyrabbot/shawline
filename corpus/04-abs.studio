@@ -75,3 +75,29 @@ move 25:16 -1 0 refused blocked 25:16
 move 25:16 1 0 ok 9d9d0c42597e
 move 25:16 0 -1 ok 00565bbd478c
 move 25:16 0 1 ok 2cfe9f4f5a4d
+room
+  make_room move 4:14 1 0 refused unsupported 4:14
+  make_room move 4:14 0 -1 refused unsupported 4:14
+  make_room move 12:18 -1 0 refused unsupported 12:18
+  make_room move 12:18 1 0 refused unsupported 12:18
+  make_room move 22:6 1 0 refused unsupported 22:6
+  make_room move 22:16 1 0 refused unsupported 22:16
+  make_room move 25:16 -1 0 refused unsupported 25:16
+insert 2:0
+  insert row 18:0 1 refused unsupported 18:0
+  insert column 2:34 1 refused unsupported 2:34
+  insert row 10:0 1 refused unsupported 10:0
+  insert column 2:17 1 refused unsupported 2:17
+insert 20:0
+  insert row 29:0 1 refused unsupported 29:0
+  insert column 20:30 1 refused unsupported 20:30
+  insert row 24:0 1 refused unsupported 24:0
+  insert column 20:15 1 refused unsupported 20:15
+retext
+  set_text 6:11 1 refused unsupported 6:11
+  set_text 13:15 1 refused unsupported 13:15
+  set_text 23:3 1 refused unsupported 23:3
+  set_text 24:3 8 refused unsupported 24:3
+  set_text 26:3 6 refused unsupported 26:3
+build
+  place_text 0:0 ※ 𐑨𐑚𐑕𐑩𐑤𐑵𐑑 refused unsupported 0:0
