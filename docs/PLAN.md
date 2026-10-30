@@ -1100,6 +1100,25 @@ Five read-only audits (interaction mechanics, product legibility, conceptual int
 - **`WHILE_BUILDING`:** `C005`, `W002`, `Y002`, `Y011`, `Y012`, `Y016` and `Y019`. The edits don't exist yet, so this was measured by painting each program's own cells in build order, step by step, and reading the codes. One `Y003` came from painting a crossing with only one of its wires, and was left out. It is measured again on the real run at the gate.
 - **Gate:** the workspace tests pass with no `.studio` change, and clippy is clean on host and wasm. `studio_build` stays ignored until the wave 2 gate.
 
+**Wave 2 gate** ✅. E2 and W2 both merged by fast-forward. W2 had two more rounds: its checks were updated for the lifted wires, and the pane gained blank sheet past the text.
+- **Decisions made at the gate:**
+  - `build` connects each inline chain before the branches that fan out beside it (E2's proposal). In `13-fanout` the router's tee for 7's other branches left a corner where 𐑖's arrowhead must go. Connected first, the chain's stretch stays straight for its nodes, and the branches tee off it.
+  - `make_room` re-addresses a cell that names a place (`add_arm`'s row, where a box or text is drawn) as a place: an insertion at that cell leaves it on the new blank row. Only cells that name a part follow the part. W2 found that otherwise Make room could never succeed for `add_arm`.
+  - `place_text` lets a constant wait in front of a node's arrowhead or tee, stray (`Y012`) until a `connect`, because the build places constants before connections. This supersedes the wave 1 gate's remark that it rightly refuses one; `feed` stays one edit.
+  - The drawing offers blank sheet past the text: at least the visible pane, plus 8 rows and 16 columns. Without it the mouse couldn't start a box on an empty sheet, whose drawing was one cell.
+- **`.studio`:** re-blessed after reading the diff. Every line before `build` is byte-identical in all 17 files. The 17 `place_definition … refused unsupported` lines became 444 `ok` steps, with no refusal.
+- **`WHILE_BUILDING`:** confirmed. The real run gains exactly the seven codes the painted measurement found.
+- **Checks:** 360 workspace tests, with `studio_build` un-ignored and building all 17 programs. Clippy is clean on host and wasm, and all 90 Node checks pass with none skipped.
+- **By hand, in Chrome at 1024×768:** `04-abs` was built from an empty sheet with the mouse. It took Box tool drags for both definitions and the switch, and border clicks for every port. Names were typed into the field each port opens. Then `+ arm`, the double-click palette for each node, and drags from each unwired arrowhead onto blank sheet for the constants, valued in the inspector. Last, a drag for each wire, the merged output included. The result has no diagnostics, prints 7 and 5 as `04-abs.out` does, and is canonical. The merged output is drawn as the corpus draws it (`▶──┐` over `▶──┴────▶ 𐑬`). No console errors.
+- **Fixed at the gate** (`playground/`):
+  - after a refused commit, the inspector's text field ignored every later Enter. Now a refused value stays to be corrected, and Enter tries it again once it has changed;
+  - the drawing's status line is sticky over the pane's lower rows. After the first click of a double-click selected something, it took the second click, so the palette never opened there. It now lets pointer events through;
+  - Fit kept the pane's scroll, which hid the sheet's left edge once the pane scrolled onto blank sheet. It now shows the sheet from its top-left corner.
+- **Found, not fixed:**
+  - blank sheet reaches only 8 rows past the text or the visible pane, and a drag doesn't scroll the pane, so a definition taller than that is drawn zoomed out. Main was drawn at 55%;
+  - the router runs a new wire tight against a constant (`│0`), as it hugs a moved node;
+  - once after `+ arm` succeeded, the status said "an arm starts at a cell of a switch's left border". It wasn't reproduced.
+
 **Wave 3: extract and repair.**
 - **Contracts (lead):**
   - `extract`, returning `Extracted { edited, definition, call }`;
