@@ -954,7 +954,7 @@ Five read-only audits (interaction mechanics, product legibility, conceptual int
 | `Y003` | Connect to the nearest free sink in scope, or remove the wire, with the constant that feeds it if one does; the label says which | `Connect`, `RemoveWire` or `RemoveText` |
 | `Y004` | Remove the dangling wire, with the constant that feeds it if one does | `RemoveWire` or `RemoveText` |
 | `Y009`, `Y013`, `C004` | Name it (the inspector field opens) | `NameField` |
-| `Y012` | Remove the stray text; a literal can be wired instead | `RemoveText`, or `DrawWire` |
+| `Y012` | Wire a literal when an unwired arrowhead in its scope can take it; otherwise remove the stray text | `DrawWire`, or `RemoveText` |
 | `Y019` | Wire it: a connection starts from the arrowhead | `DrawWire` |
 | `Y001` | Add the namer dot | `SetText` |
 | `Y014`, `Y015`, `Y018` | Square or round its corners | `Restyle` |
@@ -1158,6 +1158,43 @@ Five read-only audits (interaction mechanics, product legibility, conceptual int
   - Eleven cases under `corpus/static/` (`03` to `13`) cover `Y001`, `Y004`, `Y009`, `Y012`, `Y014`, `Y015`, `C004`, `C006`, `W001`, `W002` and `C001`. Each is canonical and has exactly its code, with these companions: `Y004` comes with the `Y003` of the same wire, `C006` with the `W002` of the same input, and `Y015` with its lint. `C001` needed a case because `95-unknown`'s 𐑓𐑵 is two edits from every name.
   - The gate tests `repairs` (every table code offered on a case, and each edit clears its code) and `studio_extract` (every single-node extraction keeps the codes and output, or is refused with a kind other than `unsupported`) are ignored until the wave 3 gate.
 - **Gate:** `.studio` changed only by appending an `extract` section to the 15 programs with node boxes, each line refused `unsupported` at its node's corner. The other stages' files changed only by the new cases' own. The workspace tests pass, and clippy is clean on host and wasm.
+
+**Wave 3 gate, Phase 2's gate** ✅ (the lead's half; the user's by-hand pass follows). E3, I, L and W3 all merged by fast-forward. L and W3 had a second round on E3's work.
+- **Contract changes at the gate:**
+  - a follow-up's cell is on the sheet its edit leaves (W3's proposal): `W001`'s new port exists only after its edit;
+  - E3's choices, accepted:
+    - `repairs` offers a repair only when its edit clears its code without adding an error, so a Fix button never leads to a refusal;
+    - removing an unused input also drops that argument from the calls that match, so `W002`'s repair leaves no `C002`;
+    - `C002`'s repair is "Fix…" when it adds an input, which it then wires;
+    - `connect` from a dangling end extends that wire, which is `Y003`'s first choice;
+    - a pick of several parts gets its call's wires routed afresh.
+- **Decisions recorded from the agents:**
+  - Make definition asks for the name first, since renaming afterwards would leave the call as `C001`. Its default skips `𐑥𐑱𐑯`.
+  - A drag on blank sheet with the Box tool off is a marquee, so a definition or switch moves by its border or title.
+  - `W` on an arrowhead with no source in reach opens the palette of sources.
+  - Messages share one wording through `shawline_syntax::message`, and `Y005` and `Y006` got richer too.
+  - The language server reads a typed capital as its lowercase key, and Convert keys to Shavian does the same.
+- **`.studio`:** the `extract` sections were re-blessed after reading. 57 extractions succeed and 2 are refused: `07-list` 4:32 is `blocked`, and Make room fixes it; `09-length` 22:20 is `changed`, because inputs in first-cell order would cross. None is refused `unsupported`, and every line before `extract` is byte-identical.
+- **`.repair`:** 20 dumps were blessed, each read against the table.
+- **Checks:**
+  - 412 workspace tests, with `repairs` and `studio_extract` un-ignored, and clippy clean on host and wasm;
+  - 112 Node checks with none skipped, 44 language-server tests with none ignored, and a green extension build.
+- **By hand, in Chrome at 1024×768:**
+  - `03-double` built with the keyboard alone: Tab into the drawing, then `B`, `P`, `/`, `]` and `[`, `W` and Enter. Names were typed into the fields those gestures open. It runs 42.
+  - Each of the 18 codes in the table was repaired in Studio. Twelve took one click: `S012`, `Y001`, `Y003`, `Y004`, `Y012`, `Y014`, `Y015`, `Y018`, `C001`, `C005`, `C006` and `W002`. Six took "Fix…" and a follow-up: `Y009`, `Y013` and `C004` named in the field, `Y019` wired, `C002` wired after Make room, and `W001` fed a Text constant. Each left no diagnostics.
+  - In `11-even-odd`, a node and its constant were extracted from the default arm as `·𐑛𐑧𐑒`, and the output stayed 0 and 1.
+  - The Box tool still draws a definition by mouse after the marquee change. The full mouse build was the wave 2 gate's.
+- **Fixed at the gate:**
+  - `shawline-edit`: `Y012` offered "wire it" when no arrowhead could take the literal, which led nowhere. It now offers removal in that case. The new unit test covers both, and `static/06`'s `.repair` was re-blessed;
+  - `playground/`:
+    - after `B` … Enter or `P`, the name field lost focus to the page, because the inspector's rebuild replaced the focused field. A rebuild now keeps focus and selection;
+    - Escape, or Enter on an unchanged name, left focus in the field. Both now return to the drawing;
+    - Ctrl or ⌘ + Enter ran only from the text pane. It now runs from the drawing too, and `?` lists it;
+    - `W` offered a node's own output first for its input. That wire is a cycle (`connect` makes it, and `C003` follows), and it kept the palette of sources from opening when it was the only source. Ends are now tried, and one that would be refused for anything but room, or would add a cycle, isn't offered.
+- **Found, not fixed:**
+  - extracting an inline node or a lone constant is usually refused `NoRoom`, because the call's top border lands on the wire's row;
+  - a constant that grows leftwards can end up against a border (`│21`). That is canonical, but tight.
+- **Still to do:** the user's by-hand pass of the same four items.
 
 **Then Phase 3**, the toy layer, with step-through runs.
 
