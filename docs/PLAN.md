@@ -951,8 +951,8 @@ Five read-only audits (interaction mechanics, product legibility, conceptual int
 | Code | Repair | Edit or follow-up |
 |---|---|---|
 | `S012` | Move the slipped cell home | `Edit::Fix` (`Doc::fixed`) |
-| `Y003` | Connect to the nearest free sink in scope, or remove the wire; the label says which | `Connect` or `RemoveWire` |
-| `Y004` | Remove the dangling wire | `RemoveWire` |
+| `Y003` | Connect to the nearest free sink in scope, or remove the wire, with the constant that feeds it if one does; the label says which | `Connect`, `RemoveWire` or `RemoveText` |
+| `Y004` | Remove the dangling wire, with the constant that feeds it if one does | `RemoveWire` or `RemoveText` |
 | `Y009`, `Y013`, `C004` | Name it (the inspector field opens) | `NameField` |
 | `Y012` | Remove the stray text; a literal can be wired instead | `RemoveText`, or `DrawWire` |
 | `Y019` | Wire it: a connection starts from the arrowhead | `DrawWire` |
@@ -962,7 +962,7 @@ Five read-only audits (interaction mechanics, product legibility, conceptual int
 | `C002` | Match the callee's ports | `SetPorts` |
 | `C005` | Add `·𐑥𐑱𐑯` below the sheet | `PlaceDefinition` |
 | `C006` | Remove main's inputs | `RemovePort` |
-| `W001` | Add a default arm | `AddArm` |
+| `W001` | Fix…: add a default arm with its through-ports, then wire its value | `AddDefaultArm`, then `DrawWire` |
 | `W002` | Remove the unused input | `RemovePort` |
 
 **Oracle first** (lead, before wave 1):
@@ -1143,6 +1143,21 @@ Five read-only audits (interaction mechanics, product legibility, conceptual int
     - build `03-double` with the keyboard alone;
     - fix one case of each repairable code in one click;
     - extract a definition from `11-even-odd`.
+
+**Wave 3 contracts landed** ✅. E3, W3, L and I can start.
+- **Decisions made while landing them:**
+  - `W001`'s repair, chosen by the user: "Fix…" adds a default arm with a right through-port at each result ordinal, each joined to its merge, then starts a wire from the arm's first port (`Edit::AddDefaultArm`, then `DrawWire`). A plain `AddArm` can't pass the gate, since a new arm with no results is `Y011`. So a repair may add the codes its follow-up resolves (`Y019` for `DrawWire`), and no other error.
+  - `Edit` gains `Extract { picks, name }`, `Restyle { corner, rounded }`, `Fix(at)` and `AddDefaultArm(corner)`, written `extract NAME AT…`, `restyle AT rounded|square`, `fix AT` and `add_default_arm AT`. Each is a stub refusing as `unsupported`, and `repairs` offers nothing yet.
+  - `Fix` names the slip its repair is offered for, though it moves every slip home, as `fmt --fix` does.
+  - A dangling wire fed by a constant is removed with its constant (`RemoveText`) in `Y003`'s and `Y004`'s repairs. Removing only the wire would leave the constant stray (`Y012`). `97-dangling` is such a case.
+  - At most one repair per diagnostic, so each row has one Fix button. `Y012` wires a literal (`DrawWire`) and removes any other stray text. `C006` offers one `RemovePort` at a time.
+  - `set_text` at an unnamed port's arrowhead writes its name. That is the commit of `Y009`'s `NameField`.
+  - `PORT_NAMES` (𐑨, 𐑚, 𐑒, …: the letters typed by one key each, in the keys' alphabetical order) moves into `shawline-edit`, so `extract` and the Box tool name ports from one list.
+  - The `repair` stage writes a line for each offered repair, `ROW:COL CODE EDIT ok DIGEST` or `… refused KIND AT`. A repair that is all follow-up is just `ROW:COL CODE`, and either form ends `then FOLLOWUP ROW:COL` when it has one. `.repair` is kept for the 26 programs with static diagnostics.
+  - The `extract` section of `.studio` extracts each node box on its own into a definition named `𐑐𐑸𐑑` ("part"), which no corpus program uses.
+  - Eleven cases under `corpus/static/` (`03` to `13`) cover `Y001`, `Y004`, `Y009`, `Y012`, `Y014`, `Y015`, `C004`, `C006`, `W001`, `W002` and `C001`. Each is canonical and has exactly its code, with these companions: `Y004` comes with the `Y003` of the same wire, `C006` with the `W002` of the same input, and `Y015` with its lint. `C001` needed a case because `95-unknown`'s 𐑓𐑵 is two edits from every name.
+  - The gate tests `repairs` (every table code offered on a case, and each edit clears its code) and `studio_extract` (every single-node extraction keeps the codes and output, or is refused with a kind other than `unsupported`) are ignored until the wave 3 gate.
+- **Gate:** `.studio` changed only by appending an `extract` section to the 15 programs with node boxes, each line refused `unsupported` at its node's corner. The other stages' files changed only by the new cases' own. The workspace tests pass, and clippy is clean on host and wasm.
 
 **Then Phase 3**, the toy layer, with step-through runs.
 

@@ -1,0 +1,8 @@
+box 0 rounded 2:0-8:20
+  port 4:0 side W arrow E
+  port 6:20 side E arrow E
+text comment 0:0 "𐑥𐑱𐑯 𐑦𐑯𐑐𐑫𐑑"
+text word 2:3 "·𐑥𐑱𐑯" title 0
+text word 4:2 "𐑯" in 0
+text number 6:2 "1" in 0
+text word 6:22 "𐑬"

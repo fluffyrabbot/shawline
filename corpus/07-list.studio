@@ -102,3 +102,8 @@ build
   connect 5:36 9:40 ok 5f2ed6fcd53c
   connect 9:44 9:50 ok eb1e9655c9b1
   connect 10:44 10:50 ok b47ff9a18ce8
+extract
+  extract 𐑐𐑸𐑑 4:8 refused unsupported 4:8
+  extract 𐑐𐑸𐑑 4:20 refused unsupported 4:20
+  extract 𐑐𐑸𐑑 4:32 refused unsupported 4:32
+  extract 𐑐𐑸𐑑 8:40 refused unsupported 8:40

@@ -197,3 +197,12 @@ build
   connect 23:12 24:20 ok 9136bb666b5f
   connect 27:23 27:28 ok ed4c31c45412
   connect 27:35 27:40 ok fb4190c3a9b1
+extract
+  extract 𐑐𐑸𐑑 4:16 refused unsupported 4:16
+  extract 𐑐𐑸𐑑 12:18 refused unsupported 12:18
+  extract 𐑐𐑸𐑑 12:40 refused unsupported 12:40
+  extract 𐑐𐑸𐑑 13:26 refused unsupported 13:26
+  extract 𐑐𐑸𐑑 22:8 refused unsupported 22:8
+  extract 𐑐𐑸𐑑 22:20 refused unsupported 22:20
+  extract 𐑐𐑸𐑑 22:28 refused unsupported 22:28
+  extract 𐑐𐑸𐑑 26:28 refused unsupported 26:28

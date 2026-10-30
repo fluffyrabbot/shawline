@@ -158,3 +158,9 @@ build
   connect 24:3 24:6 ok 045e82c90b88
   connect 26:3 26:16 ok c0269d135215
   connect 26:22 26:30 ok b7342c9a4327
+extract
+  extract 𐑐𐑸𐑑 4:14 refused unsupported 4:14
+  extract 𐑐𐑸𐑑 12:18 refused unsupported 12:18
+  extract 𐑐𐑸𐑑 22:6 refused unsupported 22:6
+  extract 𐑐𐑸𐑑 22:16 refused unsupported 22:16
+  extract 𐑐𐑸𐑑 25:16 refused unsupported 25:16

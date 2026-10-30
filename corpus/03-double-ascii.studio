@@ -64,3 +64,6 @@ build
   connect 5:0 6:10 ok 07940300a9eb
   connect 14:2 14:8 ok 938e011b996e
   connect 14:16 14:22 ok 6f8b02b839bf
+extract
+  extract 𐑐𐑸𐑑 4:10 refused unsupported 4:10
+  extract 𐑐𐑸𐑑 13:8 refused unsupported 13:8

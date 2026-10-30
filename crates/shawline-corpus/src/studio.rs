@@ -15,7 +15,9 @@
 //!   its right border, and a row and a column through its middle, each
 //!   inserted and deleted again;
 //! - **retext,** per number constant: +1, then ×10, then set back;
-//! - **build:** the whole program from an empty sheet.
+//! - **build:** the whole program from an empty sheet;
+//! - **extract,** per node box: extract it on its own into a new definition
+//!   named [`EXTRACTED`].
 //!
 //! A sequence stops at its first refusal. The dump has one line per step:
 //! the step, then `ok` with a hash of the resulting text, or `refused` with
@@ -492,7 +494,26 @@ pub fn dump(src: &str) -> String {
     }
     out.push_str("build\n");
     walk(&mut out, "  ", EMPTY, &build(src, sheet));
+    let extractions = extractions(src);
+    if !extractions.is_empty() {
+        out.push_str("extract\n");
+        for step in extractions {
+            walk(&mut out, "  ", src, &[step]);
+        }
+    }
     out
+}
+
+/// The name every extraction in `.studio` gives its new definition: 𐑐𐑸𐑑,
+/// "part", which no corpus program uses.
+pub const EXTRACTED: &str = "𐑐𐑸𐑑";
+
+/// One extraction per node box, of that box on its own.
+pub fn extractions(src: &str) -> Vec<Edit> {
+    node_corners(src)
+        .into_iter()
+        .map(|corner| Edit::Extract { picks: vec![corner], name: EXTRACTED.to_owned() })
+        .collect()
 }
 
 /// The sheet `build` starts from.

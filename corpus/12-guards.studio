@@ -110,3 +110,7 @@ build
   connect 23:15 23:22 ok 0eab0237fc9f
   connect 27:4 27:9 ok c40c46b99ad6
   connect 27:15 27:22 ok fe3a6daa5bbd
+extract
+  extract 𐑐𐑸𐑑 18:9 refused unsupported 18:9
+  extract 𐑐𐑸𐑑 22:9 refused unsupported 22:9
+  extract 𐑐𐑸𐑑 26:9 refused unsupported 26:9

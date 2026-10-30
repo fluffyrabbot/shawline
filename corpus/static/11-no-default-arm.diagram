@@ -1,0 +1,25 @@
+box 0 rounded 2:0-12:26
+  port 4:0 side W arrow E
+  port 9:26 side E arrow E
+box 1 square 6:2-10:18 in 0
+  port 6:9 side N arrow S
+  port 7:18 side E arrow E
+  port 9:18 side E arrow E
+  divider 8 gap 4-7
+box 2 rounded 14:0-20:22
+  port 17:22 side E arrow E
+box 3 square 16:9-18:15 in 2
+  port 17:9 side W arrow E
+  port 17:15 side E tee E
+text comment 0:0 "𐑯𐑴 𐑛𐑦𐑓𐑷𐑤𐑑"
+text word 2:3 "·𐑯𐑱𐑥" title 0
+text word 4:2 "𐑯" in 0
+text number 6:5 "1" in 0 title 1
+text literal 7:4 "𐑢𐑳𐑯" in 1
+text number 8:5 "2" in 1 divider 1
+text literal 9:4 "𐑑𐑵" in 1
+text word 9:28 "𐑬"
+text word 14:3 "·𐑥𐑱𐑯" title 2
+text number 17:4 "1" in 2
+text word 17:11 "𐑯𐑱𐑥" in 3
+text word 17:24 "𐑢𐑳𐑯"

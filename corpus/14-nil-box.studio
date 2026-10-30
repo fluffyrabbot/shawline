@@ -24,3 +24,5 @@ build
   add_port 5:19 𐑬 ok f743b64de20b
   place_node 4:4 𐑯𐑦𐑤 0 1 ok f78858e6a061
   connect 5:10 5:19 ok 1ed516787413
+extract
+  extract 𐑐𐑸𐑑 4:4 refused unsupported 4:4

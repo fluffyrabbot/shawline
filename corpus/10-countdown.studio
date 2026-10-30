@@ -128,3 +128,8 @@ build
   connect 14:14 14:17 ok 65e6ab5e4dab
   connect 23:2 23:11 ok ec079accda0d
   connect 23:18 23:24 ok 433fdacc552c
+extract
+  extract 𐑐𐑸𐑑 4:14 refused unsupported 4:14
+  extract 𐑐𐑸𐑑 12:17 refused unsupported 12:17
+  extract 𐑐𐑸𐑑 12:26 refused unsupported 12:26
+  extract 𐑐𐑸𐑑 22:11 refused unsupported 22:11

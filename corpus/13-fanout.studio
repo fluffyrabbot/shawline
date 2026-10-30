@@ -42,3 +42,6 @@ build
   connect 5:2 11:10 ok b38ea43b3f36
   place_inline 14:10 𐑖 ok 171191dd7bb2
   place_inline 14:16 𐑠 ok 39652cad2fbd
+extract
+  extract 𐑐𐑸𐑑 4:10 refused unsupported 4:10
+  extract 𐑐𐑸𐑑 9:10 refused unsupported 9:10

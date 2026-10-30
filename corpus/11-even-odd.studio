@@ -239,3 +239,12 @@ build
   connect 41:15 41:22 ok 6bade6bbc089
   connect 45:3 45:8 ok a3023d977b03
   connect 45:13 45:22 ok 07dcd39cbc14
+extract
+  extract 𐑐𐑸𐑑 4:14 refused unsupported 4:14
+  extract 𐑐𐑸𐑑 12:16 refused unsupported 12:16
+  extract 𐑐𐑸𐑑 12:25 refused unsupported 12:25
+  extract 𐑐𐑸𐑑 22:14 refused unsupported 22:14
+  extract 𐑐𐑸𐑑 30:16 refused unsupported 30:16
+  extract 𐑐𐑸𐑑 30:25 refused unsupported 30:25
+  extract 𐑐𐑸𐑑 40:8 refused unsupported 40:8
+  extract 𐑐𐑸𐑑 44:8 refused unsupported 44:8

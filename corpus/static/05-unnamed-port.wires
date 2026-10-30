@@ -1,0 +1,6 @@
+wire 0 cells 16
+  end 4:4 W open
+  end 4:19 E port 4:20
+wire 1 cells 16
+  end 6:4 W open
+  end 6:19 E port 6:20

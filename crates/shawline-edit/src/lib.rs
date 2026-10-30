@@ -43,7 +43,7 @@ use std::collections::HashSet;
 use std::fmt;
 
 use shawline_doc::Doc;
-use shawline_grid::{Dir, Grid, Pos, Rect};
+use shawline_grid::{Code, Dir, Grid, Pos, Rect};
 use shawline_shape::Diagram;
 pub use shawline_shape::structure::Mapping;
 
@@ -380,6 +380,14 @@ pub enum Edit {
     RemoveBox(Pos),
     /// [`set_ports`].
     SetPorts { corner: Pos, inputs: u16, outputs: u16 },
+    /// [`extract`].
+    Extract { picks: Vec<Pos>, name: String },
+    /// [`restyle`].
+    Restyle { corner: Pos, rounded: bool },
+    /// [`fix`].
+    Fix(Pos),
+    /// [`add_default_arm`].
+    AddDefaultArm(Pos),
 }
 
 impl fmt::Display for Edit {
@@ -426,6 +434,15 @@ impl fmt::Display for Edit {
             Edit::RemoveArm(at) => write!(f, "remove_arm {at}"),
             Edit::RemoveBox(corner) => write!(f, "remove_box {corner}"),
             Edit::SetPorts { corner, inputs, outputs } => write!(f, "set_ports {corner} {inputs} {outputs}"),
+            Edit::Extract { picks, name } => {
+                write!(f, "extract {name}")?;
+                picks.iter().try_for_each(|p| write!(f, " {p}"))
+            }
+            Edit::Restyle { corner, rounded } => {
+                write!(f, "restyle {corner} {}", if *rounded { "rounded" } else { "square" })
+            }
+            Edit::Fix(at) => write!(f, "fix {at}"),
+            Edit::AddDefaultArm(corner) => write!(f, "add_default_arm {corner}"),
         }
     }
 }
@@ -475,6 +492,10 @@ pub fn apply(doc: &Doc, edit: &Edit) -> Result<Edited, Refusal> {
         Edit::RemoveArm(at) => remove_arm(doc, *at),
         Edit::RemoveBox(corner) => remove_box(doc, *corner),
         Edit::SetPorts { corner, inputs, outputs } => set_ports(doc, *corner, *inputs, *outputs),
+        Edit::Extract { picks, name } => extract(doc, picks, name).map(|extracted| extracted.edited),
+        Edit::Restyle { corner, rounded } => restyle(doc, *corner, *rounded),
+        Edit::Fix(at) => fix(doc, *at),
+        Edit::AddDefaultArm(corner) => add_default_arm(doc, *corner),
     }
 }
 
@@ -565,6 +586,10 @@ pub fn make_room(doc: &Doc, edit: &Edit) -> Result<Roomed, Refusal> {
 ///   arity is `C002` until [`set_ports`] matches it.
 /// - **Refusals:** `Target` when `content` isn't one Shavian word;
 ///   `Blocked(NoRoom)` when the wider box or word would overlap anything.
+///
+/// At a definition port's arrowhead that has no name (`Y009`), it writes
+/// `content` as the port's name, as [`add_port`] writes one (P10 wave 3):
+/// the commit of the `NameField` follow-up that [`repairs`] offers.
 pub fn set_text(doc: &Doc, at: Pos, content: &str) -> Result<Edited, Refusal> {
     retext::set_text(doc, at, content)
 }
@@ -736,6 +761,176 @@ pub fn place_inline(doc: &Doc, at: Pos, word: &str) -> Result<Edited, Refusal> {
     inline::place_inline(doc, at, word)
 }
 
+// ---------------------------------------------------------------------------
+// P10 wave 3 contract: extracting a definition, restyling a box, fixing
+// slips, a default arm, and repairs (PLAN P10, "Extracting a definition"
+// and "Repairs"). Lead-owned. Until the wave lands, the edits refuse as
+// `unsupported` and `repairs` offers nothing.
+// ---------------------------------------------------------------------------
+
+/// The names a new port takes, in order: the letters typed by one key each,
+/// in the keys' alphabetical order (a, b, k, d, e, f, g, h, i, j, l, m, n,
+/// o, p, r, s, t, u, v, w, y, z). [`extract`] and Studio's Box tool both
+/// name ports with the first one the definition doesn't have yet.
+pub const PORT_NAMES: [char; 23] = [
+    '𐑨', '𐑚', '𐑒', '𐑛', '𐑧', '𐑓', '𐑜', '𐑣', '𐑦', '𐑡', '𐑤', '𐑥', '𐑯', '𐑪', '𐑐', '𐑮', '𐑕', '𐑑', '𐑳', '𐑝',
+    '𐑢', '𐑘', '𐑟',
+];
+
+/// What [`extract`] made.
+#[derive(Debug)]
+pub struct Extracted {
+    /// The sheet with the new definition and the call to it. Its map sends
+    /// each picked box and text to its place inside the new definition.
+    pub edited: Edited,
+    /// The new definition's top-left corner.
+    pub definition: Pos,
+    /// The call node's top-left corner.
+    pub call: Pos,
+}
+
+/// Moves the parts `picks` names into a new definition titled `·name`, and
+/// calls it where they were, as one checked edit (PLAN P10, "Extracting a
+/// definition"):
+///
+/// - **The pick.** Each cell names a node box or a switch by its corner, an
+///   inline node by its word's first cell, or a constant by its first cell,
+///   all in one scope. A switch is picked whole, with everything in it.
+/// - **The definition** goes one blank line below the sheet's last
+///   top-level item, at column 0, as [`place_definition`] places one. The
+///   picked parts keep their placement relative to one another, and so do
+///   the wires among them.
+/// - **Ports.** Each wire into the pick becomes an input, one per source
+///   outside it, and each wire out of it an output, one per source inside
+///   it. Both are ordered row-major by the wire's first cell.
+/// - **Names.** An input takes the name of the definition input its wire
+///   comes from. Every other port takes the first of [`PORT_NAMES`] that
+///   the new definition doesn't have yet.
+/// - **The call** is a node for `name` with its corner at the pick's
+///   top-left corner and the definition's ports. Its wires are re-routed
+///   the way a move re-routes them.
+/// - **Checked:** the result is canonical and has the input's codes. The
+///   edit doesn't run the program; the gate checks that its output stays.
+/// - **Refusals:** `Target` when a cell names none of those parts, the
+///   parts lie in two scopes, or `name` isn't two or more Shavian letters
+///   that no definition has; `Blocked(NoRoom)` when the call doesn't fit
+///   where the pick was; `Changed` when the codes would change.
+pub fn extract(doc: &Doc, picks: &[Pos], name: &str) -> Result<Extracted, Refusal> {
+    let _ = (doc, name);
+    Err(pending(picks.first().copied().unwrap_or(Pos::new(0, 0))))
+}
+
+/// Redraws the corners of the box whose top-left corner is `corner`,
+/// rounded (`╭╮╰╯`) or square (`┌┐└┘`), and nothing else. The repair for
+/// `Y014`, `Y015` and `Y018`: its structure is the input's, and its codes
+/// may change. Refused as `Target` when no box has its corner at `corner`.
+pub fn restyle(doc: &Doc, corner: Pos, rounded: bool) -> Result<Edited, Refusal> {
+    let _ = (doc, rounded);
+    Err(pending(corner))
+}
+
+/// Moves every slipped border cell home, as `shawline fmt --fix` does
+/// ([`Doc::fixed`]), as one edit: the repair for `S012`. `at` names the
+/// slip the repair is offered for, where a refusal points. Its map sends
+/// each slipped cell's box to the box made whole. Refused as `Target` when
+/// the sheet has no slip.
+pub fn fix(doc: &Doc, at: Pos) -> Result<Edited, Refusal> {
+    let _ = doc;
+    Err(pending(at))
+}
+
+/// Adds a default arm below the last arm of the switch whose top-left
+/// corner is `corner`: the repair for `W001`.
+///
+/// - Rows are inserted above the switch's bottom border, as [`insert`]
+///   inserts them, for a divider and the arm's rows.
+/// - The arm has a right through-port at each of the switch's result
+///   ordinals, each joined from outside to that ordinal's merge, so the
+///   arms still have equal results (`Y011`).
+/// - Inside, each port's arrowhead is unwired (`Y019`) until the author
+///   wires the arm's value, which the repair's follow-up starts.
+///
+/// Refused as `Target` when `corner` isn't a switch's corner or the switch
+/// already has a default arm, and as `Blocked(NoRoom)` when a merge can't
+/// take the new stub.
+pub fn add_default_arm(doc: &Doc, corner: Pos) -> Result<Edited, Refusal> {
+    let _ = doc;
+    Err(pending(corner))
+}
+
+/// A known fix for one diagnostic (PLAN P10, "Repairs").
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Repair {
+    /// The diagnostic's cell.
+    pub at: Pos,
+    /// The diagnostic's code.
+    pub code: Code,
+    /// What the fix does, as a button says it. It starts "Fix…" when the
+    /// fix has a follow-up, since it isn't one click.
+    pub label: String,
+    /// The edit that makes the fix, or `None` when the follow-up is all
+    /// of it.
+    pub edit: Option<Edit>,
+    /// What the page does after `edit`.
+    pub then: Followup,
+}
+
+/// What a repair leaves to the author after its edit.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Followup {
+    None,
+    /// Open the inspector's name field on the text or port at this cell.
+    NameField(Pos),
+    /// Start a connection at this arrowhead or source, as `W` does.
+    DrawWire(Pos),
+}
+
+impl Followup {
+    /// Its name in dumps and in JS: `none`, `name_field` or `draw_wire`.
+    pub const fn name(self) -> &'static str {
+        match self {
+            Followup::None => "none",
+            Followup::NameField(_) => "name_field",
+            Followup::DrawWire(_) => "draw_wire",
+        }
+    }
+}
+
+/// The repairs `doc`'s diagnostics have, in diagnostic order, at most one
+/// per diagnostic. Nothing is applied: a repair's edit is checked when it
+/// is applied, and may then be refused. The table (PLAN P10, "Repairs"):
+///
+/// | Code | Repair | Edit, follow-up |
+/// |---|---|---|
+/// | `S012` | Move the slipped cell home | [`Edit::Fix`] |
+/// | `Y003` | Connect the end to the nearest free arrowhead in its scope; when there is none, remove the wire, with the constant that feeds it if one does. The label says which | `Connect`, `RemoveWire` or `RemoveText` |
+/// | `Y004` | Remove the dangling wire, with the constant that feeds it if one does | `RemoveWire` or `RemoveText` |
+/// | `Y009`, `Y013`, `C004` | Name it: the field's commit is a [`set_text`] | `NameField` |
+/// | `Y012` | Wire a literal, remove any other stray text | `DrawWire`, or `RemoveText` |
+/// | `Y019` | Wire it, starting from the arrowhead | `DrawWire` |
+/// | `Y001` | Add the namer dot | `SetText` |
+/// | `Y014`, `Y018` | Square or round its corners, as its place asks | `Restyle` |
+/// | `Y015` | Make its corners agree, as its place asks | `Restyle` |
+/// | `C001` | "Did you mean …?": the known name at edit distance 1, offered only when exactly one is | `SetText` |
+/// | `C002` | Match the callee's ports | `SetPorts` |
+/// | `C005` | Add `·𐑥𐑱𐑯` below the sheet | `PlaceDefinition` |
+/// | `C006` | Remove main's inputs | `RemovePort`, the first; the next repair offers the next |
+/// | `W001` | Fix…: add a default arm, then wire its value | [`Edit::AddDefaultArm`], then `DrawWire` |
+/// | `W002` | Remove the unused input | `RemovePort` |
+///
+/// Every other code has no known fix in Phase 2. A repair that has an
+/// `edit` clears its diagnostic when applied and adds no error code, except
+/// those its follow-up resolves (`Y019` for `DrawWire`).
+pub fn repairs(doc: &Doc) -> Vec<Repair> {
+    let _ = doc;
+    Vec::new()
+}
+
+/// The refusal of an edit whose wave hasn't landed.
+fn pending(at: Pos) -> Refusal {
+    Refusal::new(at, RefusalKind::Unsupported, "Studio can't make this edit yet")
+}
+
 impl Edit {
     /// The cell the edit names first, where a refusal about it points.
     pub fn at(&self) -> Pos {
@@ -758,7 +953,11 @@ impl Edit {
             | Edit::RemovePort(at)
             | Edit::RemoveArm(at)
             | Edit::RemoveBox(at)
-            | Edit::SetPorts { corner: at, .. } => *at,
+            | Edit::SetPorts { corner: at, .. }
+            | Edit::Restyle { corner: at, .. }
+            | Edit::Fix(at)
+            | Edit::AddDefaultArm(at) => *at,
+            Edit::Extract { picks, .. } => picks.first().copied().unwrap_or(Pos::new(0, 0)),
             Edit::Insert(i) | Edit::Delete(i) => i.at,
             Edit::MakeRoom(edit) => edit.at(),
             Edit::PlaceDefinition { rect, .. } | Edit::PlaceSwitch { rect, .. } => {

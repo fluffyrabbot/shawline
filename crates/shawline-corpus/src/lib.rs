@@ -10,6 +10,7 @@
 //! Only the lead blesses; see `CLAUDE.md`.
 
 pub mod jitter;
+pub mod repair;
 pub mod studio;
 
 use std::fs;
@@ -78,6 +79,9 @@ pub const STAGES: &[Stage] = &[
     },
     // Kept for every valid program (01–79): how each Studio edit ends.
     Stage { name: "studio", run: studio::dump, fallback: None, selective: true },
+    // Kept for every program with static diagnostics: how each repair
+    // `shawline_edit::repairs` offers ends (PLAN P10, wave 3).
+    Stage { name: "repair", run: repair::dump, fallback: None, selective: true },
     // Kept for every valid program (01–79): each word's reading, a
     // primitive's short name, and whether the gloss strip shows it.
     Stage {

@@ -275,5 +275,9 @@ pub(crate) fn readdress_by(edit: &Edit, part: &impl Fn(Pos) -> Pos, place: &impl
         Edit::RemoveArm(at) => Edit::RemoveArm(f(at)),
         Edit::RemoveBox(corner) => Edit::RemoveBox(f(corner)),
         Edit::SetPorts { corner, inputs, outputs } => Edit::SetPorts { corner: f(corner), inputs, outputs },
+        Edit::Extract { picks, name } => Edit::Extract { picks: picks.into_iter().map(f).collect(), name },
+        Edit::Restyle { corner, rounded } => Edit::Restyle { corner: f(corner), rounded },
+        Edit::Fix(at) => Edit::Fix(f(at)),
+        Edit::AddDefaultArm(corner) => Edit::AddDefaultArm(f(corner)),
     }
 }
