@@ -1,9 +1,6 @@
 //! PLAN P10's extract gate: every single-node extraction the `.studio`
 //! dump records keeps the program's codes and output, or is refused with a
 //! kind that names a reason, never `unsupported`.
-//!
-//! Red until P10's wave 3 lands `extract`, so it is ignored until then:
-//! run it with `--ignored`.
 
 use std::collections::BTreeSet;
 use std::fs;
@@ -18,7 +15,6 @@ fn codes(doc: &Doc) -> BTreeSet<String> {
 }
 
 #[test]
-#[ignore = "red until P10 wave 3"]
 fn studio_extract() {
     let out = STAGES.iter().find(|s| s.name == "out").unwrap().run;
     let mut failures = Vec::new();

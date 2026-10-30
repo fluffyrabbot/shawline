@@ -240,11 +240,11 @@ build
   connect 45:3 45:8 ok a3023d977b03
   connect 45:13 45:22 ok 07dcd39cbc14
 extract
-  extract 𐑐𐑸𐑑 4:14 refused unsupported 4:14
-  extract 𐑐𐑸𐑑 12:16 refused unsupported 12:16
-  extract 𐑐𐑸𐑑 12:25 refused unsupported 12:25
-  extract 𐑐𐑸𐑑 22:14 refused unsupported 22:14
-  extract 𐑐𐑸𐑑 30:16 refused unsupported 30:16
-  extract 𐑐𐑸𐑑 30:25 refused unsupported 30:25
-  extract 𐑐𐑸𐑑 40:8 refused unsupported 40:8
-  extract 𐑐𐑸𐑑 44:8 refused unsupported 44:8
+  extract 𐑐𐑸𐑑 4:14 ok c592b856ef68
+  extract 𐑐𐑸𐑑 12:16 ok ddc2e0ae1aae
+  extract 𐑐𐑸𐑑 12:25 ok 225d4158e794
+  extract 𐑐𐑸𐑑 22:14 ok 1ee6e5c7378d
+  extract 𐑐𐑸𐑑 30:16 ok 9cc6d085d784
+  extract 𐑐𐑸𐑑 30:25 ok b68b93072470
+  extract 𐑐𐑸𐑑 40:8 ok 9fbfc8acb996
+  extract 𐑐𐑸𐑑 44:8 ok 90f47a5e21c9

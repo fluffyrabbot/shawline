@@ -129,7 +129,7 @@ build
   connect 20:12 20:18 ok 44fddf9d3345
   connect 21:3 21:8 ok 316e4940cb35
 extract
-  extract 𐑐𐑸𐑑 4:8 refused unsupported 4:8
-  extract 𐑐𐑸𐑑 9:8 refused unsupported 9:8
-  extract 𐑐𐑸𐑑 14:8 refused unsupported 14:8
-  extract 𐑐𐑸𐑑 19:8 refused unsupported 19:8
+  extract 𐑐𐑸𐑑 4:8 ok 584611db3209
+  extract 𐑐𐑸𐑑 9:8 ok 770567ea4bd4
+  extract 𐑐𐑸𐑑 14:8 ok 5ede85197a21
+  extract 𐑐𐑸𐑑 19:8 ok 7d9b38e3a6c9

@@ -65,5 +65,5 @@ build
   connect 14:2 14:8 ok 938e011b996e
   connect 14:16 14:22 ok 6f8b02b839bf
 extract
-  extract 𐑐𐑸𐑑 4:10 refused unsupported 4:10
-  extract 𐑐𐑸𐑑 13:8 refused unsupported 13:8
+  extract 𐑐𐑸𐑑 4:10 ok 35e5699773c2
+  extract 𐑐𐑸𐑑 13:8 ok 8688091318b0

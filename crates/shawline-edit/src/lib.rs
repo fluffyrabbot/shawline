@@ -254,6 +254,9 @@ pub struct Candidate {
 /// old one plus this pair, and nothing else changes. The result is canonical.
 /// Refused when `to` already has a wire, the cells aren't a source and a sink,
 /// or no route fits within the router's budget.
+///
+/// `from` may also be a wire's dangling end (`Y003`): that wire is extended
+/// from its end to `to`, which is `Y003`'s repair (P10 wave 3).
 pub fn connect(doc: &Doc, from: Pos, to: Pos) -> Result<Edited, Refusal> {
     wiring::connect(doc, from, to).map(|d| mapped::kept(doc, d))
 }
@@ -683,7 +686,10 @@ pub fn add_port(doc: &Doc, at: Pos, name: Option<&str>) -> Result<Edited, Refusa
 /// wires:
 ///
 /// - a definition's input with its name and every wire it sources, or an
-///   output with its name and the branch reaching it ([`disconnect`]);
+///   output with its name and the branch reaching it ([`disconnect`]). An
+///   input no wire inside uses also leaves every call of its definition
+///   whose ports match it, with the branch reaching it and a constant that
+///   fed only that branch, so the calls keep matching (`W002`'s repair);
 /// - a selector with the branch reaching it;
 /// - a through-port with its wires on both sides: the branch reaching it,
 ///   and the wire it starts. A right through-port's outer wire is its stub
@@ -811,8 +817,9 @@ pub struct Extracted {
 ///   comes from. Every other port takes the first of [`PORT_NAMES`] that
 ///   the new definition doesn't have yet.
 /// - **The call** is a node for `name` with its corner at the pick's
-///   top-left corner and the definition's ports. Its wires are re-routed
-///   the way a move re-routes them.
+///   top-left corner and the definition's ports. A single node's wires are
+///   re-routed the way a move re-routes them; a pick of several parts is
+///   cleared, and the call's wires are routed afresh.
 /// - **Checked:** the result is canonical and has the input's codes. The
 ///   edit doesn't run the program; the gate checks that its output stays.
 /// - **Refusals:** `Target` when a cell names none of those parts, the
@@ -899,8 +906,10 @@ impl Followup {
 }
 
 /// The repairs `doc`'s diagnostics have, in diagnostic order, at most one
-/// per diagnostic. Nothing is applied: a repair's edit is checked when it
-/// is applied, and may then be refused. The table (PLAN P10, "Repairs"):
+/// per diagnostic. Each repair's edit is tried, and the repair is offered
+/// only when the edit clears its diagnostic and adds no error but those its
+/// follow-up resolves, so a Fix button never leads to a refusal. The table
+/// (PLAN P10, "Repairs"):
 ///
 /// | Code | Repair | Edit, follow-up |
 /// |---|---|---|
@@ -914,7 +923,7 @@ impl Followup {
 /// | `Y014`, `Y018` | Square or round its corners, as its place asks | `Restyle` |
 /// | `Y015` | Make its corners agree, as its place asks | `Restyle` |
 /// | `C001` | "Did you mean …?": the known name at edit distance 1, offered only when exactly one is | `SetText` |
-/// | `C002` | Match the callee's ports | `SetPorts` |
+/// | `C002` | Match the callee's ports; Fix…, wiring the first new input, when an input is added | `SetPorts`, then `DrawWire` when it adds an arrowhead |
 /// | `C005` | Add `·𐑥𐑱𐑯` below the sheet | `PlaceDefinition` |
 /// | `C006` | Remove main's inputs | `RemovePort`, the first; the next repair offers the next |
 /// | `W001` | Fix…: add a default arm, then wire its value | [`Edit::AddDefaultArm`], then `DrawWire` |

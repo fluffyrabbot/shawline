@@ -77,6 +77,6 @@ build
   connect 9:34 9:40 ok a5e50bf0a134
   connect 9:20 10:30 ok 54f781cee2f5
 extract
-  extract 𐑐𐑸𐑑 4:6 refused unsupported 4:6
-  extract 𐑐𐑸𐑑 8:16 refused unsupported 8:16
-  extract 𐑐𐑸𐑑 8:30 refused unsupported 8:30
+  extract 𐑐𐑸𐑑 4:6 ok 8d5d7c4082fc
+  extract 𐑐𐑸𐑑 8:16 ok 8e59c8a48ee1
+  extract 𐑐𐑸𐑑 8:30 ok a0f064f1315c

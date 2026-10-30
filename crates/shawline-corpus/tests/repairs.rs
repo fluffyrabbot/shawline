@@ -2,9 +2,6 @@
 //! repair on a corpus case, and a repair's edit clears its diagnostic
 //! without adding an error, except the codes its follow-up resolves
 //! (`Y019` until a `DrawWire` is drawn).
-//!
-//! Red until P10's wave 3 lands `repairs`, so it is ignored until then:
-//! run it with `--ignored`.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
@@ -30,7 +27,6 @@ fn errors(diagnostics: &[Diagnostic]) -> BTreeMap<&'static str, usize> {
 }
 
 #[test]
-#[ignore = "red until P10 wave 3"]
 fn repairs_clear_their_codes() {
     let mut offered = BTreeSet::new();
     let mut failures = Vec::new();

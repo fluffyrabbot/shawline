@@ -103,7 +103,7 @@ build
   connect 9:44 9:50 ok eb1e9655c9b1
   connect 10:44 10:50 ok b47ff9a18ce8
 extract
-  extract 𐑐𐑸𐑑 4:8 refused unsupported 4:8
-  extract 𐑐𐑸𐑑 4:20 refused unsupported 4:20
-  extract 𐑐𐑸𐑑 4:32 refused unsupported 4:32
-  extract 𐑐𐑸𐑑 8:40 refused unsupported 8:40
+  extract 𐑐𐑸𐑑 4:8 ok 04f9fbd43f54
+  extract 𐑐𐑸𐑑 4:20 ok f0052a97dfcf
+  extract 𐑐𐑸𐑑 4:32 refused blocked 4:32
+  extract 𐑐𐑸𐑑 8:40 ok b2595700cecf

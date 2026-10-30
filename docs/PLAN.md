@@ -959,7 +959,7 @@ Five read-only audits (interaction mechanics, product legibility, conceptual int
 | `Y001` | Add the namer dot | `SetText` |
 | `Y014`, `Y015`, `Y018` | Square or round its corners | `Restyle` |
 | `C001` | "Did you mean …?" with the known name nearest by edit distance, offered only at distance 1 and only when that name is unique. Shavian words are 2 to 4 letters, so distance 2 matches nearly anything | `SetText` |
-| `C002` | Match the callee's ports | `SetPorts` |
+| `C002` | Match the callee's ports; "Fix…" when it adds an input, which is then wired | `SetPorts`, then `DrawWire` when it adds an arrowhead |
 | `C005` | Add `·𐑥𐑱𐑯` below the sheet | `PlaceDefinition` |
 | `C006` | Remove main's inputs | `RemovePort` |
 | `W001` | Fix…: add a default arm with its through-ports, then wire its value | `AddDefaultArm`, then `DrawWire` |

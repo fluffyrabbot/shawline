@@ -1,0 +1,7 @@
+2:1 Y003 remove_wire 2:1 ok 8858f70df483
+2:10 Y003 remove_wire 2:10 ok 79a67c375eae
+4:10 Y018 restyle 4:10 rounded ok 5c399d827e18
+6:10 Y009 then name_field 6:10
+6:22 Y003 remove_wire 6:22 ok a1ca62494966
+7:24 Y003 remove_wire 7:24 ok 541cbeabd8b8
+7:24 Y003 remove_wire 7:24 ok 541cbeabd8b8

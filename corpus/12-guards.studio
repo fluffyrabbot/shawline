@@ -111,6 +111,6 @@ build
   connect 27:4 27:9 ok c40c46b99ad6
   connect 27:15 27:22 ok fe3a6daa5bbd
 extract
-  extract 𐑐𐑸𐑑 18:9 refused unsupported 18:9
-  extract 𐑐𐑸𐑑 22:9 refused unsupported 22:9
-  extract 𐑐𐑸𐑑 26:9 refused unsupported 26:9
+  extract 𐑐𐑸𐑑 18:9 ok a53f80901ead
+  extract 𐑐𐑸𐑑 22:9 ok 6d50f918c2dd
+  extract 𐑐𐑸𐑑 26:9 ok 01b4cc318580
