@@ -875,7 +875,9 @@ pub struct Repair {
     pub then: Followup,
 }
 
-/// What a repair leaves to the author after its edit.
+/// What a repair leaves to the author after its edit. Its cell is on the
+/// sheet the repair's `edit` leaves, or on the input when `edit` is `None`:
+/// `W001`'s new through-port exists only after its edit.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Followup {
     None,
