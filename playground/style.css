@@ -308,6 +308,24 @@ main {
   color: var(--text);
   cursor: pointer;
 }
+/* The Box tool: a crosshair over blank sheet, and a copy cursor over
+   plain border, where a click adds a port. */
+button[aria-pressed="true"] { background: var(--wash); border-color: var(--wire); color: var(--text); }
+#drawing.box-tool svg, #drawing.drawing-box svg { cursor: crosshair; user-select: none; }
+#drawing.box-tool svg.over-border { cursor: copy; }
+/* `+ arm` on a selected switch's lower edge. */
+#drawing .arm-handle {
+  position: absolute;
+  z-index: 2;
+  transform: translate(-50%, -30%);
+  padding: 1px 8px;
+  font: 12px/1.4 var(--sans);
+  border: 1px solid var(--wire);
+  border-radius: 10px;
+  background: var(--background);
+  color: var(--text);
+  cursor: pointer;
+}
 #drawing .room-ghost { position: absolute; z-index: 1; pointer-events: none; opacity: 0; transition: opacity 0.15s; }
 #drawing .room-ghost.shown { opacity: 0.45; }
 #drawing .inline-text {
@@ -348,6 +366,10 @@ main {
 .inspector .field { display: flex; gap: 8px; align-items: center; margin-top: 6px; }
 .inspector .field .scrub { cursor: ew-resize; text-decoration: underline dotted; }
 .inspector .field input { font: 15px var(--mono); padding: 2px 6px; }
+.inspector .stepper { display: flex; gap: 6px; align-items: center; margin-top: 6px; }
+.inspector .stepper .name { min-width: 4.5em; }
+.inspector .stepper button { padding: 0 8px; line-height: 1.4; }
+.inspector .stepper .count { min-width: 1.5em; text-align: center; color: var(--text); font-variant-numeric: tabular-nums; }
 .refusal {
   position: absolute;
   z-index: 1;

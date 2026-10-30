@@ -983,7 +983,12 @@ function studioOn(text) {
     refusals: [],
     statuses: [],
     editing: [],
-    apply: shawline.apply,
+    /** Every edit sent to wasm, trials included. */
+    sent: [],
+    /** The texts whose inspector field was opened for naming. */
+    naming: [],
+    palettes: [],
+    apply: (doc, edit) => (host.sent.push(edit), shawline.apply(doc, edit)),
     text: () => host.current,
     write: (t) => {
       host.steps.push(t);
@@ -995,11 +1000,12 @@ function studioOn(text) {
       if (!docs.has(d.text)) docs.set(d.text, d);
       return d.text;
     },
-    refused: (r, edit) => host.refusals.push({ ...r, edit }),
+    refused: (r, edit, then) => host.refusals.push({ ...r, edit, then }),
     status: (said, kind) => host.statuses.push([said, kind]),
     changed: () => {},
-    palette: () => {},
+    palette: (at, mode) => host.palettes.push({ at, mode }),
     editText: (target) => host.editing.push(target),
+    name: (target) => host.naming.push(target),
     help() {},
     zoom() {},
     gloss: () => false,
@@ -1236,5 +1242,392 @@ test("the live region says what the selection is, with its description", () => {
   assert.match(studio.describe(), /^Number 21 at 15:3\./);
 });
 
-if (skipped) console.log(`${skipped} skipped until E1's edits land`);
+// Studio Phase 2, wave 2 (PLAN P10): drawing boxes, ports and arms, port
+// counts, inline nodes and renaming, each gesture one edit.
+
+/**
+ * Whether agent E2's edits (`place_definition`, `add_port`, `set_ports`,
+ * …) have landed: until they do, they refuse as `unsupported`, and the
+ * checks that need them are skipped with a marker instead of failing.
+ */
+const E2 = (() => {
+  const rect = { top: 0, left: 0, bottom: 4, right: 12 };
+  const probe = shawline.apply(sheet(""), { kind: "place_definition", rect, name: "𐑥𐑱𐑯" });
+  return probe.ok || probe.kind !== "unsupported";
+})();
+function pendingE2(name, body) {
+  if (E2) return test(name, body);
+  skipped++;
+  console.log(`skip  ${name} (pendingE2: its edits refuse as unsupported)`);
+}
+
+const { KEYS, PORT_NAMES, portSpot, armsOf, switchLike, portCounts } = await import("./studio.js");
+
+const abs = corpus("04-abs.shaw");
+/** 04-abs without its comment, which no drawing gesture writes. */
+const absBare = abs.split("\n").slice(2).join("\n");
+const boxOf = (src, row, col) => sheet(src).boxes().find((b) => b.top === row && b.left === col);
+const lastSent = (host) => JSON.parse(JSON.stringify(host.sent.at(-1)));
+const unreadable = /^(no edit|the edit has no|.* isn't (a number|text)|.* is (out of range|negative))/;
+
+/**
+ * A main holding an empty square box guarded 0, as `place_switch` draws
+ * one before its selector: three blank rows inside.
+ */
+const squareBox = (() => {
+  const width = 19;
+  const row = (inner) => `│${inner.padEnd(width - 2)}│`;
+  return [
+    `╭─ ·𐑥𐑱𐑯 ${"─".repeat(width - 9)}╮`,
+    row(""),
+    row(`  ┌─ 0 ${"─".repeat(5)}┐`),
+    row(`  │${" ".repeat(9)}│`),
+    row(`  │${" ".repeat(9)}│`),
+    row(`  │${" ".repeat(9)}│`),
+    row(`  └${"─".repeat(9)}┘`),
+    row(""),
+    `╰${"─".repeat(width - 2)}╯`,
+    "",
+  ].join("\n");
+})();
+
+test("boxes give their ports, dividers, titles and words, so the page classifies nothing", () => {
+  const [definition, node, switchBox] = [boxOf(abs, 2, 0), boxOf(abs, 4, 14), boxOf(abs, 9, 12)];
+  assert.deepEqual([definition.parent, definition.title.content, definition.word], [null, "·𐑨𐑚𐑕", null]);
+  const ports = definition.ports.map((p) => `${p.row}:${p.col} ${p.side} ${p.kind} ${p.name.content}`);
+  assert.deepEqual(ports, ["5:0 west arrowhead 𐑯", "13:34 east arrowhead 𐑬"]);
+  assert.deepEqual([node.word.content, node.word.row, node.word.col, node.parent], ["𐑤", 5, 16, 0]);
+  assert.deepEqual(node.ports.map((p) => `${p.side} ${p.kind}`), ["west arrowhead", "east tee", "west arrowhead"]);
+  assert.deepEqual([switchBox.kind, switchBox.title.content, switchBox.gap.col, switchBox.word], ["switch", "0", 14, null]);
+  assert.deepEqual(switchBox.dividers.map((d) => [d.row, d.guard]), [[11, null]]);
+  assert.ok(switchBox.ports.some((p) => p.row === 9 && p.col === 20 && p.side === "north"), "the selector");
+  const arms = armsOf(switchBox).map((a) => [a.top, a.bottom, a.guard?.content ?? null, a.divider]);
+  assert.deepEqual(arms, [[10, 10, "0", null], [12, 15, null, 11]]);
+  // The square box place_switch draws reads as a node with no word.
+  const empty = sheet(squareBox).boxes().find((b) => b.parent !== null);
+  assert.deepEqual([empty.kind, empty.word, empty.title.content, switchLike(empty)], ["node", null, "0", true]);
+  assert.equal(switchLike(node), false);
+});
+
+test("apply reads remove_port, remove_arm, remove_box and set_ports", () => {
+  for (const edit of [
+    { kind: "remove_port", at: cell(9, 20) },
+    { kind: "remove_arm", at: cell(11, 15) },
+    { kind: "remove_box", at: cell(9, 12) },
+    { kind: "set_ports", corner: cell(4, 14), inputs: 3, outputs: 1 },
+  ]) {
+    const result = shawline.apply(sheet(abs), edit);
+    assert.ok(result.ok || !unreadable.test(result.reason), `${edit.kind}: ${result.reason}`);
+  }
+  const wrong = shawline.apply(sheet(abs), { kind: "set_ports", corner: cell(4, 14), inputs: 3 });
+  assert.deepEqual([wrong.ok, wrong.kind, wrong.reason], [false, "target", "the edit has no outputs"]);
+});
+
+test("the Box tool sends place_definition at top level, named 𐑥𐑱𐑯 while there is no main, and place_switch inside one", () => {
+  const empty = studioOn("");
+  const rect = { top: 0, left: 0, bottom: 4, right: 12 };
+  empty.studio.placeBox(rect);
+  assert.deepEqual(lastSent(empty.host), { kind: "place_definition", rect, name: "𐑥𐑱𐑯" });
+  const { studio, host, press } = studioOn(double);
+  const below = { top: 19, left: 0, bottom: 23, right: 16 };
+  studio.placeBox(below);
+  assert.deepEqual(lastSent(host), { kind: "place_definition", rect: below, name: "𐑯𐑿" }, "a sheet with a main gets 𐑯𐑿");
+  const inside = { top: 3, left: 16, bottom: 8, right: 20 };
+  studio.placeBox(inside);
+  assert.deepEqual(lastSent(host), { kind: "place_switch", rect: inside, guard: "0" });
+  // The keyboard path: B at one corner, the arrow keys to the other, Enter.
+  const keyed = studioOn(double);
+  keyed.studio.cursor = cell(19, 0);
+  keyed.press("b");
+  for (let i = 0; i < 4; i++) keyed.press("ArrowDown");
+  for (let i = 0; i < 16; i++) keyed.press("ArrowRight");
+  assert.deepEqual(keyed.studio.sketched, below);
+  assert.equal(keyed.host.sent.length, 0, "nothing is sent while the box is drawn");
+  keyed.press("Enter");
+  assert.deepEqual([keyed.host.sent.length, lastSent(keyed.host)], [1, { kind: "place_definition", rect: below, name: "𐑯𐑿" }]);
+  assert.equal(keyed.studio.sketched, null);
+  keyed.press("b");
+  keyed.press("Escape");
+  assert.deepEqual([keyed.studio.sketched, keyed.host.sent.length], [null, 1], "Escape stops it");
+});
+
+test("a click on a definition's border adds a port named 𐑨, or the next free letter; a node's takes no name", () => {
+  const view = readView(sheet(double));
+  assert.equal(portSpot(view, cell(7, 0))?.kind, "definition", "plain left border");
+  for (const at of [cell(2, 0), cell(5, 0), cell(2, 4), cell(9, 5), cell(5, 12)]) {
+    assert.equal(portSpot(view, at), null, `no port at ${at.row}:${at.col}`);
+  }
+  const { studio, host, press } = studioOn(double);
+  studio.addPort(cell(7, 0));
+  assert.deepEqual(lastSent(host), { kind: "add_port", at: cell(7, 0), name: "𐑨" });
+  const taken = studioOn(double.replace("▶ 𐑯 ──", "▶ 𐑨 ──"));
+  taken.studio.addPort(cell(7, 0));
+  assert.deepEqual(lastSent(taken.host), { kind: "add_port", at: cell(7, 0), name: PORT_NAMES[1] }, "𐑨 is taken, so 𐑚");
+  studio.addPort(cell(6, 14));
+  assert.deepEqual(lastSent(host), { kind: "add_port", at: cell(6, 14), name: null }, "𐑐's right border");
+  // P at the cursor is the same gesture.
+  const keyed = studioOn(double);
+  keyed.studio.cursor = cell(7, 0);
+  keyed.press("p");
+  assert.deepEqual([keyed.host.sent.length, lastSent(keyed.host)], [1, { kind: "add_port", at: cell(7, 0), name: "𐑨" }]);
+  // A refused port carries its follow-up, so Make room can open the name field too.
+  const corner = studioOn(double);
+  corner.studio.addPort(cell(2, 0));
+  assert.equal(typeof corner.host.refusals.at(-1)?.then, "function");
+});
+
+test("+ arm adds a default arm under a guarded one, and a guarded arm above the default", () => {
+  const { studio, host, press } = studioOn(squareBox);
+  const empty = readView(sheet(squareBox)).boxes.find((b) => b.parent !== null);
+  studio.select({ kind: "box", box: empty });
+  studio.addArm();
+  assert.deepEqual(lastSent(host), { kind: "add_arm", at: cell(4, 3), guard: null }, "under the first row, for the default");
+  const keyed = studioOn(squareBox);
+  keyed.studio.select({ kind: "box", box: empty });
+  keyed.press("a");
+  assert.deepEqual([keyed.host.sent.length, lastSent(keyed.host)], [1, { kind: "add_arm", at: cell(4, 3), guard: null }]);
+  // 04-abs's switch has a default arm, so the new arm is guarded 1 and
+  // splits the arm above it; that arm is full, so the edit is the one to say so.
+  const full = studioOn(abs);
+  full.studio.select({ kind: "box", box: boxOf(abs, 9, 12) });
+  full.press("A");
+  assert.deepEqual(lastSent(full.host), { kind: "add_arm", at: cell(10, 12), guard: "1" });
+  const none = studioOn(double);
+  none.studio.select(none.studio.targetAt(cell(4, 10)));
+  none.press("a");
+  assert.equal(none.host.sent.length, 0, "a node has no arms");
+});
+
+test("the inspector's steppers, and I and O, send one set_ports for the selected node", () => {
+  const node = boxOf(double, 4, 10);
+  const { studio, host } = studioOn(double);
+  studio.setPorts(node, 3, 1);
+  assert.deepEqual(lastSent(host), { kind: "set_ports", corner: cell(4, 10), inputs: 3, outputs: 1 });
+  for (const [key, inputs, outputs] of [["i", 3, 1], ["I", 1, 1], ["o", 2, 2], ["O", 2, 0]]) {
+    const keyed = studioOn(double);
+    keyed.studio.select({ kind: "box", box: node });
+    keyed.press(key, { shiftKey: key === key.toUpperCase() });
+    assert.deepEqual([keyed.host.sent.length, lastSent(keyed.host)], [1, { kind: "set_ports", corner: cell(4, 10), inputs, outputs }], key);
+  }
+  const definition = studioOn(double);
+  definition.studio.select({ kind: "box", box: boxOf(double, 2, 0) });
+  definition.press("i");
+  assert.equal(definition.host.sent.length, 0, "a definition's ports are drawn one by one");
+});
+
+test("a double-click on a straight stretch of wire opens the 1→1 palette, and the pick is one place_inline", () => {
+  const { studio, host, press } = studioOn(double);
+  assert.equal(studio.inlineAt(cell(5, 18)), true);
+  for (const at of [cell(5, 6), cell(6, 6), cell(3, 5), cell(5, 12)]) assert.equal(studio.inlineAt(at), false, `${at.row}:${at.col}`);
+  const callees = sheet(double).palette().map((c) => ({ ...c, reading: "", keys: "" }));
+  const offered = offer(callees, "inline");
+  assert.ok(offered.every((c) => c.inputs === 1 && c.outputs === 1));
+  assert.deepEqual(["𐑖", "𐑠", "𐑛𐑳𐑚𐑩𐑤"].map((w) => offered.some((c) => c.word === w)), [true, true, true]);
+  assert.ok(!offered.some((c) => c.word === "𐑐"), "𐑐 takes two");
+  const show = offered.find((c) => c.word === "𐑖");
+  studio.pick(placing(show, cell(5, 18), { mode: "inline" }));
+  assert.deepEqual(lastSent(host), { kind: "place_inline", at: cell(5, 18), word: "𐑖" });
+  studio.cursor = cell(5, 18);
+  press("/");
+  studio.cursor = cell(3, 5);
+  press("/");
+  assert.deepEqual(host.palettes.map((p) => p.mode), ["inline", "place"], "/ on a wire splices, elsewhere it places");
+});
+
+test("a node is renamed with one set_text on its word, from the inspector or in place; a definition keeps its dot", () => {
+  const { studio, host, press } = studioOn(double);
+  studio.select({ kind: "box", box: boxOf(double, 4, 10) });
+  const word = studio.editable();
+  assert.deepEqual([word.text.content, word.at.row, word.at.col], ["𐑐", 5, 12]);
+  press("Enter");
+  assert.deepEqual([host.editing.length, host.editing.at(-1).text.content], [1, "𐑐"], "Enter opens its word in place");
+  studio.retext(word, "𐑚");
+  assert.deepEqual(lastSent(host), { kind: "set_text", at: cell(5, 12), content: "𐑚" });
+  // A definition's name is renamed today (wave 1), its namer dot kept.
+  const named = studioOn(double);
+  named.studio.select({ kind: "box", box: boxOf(double, 2, 0) });
+  const title = named.studio.editable();
+  assert.equal(title.text.content, "·𐑛𐑳𐑚𐑩𐑤");
+  assert.equal(named.studio.retext(title, "𐑑𐑢𐑲𐑕"), true, named.host.refusals[0]?.reason);
+  assert.deepEqual([named.host.steps.length, boxOf(named.host.current, 2, 0).title.content], [1, "·𐑑𐑢𐑲𐑕"]);
+  assert.deepEqual([named.studio.selection.kind, named.studio.selection.box.top], ["box", 2], "the definition stays selected");
+});
+
+test("Delete removes a selected definition, switch, arm or port with one edit each", () => {
+  const removal = (src, pick) => {
+    const { studio, host, press } = studioOn(src);
+    studio.select(pick(studio));
+    assert.ok(studio.selection, "something is selected");
+    press("Delete");
+    assert.equal(host.sent.length, 1);
+    return lastSent(host);
+  };
+  const box = (row, col) => (s) => ({ kind: "box", box: s.view().boxes.find((b) => b.top === row && b.left === col) });
+  const at = (row, col) => (s) => s.targetAt(cell(row, col));
+  assert.deepEqual(removal(abs, box(2, 0)), { kind: "remove_box", at: cell(2, 0) });
+  assert.deepEqual(removal(abs, box(9, 12)), { kind: "remove_box", at: cell(9, 12) });
+  assert.deepEqual(removal(abs, box(4, 14)), { kind: "remove_node", at: cell(4, 14) });
+  assert.deepEqual(removal(abs, at(11, 15)), { kind: "remove_arm", at: cell(11, 12) });
+  assert.deepEqual(removal(abs, at(5, 18)), { kind: "remove_port", at: cell(5, 18) }, "𐑤's output tee");
+  assert.deepEqual(removal(abs, at(5, 2)), { kind: "remove_port", at: cell(5, 0) }, "an input, by its name");
+  assert.deepEqual(removal(abs, at(13, 36)), { kind: "remove_port", at: cell(13, 34) }, "an output, by its name");
+  const unwired = edits.disconnect(abs, 9, 20).text;
+  assert.deepEqual(removal(unwired, at(9, 20)), { kind: "remove_port", at: cell(9, 20) }, "an unwired selector");
+  assert.deepEqual(removal(abs, at(9, 20)), { kind: "disconnect", at: cell(9, 20) }, "a wired one loses its branch first");
+  // ] reaches the arm.
+  const { seek } = studioOn(abs);
+  assert.equal(seek((s) => s.kind === "arm").divider, 11);
+});
+
+test("every new gesture's key is in the ? overlay", () => {
+  const keys = KEYS.map(([k]) => k);
+  for (const k of ["B", "P", "A", "I, Shift+I", "O, Shift+O", "Enter", "Delete", "/"]) assert.ok(keys.includes(k), k);
+  assert.match(KEYS.find(([k]) => k === "/")[1], /wire/);
+});
+
+pendingE2("the Box tool draws a definition, and typing in its open field renames it", () => {
+  const { studio, host } = studioOn("");
+  assert.equal(studio.placeBox({ top: 0, left: 0, bottom: 4, right: 16 }), true, host.refusals[0]?.reason);
+  const made = boxOf(host.current, 0, 0);
+  assert.deepEqual([made.kind, made.title.content], ["definition", "·𐑥𐑱𐑯"]);
+  assert.equal(host.naming.at(-1).text.content, "·𐑥𐑱𐑯", "its name's field opens");
+  assert.equal(studio.retext(host.naming.at(-1), "𐑛𐑳𐑚𐑩𐑤"), true, host.refusals[0]?.reason);
+  assert.equal(boxOf(host.current, 0, 0).title.content, "·𐑛𐑳𐑚𐑩𐑤");
+  assert.equal(host.steps.length, 2, "one undo step each");
+});
+
+pendingE2("a port added to a definition is named 𐑨, its field opens, and typing renames it", () => {
+  const { studio, host } = studioOn(double);
+  assert.equal(studio.addPort(cell(7, 0)), true, host.refusals[0]?.reason);
+  const port = boxOf(host.current, 2, 0).ports.find((p) => p.row === 7);
+  assert.deepEqual([port.side, port.name.content], ["west", "𐑨"]);
+  assert.deepEqual([host.naming.length, host.naming.at(-1).text.content], [1, "𐑨"]);
+  assert.equal(studio.retext(host.naming.at(-1), "𐑥"), true, host.refusals[0]?.reason);
+  assert.equal(boxOf(host.current, 2, 0).ports.find((p) => p.row === 7).name.content, "𐑥");
+});
+
+pendingE2("+ arm splits an empty box into a guarded arm and a default arm, and keeps it selected", () => {
+  const { studio, host } = studioOn(squareBox);
+  studio.select({ kind: "box", box: readView(sheet(squareBox)).boxes.find((b) => b.parent !== null) });
+  assert.equal(studio.addArm(), true, host.refusals[0]?.reason);
+  const split = sheet(host.current).boxes().find((b) => b.parent !== null);
+  assert.deepEqual(split.dividers.map((d) => [d.row, d.guard]), [[4, null]]);
+  assert.deepEqual([studio.selection.kind, studio.selection.box.top, studio.selection.box.left], ["box", 2, 3]);
+});
+
+pendingE2("a stepper gives a node another input, and the node stays selected", () => {
+  const { studio, host } = studioOn(double);
+  studio.select({ kind: "box", box: boxOf(double, 4, 10) });
+  assert.equal(studio.setPorts(studio.selection.box, 3, 1), true, host.refusals[0]?.reason);
+  const node = boxOf(host.current, 4, 10);
+  assert.deepEqual([node.ports.filter((p) => p.side === "west").length, studio.selection.box.bottom], [3, node.bottom]);
+  assert.ok(wiredSinks(host.current).includes("5:10") && wiredSinks(host.current).includes("6:10"), "ports 0 and 1 keep their wires");
+});
+
+pendingE2("a 1→1 call is spliced into a wire, and its word is selected", () => {
+  const { studio, host } = studioOn(double);
+  assert.equal(studio.pick({ kind: "place_inline", at: cell(5, 18), word: "𐑖" }), true, host.refusals[0]?.reason);
+  assert.ok(sheet(host.current).texts().some((t) => t.row === 5 && t.col === 18 && t.content === "𐑖"));
+  assert.deepEqual([studio.selection.text.content, studio.selection.at.col], ["𐑖", 18]);
+  assert.ok(wiredSinks(host.current).includes("5:22"), "the definition's output keeps its wire");
+});
+
+pendingE2("a node renamed in the inspector keeps its box selected", () => {
+  const { studio, host } = studioOn(double);
+  studio.select({ kind: "box", box: boxOf(double, 4, 10) });
+  assert.equal(studio.retext(studio.editable(), "𐑚"), true, host.refusals[0]?.reason);
+  assert.equal(boxOf(host.current, 4, 10).word.content, "𐑚");
+  assert.deepEqual([studio.selection.kind, studio.selection.box.word.content], ["box", "𐑚"]);
+});
+
+pendingE2("Delete takes out an arm, a port and a switch, one undo step each", () => {
+  const { studio, host, press } = studioOn(abs);
+  studio.select(studio.targetAt(cell(11, 15)));
+  press("Delete");
+  assert.deepEqual([host.steps.length, boxOf(host.current, 9, 12)?.dividers.length], [1, 0], host.refusals[0]?.reason);
+  studio.select(studio.targetAt(cell(5, 18)));
+  press("Delete");
+  assert.equal(host.steps.length, 2, host.refusals[0]?.reason);
+  assert.equal(portCounts(boxOf(host.current, 4, 14)).outputs, 0);
+  studio.select({ kind: "box", box: boxOf(host.current, 9, 12) });
+  press("Delete");
+  assert.equal(host.steps.length, 3, host.refusals[0]?.reason);
+  assert.equal(boxOf(host.current, 9, 12), undefined);
+});
+
+pendingE2("a drawing edit refused for room carries its edit, so Make room is offered when it would fit", () => {
+  const { studio, host } = studioOn(double);
+  studio.select({ kind: "box", box: boxOf(double, 4, 10) });
+  // Seven rows tall, the node would cross ·𐑛𐑳𐑚𐑩𐑤's bottom border.
+  assert.equal(studio.setPorts(studio.selection.box, 5, 1), false);
+  const refusal = host.refusals.at(-1);
+  assert.deepEqual([refusal.kind, refusal.remedy], ["blocked", "make-room"]);
+  assert.deepEqual(JSON.parse(JSON.stringify(refusal.edit)), { kind: "set_ports", corner: cell(4, 10), inputs: 5, outputs: 1 });
+  // The page's offer: make_room of the refused edit, shown only if it succeeds, applied as one step.
+  const roomed = shawline.apply(sheet(host.current), { kind: "make_room", edit: refusal.edit });
+  if (roomed.ok) {
+    studio.commit(studio.settle(roomed), host.current, refusal.then);
+    assert.equal(host.steps.length, 1);
+    assert.equal(portCounts(boxOf(host.current, studio.selection.box.top, studio.selection.box.left)).inputs, 5);
+  } else {
+    assert.equal(roomed.remedy, null, "a refused make_room offers nothing");
+  }
+});
+
+pendingE2("04-abs builds from an empty sheet through the page's own gestures", () => {
+  const { studio, host } = studioOn("");
+  const ok = (done, what) => assert.equal(done, true, `${what}: ${host.refusals.at(-1)?.reason}`);
+  /** Types a name into the field the last gesture opened. */
+  const name = (content) => ok(studio.retext(host.naming.at(-1), content), `name ${content}`);
+  // Definitions and their ports, each named as its field opens.
+  ok(studio.placeBox({ top: 0, left: 0, bottom: 16, right: 34 }), "·𐑨𐑚𐑕");
+  name("𐑨𐑚𐑕");
+  ok(studio.addPort(cell(3, 0)), "input");
+  name("𐑯");
+  ok(studio.addPort(cell(11, 34)), "output");
+  name("𐑬");
+  ok(studio.placeBox({ top: 18, left: 0, bottom: 27, right: 30 }), "·𐑥𐑱𐑯");
+  assert.equal(host.naming.at(-1).text.content, "·𐑥𐑱𐑯", "the sheet had no main again");
+  ok(studio.addPort(cell(21, 30)), "output");
+  name("𐑢𐑳𐑯");
+  ok(studio.addPort(cell(24, 30)), "output");
+  name("𐑑𐑵");
+  // Nodes from the palette, the switch with the Box tool, then its
+  // selector, its through-ports and `+ arm`.
+  const node = (word, corner) => {
+    const callee = offer(sheet(host.current).palette(), "place").find((c) => c.word === word);
+    ok(studio.pick(placing(callee, cell(corner.row + 1, corner.col), { mode: "place" })), word);
+  };
+  node("𐑤", cell(2, 14));
+  ok(studio.placeBox({ top: 7, left: 12, bottom: 14, right: 26 }), "switch");
+  for (const at of [cell(7, 20), cell(8, 12), cell(8, 26), cell(11, 26), cell(12, 12)]) ok(studio.addPort(at), `port ${at.row}:${at.col}`);
+  ok(studio.addArm(boxOf(host.current, 7, 12)), "+ arm");
+  node("𐑚", cell(10, 18));
+  node("𐑚", cell(20, 6));
+  node("𐑨𐑚𐑕", cell(20, 16));
+  node("𐑨𐑚𐑕", cell(23, 16));
+  // Constants: each arrowhead fed a Number from the palette, valued in the inspector.
+  const [number] = offer([], "source");
+  for (const [to, value] of [[cell(4, 14), "0"], [cell(11, 18), "0"], [cell(21, 6), "0"], [cell(22, 6), "7"], [cell(24, 16), "5"]]) {
+    ok(studio.pick(placing(number, to, { mode: "source", to })), `feed ${to.row}:${to.col}`);
+    if (value === "0") continue;
+    const constant = sheet(host.current).texts().filter((t) => t.kind === "number" && t.row === to.row && t.col < to.col).at(-1);
+    ok(studio.retext({ kind: "source", at: constant, text: constant }, value), `value ${value}`);
+  }
+  // Every connection, arrowheads in row-major order. The switch's merged
+  // output is named by its first arm's right through-port.
+  const links = [
+    [cell(3, 0), cell(3, 14)], [cell(3, 18), cell(7, 20)], [cell(3, 0), cell(8, 12)], [cell(8, 12), cell(8, 26)],
+    [cell(11, 22), cell(11, 26)], [cell(8, 26), cell(11, 34)], [cell(3, 0), cell(12, 12)], [cell(12, 12), cell(12, 18)],
+    [cell(21, 10), cell(21, 16)], [cell(21, 22), cell(21, 30)], [cell(24, 22), cell(24, 30)],
+  ];
+  for (const [from, to] of links) ok(studio.connect(from, to), `connect ${from.row}:${from.col} ${to.row}:${to.col}`);
+  assert.deepEqual(host.refusals.map((r) => r.reason), []);
+  assert.deepEqual(sheet(host.current).diagnostics().map((d) => d.code), sheet(absBare).diagnostics().map((d) => d.code));
+  assert.deepEqual(outputsOf(host.current), outputsOf(absBare));
+  assert.deepEqual(wiredSinks(host.current), wiredSinks(absBare));
+  assert.equal(sheet(host.current).formatted(), host.current);
+});
+
+if (skipped) console.log(`${skipped} skipped until E1's or E2's edits land`);
 process.exit(failed ? 1 : 0);

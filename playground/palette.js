@@ -19,12 +19,14 @@ const NIL = "𐑯𐑦𐑤";
  * What the palette offers. `callees` is `Doc.palette()`, each with its
  * `reading` and `keys`. `mode` is `"feed"` while a wire from a source is
  * dropped (callees with an input), `"source"` while one from an unwired
- * arrowhead is (Number, Text, 𐑯𐑦𐑤, then callees with an output), and
- * `"place"` on blank sheet (Number, Text, 𐑯𐑦𐑤, then every callee).
+ * arrowhead is (Number, Text, 𐑯𐑦𐑤, then callees with an output),
+ * `"place"` on blank sheet (Number, Text, 𐑯𐑦𐑤, then every callee), and
+ * `"inline"` on a wire (the 1→1 callees, which can be spliced into it).
  */
 export function offer(callees, mode) {
   const nodes = callees.map((c) => ({ kind: "node", ...c }));
   if (mode === "feed") return nodes.filter((c) => c.inputs > 0);
+  if (mode === "inline") return nodes.filter((c) => c.inputs === 1 && c.outputs === 1);
   const nil = nodes.filter((c) => c.word === NIL);
   const rest = nodes.filter((c) => c.word !== NIL && (mode !== "source" || c.outputs > 0));
   return [...CONSTANTS, ...nil, ...rest];
@@ -40,12 +42,14 @@ export function matches(entry, query) {
  * The one edit a pick makes at blank cell `at`. Fed from the dragged
  * source `from` it is `place_connected`; feeding the unwired arrowhead
  * `to` it is `feed`, which places the source and wires it in (Number,
- * Text and 𐑯𐑦𐑤 as constants, any other pick as a node); otherwise it
- * places the pick alone, a node's first port on the drop row.
+ * Text and 𐑯𐑦𐑤 as constants, any other pick as a node); on a wire it is
+ * `place_inline`, its word starting at `at`; otherwise it places the pick
+ * alone, a node's first port on the drop row.
  */
 export function placing(choice, at, { mode, from = null, to = null }) {
   const { word, inputs, outputs } = choice;
   if (mode === "feed") return { kind: "place_connected", at, word, inputs, outputs, from };
+  if (mode === "inline") return { kind: "place_inline", at: { row: at.row, col: at.col }, word };
   const constant = choice.kind !== "node" || word === NIL;
   if (to) {
     const source = constant ? { kind: "constant", content: word } : { kind: "node", word, inputs, outputs };

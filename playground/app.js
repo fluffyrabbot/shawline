@@ -12,6 +12,7 @@ import { Flight } from "./flight.js";
 import { Layer } from "./layer.js";
 import {
   Studio, KEYS, SCRUB_PX, readView, anchorOf, sameTarget, keyOf, same, sourceAt, sinkAt, wireAt, boxAt,
+  portSpot, switchLike, portCounts, rectOf,
 } from "./studio.js";
 import { Choices, offer, placing } from "./palette.js";
 import { ZOOM_STEP, clampZoom, defaultZoom, fitZoom, zoomAbout, cellUnder } from "./view.js";
@@ -160,6 +161,36 @@ translit.addEventListener("change", () => {
   settle();
 });
 
+/** One transliterator for the drawing's text fields, only one of which has focus at a time. */
+let fieldTrans;
+
+/**
+ * Transliterates keys typed into one of the drawing's text fields (the
+ * inspector's, or one opened in place) as the editor does, while the
+ * switch is on, so a name is typed by its keys. A field holds one word, so
+ * every key is inside it.
+ */
+function transliterating(input) {
+  let expected = -1;
+  input.addEventListener("focus", () => fieldTrans?.reset());
+  input.addEventListener("beforeinput", (e) => {
+    const key = /^[A-Z]$/.test(e.data) ? e.data.toLowerCase() : e.data;
+    const { selectionStart: start, selectionEnd: end } = input;
+    if (start !== expected || start !== end) fieldTrans?.reset();
+    if (!fieldTrans || !translit.checked || e.inputType !== "insertText" || e.isComposing || !keys?.has(key)) {
+      fieldTrans?.reset();
+      return;
+    }
+    e.preventDefault();
+    const edit = fieldTrans.push(key);
+    let from = start;
+    for (let i = 0; i < edit.delete; i++) from -= isLow(input.value.charCodeAt(from - 1)) ? 2 : 1;
+    input.setRangeText(edit.insert, from, end, "end");
+    expected = input.selectionStart;
+  });
+  return input;
+}
+
 // The gloss layer (PLAN P9): readings under every word and in messages, on
 // by default. Holding Alt by itself flips it until Alt comes up; any other
 // key ends that, so Option-typing never flashes it. Window listeners in the
@@ -187,7 +218,8 @@ function relayer() {
   if (drag) {
     if (drag.kind === "wire" || drag.kind === "sink" || (drag.kind === "branch" && drag.view)) glow();
     if (drag.at && drag.kind === "box") showGhost();
-    else if (drag.at && drag.kind !== "scrub" && drag.kind !== "pan") showPath();
+    else if (drag.at && drag.kind === "rect") showRect();
+    else if (drag.at && ["wire", "sink", "branch"].includes(drag.kind)) showPath();
   }
   if (menu) {
     menu.show();
@@ -372,6 +404,7 @@ function sizeDrawing() {
   $("zoom-level").textContent = `${Math.round(zoom * 100)}%`;
   if (menu) placeMenu();
   if (inline) placeInline();
+  showArmHandle();
 }
 
 /** Zooms to `next`, keeping the drawing's point under `pointer` (client pixels) still. */
@@ -503,6 +536,10 @@ function cellAt(e) {
 //   whether the move would be refused.
 // - Click to select; click a source and then an arrowhead to connect them.
 //   A selected number constant scrubs: drag its digits sideways.
+// - With the Box tool on, drag on blank sheet to draw a box (a definition
+//   at top level, a switch inside one), and click a box's border to add a
+//   port. A selected switch has a `+ arm` handle on its lower edge.
+// - Double-click a straight stretch of wire to splice a 1→1 call into it.
 // - The keyboard model is the Studio's: `?` lists every key.
 
 const SVG = "http://www.w3.org/2000/svg";
@@ -536,10 +573,10 @@ drawing.addEventListener("click", (e) => {
   // A source and then an arrowhead, or the other way round, connect.
   const sink = target && (target.kind === "sink" ? target.sink : null);
   if (chosen?.kind === "source" && sink && sink.scope === chosen.source.scope) {
-    return void studio.edit({ kind: "connect", from: cellOf(chosen.source), to: cellOf(sink) });
+    return void studio.connect(chosen.source, sink);
   }
   if (chosen?.kind === "sink" && target?.kind === "source" && target.source.scope === chosen.sink.scope) {
-    return void studio.edit({ kind: "connect", from: cellOf(target.source), to: cellOf(chosen.sink) });
+    return void studio.connect(target.source, chosen.sink);
   }
   if (target && !(target.kind === "box" && lockedAt(at))) {
     studio.select(target);
@@ -560,8 +597,32 @@ const cellOf = ({ row, col }) => ({ row, col });
 
 drawing.addEventListener("dblclick", (e) => {
   const at = cellAt(e);
-  const box = at && boxAt(current(), at);
-  if (at && charAt(at) === " " && box && box.kind !== "node") openMenu(at, { mode: "place" });
+  if (!at) return;
+  // A straight stretch of wire takes a 1→1 call spliced into it.
+  if (studio.inlineAt(at)) return void openMenu(at, { mode: "inline" });
+  const box = boxAt(current(), at);
+  if (charAt(at) === " " && box && box.kind !== "node") openMenu(at, { mode: "place" });
+});
+
+// The Box tool (PLAN P10, Gesture details: Drawing boxes): while it is on,
+// a drag on blank sheet draws a box and a click on a box's border adds a
+// port. Escape or the button turns it off; `B` draws a box from the
+// keyboard either way.
+
+let boxTool = false;
+const boxButton = $("box-tool");
+
+function setBoxTool(on) {
+  boxTool = on;
+  boxButton.setAttribute("aria-pressed", String(on));
+  drawing.classList.toggle("box-tool", on);
+  if (on) showStatus("Box tool: drag on blank sheet to draw a box, click a border to add a port. Escape stops.", "hint");
+  else showStatus();
+}
+
+boxButton.addEventListener("click", () => {
+  setBoxTool(!boxTool);
+  focusDrawing(false);
 });
 
 function svgEl(tag, className, attrs = {}) {
@@ -647,6 +708,12 @@ function showOverlays() {
     svg.append(cellRect(`overlay selected-text${scrub}`, selected.at, selected.at.span));
   }
   if (selected?.kind === "sink") svg.append(cellRect("overlay selected-text", selected.sink));
+  if (selected?.kind === "arm") {
+    const { box, divider } = selected;
+    svg.append(svgRect("overlay selected", { top: divider, left: box.left, bottom: divider, right: box.right }));
+  }
+  // `B`'s box, from its first corner to the cursor.
+  if (studio?.sketched) svg.append(svgRect("overlay ghost", studio.sketched));
   if (studio?.wiring) {
     const { ends } = studio.wiring;
     const end = studio.end;
@@ -667,8 +734,32 @@ function selectionChanged() {
   else showOverlays();
   live.textContent = studio.describe();
   showInspector();
+  showArmHandle();
   const svg = drawing.querySelector("svg");
   svg?.classList.toggle("can-scrub", studio.scrubbable);
+}
+
+let armHandle = null;
+
+/** `+ arm` on a selected switch's lower edge: one `add_arm` (the Studio's `A`). */
+function showArmHandle() {
+  armHandle?.remove();
+  armHandle = null;
+  const target = studio?.selection;
+  if (target?.kind !== "box" || !switchLike(target.box) || studio.held || !geo) return;
+  const { box } = target;
+  const button = el("button", "arm-handle keep", "+ arm");
+  button.type = "button";
+  button.title = "Add an arm below (A)";
+  button.addEventListener("pointerdown", (e) => e.stopPropagation());
+  button.addEventListener("click", (e) => {
+    e.stopPropagation();
+    focusDrawing(false);
+    studio.addArm(box);
+  });
+  place(button, { row: box.bottom, col: Math.floor((box.left + box.right) / 2) });
+  drawing.append(button);
+  armHandle = button;
 }
 
 /**
@@ -729,7 +820,7 @@ function endDrag() {
   hidePreview();
   drag.marks?.forEach((n) => n.remove());
   drag = null;
-  drawing.classList.remove("dragging", "wiring", "panning");
+  drawing.classList.remove("dragging", "wiring", "panning", "drawing-box");
   if (drawing.hasPointerCapture(pointerId)) drawing.releasePointerCapture(pointerId);
   if (kind === "scrub") studio.drop();
   if (view) showDrawing();
@@ -756,7 +847,8 @@ function refuse({ row, col, reason }) {
 
 let room = null;
 
-function refused(refusal, edit) {
+/** A refused edit: said by its cell, and Make room offered when it would help. `then` is the gesture's follow-up. */
+function refused(refusal, edit, then = null) {
   refuse(refusal);
   if (refusal.remedy !== "make-room" || !edit || studio.held || drag) return;
   withdrawRoom();
@@ -789,12 +881,12 @@ function refused(refusal, edit) {
     ghost.remove();
     button.remove();
     if (offer.base !== studio.text) return void offer.result.map?.free();
-    studio.commit(studio.settle(offer.result), offer.base);
     focusDrawing(false);
+    studio.commit(studio.settle(offer.result), offer.base, offer.then);
   });
   place(button, { row: refusal.row + 1, col: refusal.col });
   drawing.append(ghost, button);
-  room = { base, result: roomed, ghost, button };
+  room = { base, result: roomed, ghost, button, then };
 }
 
 /** Takes back an offer of room: the next action makes it stale. */
@@ -872,8 +964,12 @@ drawing.addEventListener("pointerdown", (e) => {
   const view = current();
   const chosen = studio.selection;
   let start = null;
+  // The Box tool: a press on plain border adds a port when it is let go
+  // there; one on blank sheet draws a box.
+  if (boxTool && portSpot(view, at)) start = { kind: "port" };
+  else if (boxTool && charAt(at) === " ") start = { kind: "rect", ghost: null, verdict: null };
   // A selected number constant scrubs; an unselected one starts a wire.
-  if (studio.scrubbable && chosen.at.row === at.row && at.col >= chosen.at.col && at.col < chosen.at.col + chosen.at.span) {
+  if (!start && studio.scrubbable && chosen.at.row === at.row && at.col >= chosen.at.col && at.col < chosen.at.col + chosen.at.span) {
     if (studio.scrubStart()) start = { kind: "scrub", x: e.clientX };
   }
   const source = !start && sourceOf(at, view);
@@ -906,9 +1002,32 @@ drawing.addEventListener("pointerdown", (e) => {
   focusDrawing(false);
   drawing.setPointerCapture(e.pointerId);
   drag = { ...start, start: at, at, pointerId: e.pointerId, moved: false };
-  drawing.classList.add(drag.kind === "box" || drag.kind === "scrub" ? "dragging" : "wiring");
+  const look = { box: "dragging", scrub: "dragging", rect: "drawing-box", port: "drawing-box" };
+  drawing.classList.add(look[drag.kind] ?? "wiring");
   if (drag.kind === "wire" || drag.kind === "sink") glow();
 });
+
+/**
+ * A live verdict on a Box tool drag, as on a box move: a trial of the edit
+ * the rectangle would make, the ghost tinted and the reason said while it
+ * would be refused.
+ */
+function judgeBox() {
+  const trial = applyEdit(doc(), studio.boxEdit(rectOf(drag.start, drag.at)));
+  drag.verdict = trial.ok ? null : trial;
+  if (trial.ok) {
+    trial.map?.free();
+    trial.doc.free();
+  }
+  showStatus(drag.verdict?.reason ?? "", drag.verdict ? "refused" : "");
+}
+
+/** The box a Box tool drag would draw. */
+function showRect() {
+  drag.ghost?.remove();
+  drag.ghost = svgRect(`ghost${drag.verdict ? " refused" : ""}`, rectOf(drag.start, drag.at));
+  drawing.querySelector("svg")?.append(drag.ghost);
+}
 
 /** Lights up where the drag can end: free sinks for a source, sources for a sink. */
 function glow() {
@@ -983,15 +1102,19 @@ drawing.addEventListener("pointermove", (e) => {
   if (!drag) {
     const svg = drawing.querySelector("svg");
     const chosen = studio.selection;
-    const scrub = at && studio.scrubbable && chosen.at.row === at.row && at.col >= chosen.at.col && at.col < chosen.at.col + chosen.at.span;
-    const sink = at && sinkOf(at);
-    const over = at && !scrub && (sourceOf(at) || sink?.wired === false || wireOf(at));
-    const locked = at && !over && !sink && lockedAt(at);
+    const border = at && boxTool && portSpot(current(), at);
+    const blank = at && boxTool && !border && charAt(at) === " ";
+    const tool = border || blank;
+    const scrub = at && !tool && studio.scrubbable && chosen.at.row === at.row && at.col >= chosen.at.col && at.col < chosen.at.col + chosen.at.span;
+    const sink = at && !tool && sinkOf(at);
+    const over = at && !tool && !scrub && (sourceOf(at) || sink?.wired === false || wireOf(at));
+    const locked = at && !tool && !over && !sink && lockedAt(at);
+    svg?.classList.toggle("over-border", Boolean(border));
     svg?.classList.toggle("over-scrub", Boolean(scrub));
     svg?.classList.toggle("over-source", Boolean(over));
     svg?.classList.toggle("over-sink", Boolean(sink?.wired));
     svg?.classList.toggle("over-locked", Boolean(locked));
-    svg?.classList.toggle("over-box", Boolean(at && !scrub && !over && !sink && !locked && boxAt(current(), at)));
+    svg?.classList.toggle("over-box", Boolean(at && !tool && !scrub && !over && !sink && !locked && boxAt(current(), at)));
     return;
   }
   if (e.pointerId !== drag.pointerId) return;
@@ -1009,7 +1132,10 @@ drawing.addEventListener("pointermove", (e) => {
     Object.assign(drag, { dr: at.row - drag.start.row, dc: at.col - drag.start.col });
     judgeMove();
     showGhost();
-  } else {
+  } else if (drag.kind === "rect") {
+    judgeBox();
+    showRect();
+  } else if (drag.kind !== "port") {
     showPath();
   }
 });
@@ -1027,11 +1153,21 @@ drawing.addEventListener("pointerup", (e) => {
   }
   const at = cellAt(e);
   endDrag();
+  // A click on plain border with the Box tool adds a port there; the click
+  // that follows mustn't select as well.
+  if (finished.kind === "port") {
+    dragged = true;
+    if (same(at, finished.start)) studio.addPort(at);
+    return;
+  }
   // Off the sheet, or back where it started: nothing. A press that never
   // moved is a click, which selects.
   if (!at || same(at, finished.start)) return void (dragged ||= finished.moved || !at);
   dragged = true;
-  if (finished.kind === "box") {
+  if (finished.kind === "rect") {
+    showStatus();
+    studio.placeBox(rectOf(finished.start, at));
+  } else if (finished.kind === "box") {
     studio.edit({ kind: "move", corner: { row: finished.box.top, col: finished.box.left }, dr: finished.dr, dc: finished.dc });
   } else if (finished.kind === "branch") {
     // One edit either way: off, or off and onto the new source.
@@ -1086,10 +1222,13 @@ drawing.addEventListener("keydown", (e) => {
   }
   if (e.key === "Escape") {
     // The release that follows a cancelled drag isn't a click.
+    const cancelled = Boolean(drag);
     if (drag) dragged = true;
     endDrag();
     if (helpShown()) return void (e.preventDefault(), toggleHelp(false));
     if (menu) return void (e.preventDefault(), closeMenu());
+    if (cancelled) return void (e.preventDefault(), showStatus());
+    if (boxTool && !studio.sketch && !studio.wiring) return void (e.preventDefault(), setBoxTool(false));
   }
   if (drag) return;
   if (studio.keydown(e)) e.preventDefault();
@@ -1154,37 +1293,87 @@ function showInspector() {
     return;
   }
   const parts = [layer.say(el("p", "what"), studio.describe(target))];
-  const word = target.kind === "box" ? current().texts.find((t) => t.kind === "word" && t.row >= target.box.top && t.row <= target.box.bottom && t.col >= target.box.left && t.col <= target.box.right) : target.at;
-  const said = word && docs.get(current().src).describe(word.row, word.col, layer.shown);
+  const view = current();
+  const box = target.kind === "box" || target.kind === "arm" ? target.box : null;
+  const word = target.kind === "arm" ? target.guard
+    : box ? (box.word ?? box.title ?? view.texts.find((t) => t.kind === "word" && t.row >= box.top && t.row <= box.bottom && t.col >= box.left && t.col <= box.right))
+    : target.at;
+  const said = word && docs.get(view.src).describe(word.row, word.col, layer.shown);
   if (said) parts.push(...markdown(said.text));
-  const text = (target.kind === "source" || target.kind === "text") && target.text;
-  if (text && text.kind !== "comment") {
-    const label = el("label", "field");
-    const input = el("input");
-    input.value = text.content;
-    input.setAttribute("aria-label", "Text");
-    const name = el("span", text.kind === "number" ? "name scrub" : "name", text.kind === "number" ? "Number" : "Text");
-    if (text.kind === "number") {
-      name.title = "Drag sideways to change it; Shift for steps of ten";
-      scrubbing(name);
-    }
-    input.addEventListener("keydown", (e) => {
-      e.stopPropagation();
-      if (e.key === "Enter") commitText(target, input.value);
-      if (e.key === "Escape") input.value = text.content;
-    });
-    input.addEventListener("change", () => commitText(target, input.value));
-    label.append(name, input);
-    parts.push(label);
+  // A text's field: a number, a name, a node's word, a guard.
+  const editable = studio.editable(target);
+  if (editable) parts.push(textField(editable));
+  // A node's port counts, each stepped by one `set_ports`.
+  if (target.kind === "box" && box.kind === "node" && box.word) {
+    const { inputs, outputs } = portCounts(box);
+    parts.push(
+      stepper("Inputs", inputs, (n) => studio.setPorts(box, n, outputs)),
+      stepper("Outputs", outputs, (n) => studio.setPorts(box, inputs, n)),
+    );
   }
   inspector.replaceChildren(...parts);
+}
+
+/** The inspector's field for a text, committing one `set_text` on Enter or when it is left. */
+function textField(target) {
+  const { text } = target;
+  const label = el("label", "field");
+  const input = transliterating(el("input"));
+  input.value = text.content;
+  const kind = text.kind === "number" ? "Number" : text.kind === "word" ? "Name" : "Text";
+  input.setAttribute("aria-label", kind);
+  const name = el("span", text.kind === "number" ? "name scrub" : "name", kind);
+  if (text.kind === "number") {
+    name.title = "Drag sideways to change it; Shift for steps of ten";
+    scrubbing(name);
+  }
+  // Enter commits, and the blur that follows mustn't commit again.
+  let done = false;
+  const commit = () => {
+    if (done) return;
+    done = true;
+    commitText(target, input.value);
+  };
+  input.addEventListener("keydown", (e) => {
+    e.stopPropagation();
+    if (e.key === "Enter") commit();
+    if (e.key === "Escape") input.value = text.content;
+  });
+  input.addEventListener("change", commit);
+  label.append(name, input);
+  return label;
+}
+
+/** A labelled count with − and + buttons, each calling `set(n)` with the new count. */
+function stepper(label, n, set) {
+  const row = el("div", "stepper");
+  const fewer = el("button", "quiet", "−");
+  const more = el("button", "quiet", "+");
+  const word = label.toLowerCase();
+  for (const [button, by, says] of [[fewer, -1, `One fewer ${word.slice(0, -1)}`], [more, 1, `One more ${word.slice(0, -1)}`]]) {
+    button.type = "button";
+    button.setAttribute("aria-label", says);
+    button.title = says;
+    button.addEventListener("click", () => set(n + by));
+  }
+  fewer.disabled = n === 0;
+  row.append(el("span", "name", label), fewer, el("span", "count", String(n)), more);
+  return row;
 }
 
 /** One `set_text` for a text's new content, from the inspector or in place. */
 function commitText(target, content) {
   closeInline();
-  if (content === target.text.content) return;
-  studio.edit({ kind: "set_text", at: cellOf(target.at), content });
+  studio.retext(target, content);
+}
+
+/** Opens the inspector's field on a text an edit just drew, focused, so typing renames it. */
+function nameField() {
+  showInspector();
+  const input = inspector.querySelector(".field input");
+  if (!input) return;
+  input.focus({ preventScroll: true });
+  input.select();
 }
 
 /** The inspector's number scrubs as the constant does: drag it sideways. */
@@ -1212,7 +1401,7 @@ let inline = null;
 /** Enter on a selected text: a field over its cells, committing one `set_text`. */
 function editInline(target) {
   closeInline();
-  const input = el("input", "inline-text keep");
+  const input = transliterating(el("input", "inline-text keep"));
   input.value = target.text.content;
   input.setAttribute("aria-label", "Edit the text");
   input.addEventListener("keydown", (e) => {
@@ -1257,8 +1446,8 @@ function closeMenu() {
 
 /**
  * Opens the palette at `at`. `mode` is `"feed"` with the dragged source
- * `from`, `"source"` with the unwired arrowhead `to` to feed, or
- * `"place"` with neither.
+ * `from`, `"source"` with the unwired arrowhead `to` to feed, `"inline"`
+ * on a wire to splice a call into, or `"place"` with neither.
  */
 function openMenu(at, { mode, from = null, to = null }) {
   closeMenu();
@@ -1268,7 +1457,8 @@ function openMenu(at, { mode, from = null, to = null }) {
   const choices = new Choices(offer(callees, mode));
   menu = el("div", "palette");
   const filter = el("input");
-  filter.placeholder = mode === "feed" ? "Feed it into…" : mode === "source" ? "Feed the arrowhead from…" : "Place…";
+  const prompts = { feed: "Feed it into…", source: "Feed the arrowhead from…", inline: "Splice into the wire…" };
+  filter.placeholder = prompts[mode] ?? "Place…";
   filter.setAttribute("role", "combobox");
   filter.setAttribute("aria-expanded", "true");
   filter.setAttribute("aria-autocomplete", "list");
@@ -1339,7 +1529,7 @@ function openMenu(at, { mode, from = null, to = null }) {
 
 /** Places a palette pick as one edit. */
 function placeChoice(c, at, how) {
-  studio.edit(placing(c, at, how));
+  studio.pick(placing(c, at, how));
 }
 
 /**
@@ -1802,12 +1992,14 @@ async function main() {
     changed: selectionChanged,
     mapped: carryValues,
     previewed: (text) => requestTrace(text),
-    palette: (at) => {
+    palette: (at, mode) => {
+      if (mode === "inline") return void openMenu(at, { mode });
       const box = boxAt(current(), at);
-      if (!box || box.kind === "node") return void showStatus("/ opens the palette on blank sheet inside a definition: move the cursor there.", "hint");
+      if (!box || box.kind === "node") return void showStatus("/ opens the palette on blank sheet inside a definition, or on a wire: move the cursor there.", "hint");
       openMenu(at, { mode: "place" });
     },
     editText: editInline,
+    name: nameField,
     help: () => toggleHelp(),
     zoom: zoomBy,
     gloss: () => layer.shown,
@@ -1816,6 +2008,7 @@ async function main() {
   // The page's own Shavian, marked in index.html, shows its readings too.
   layer.resay(document);
   trans = new Transliterator();
+  fieldTrans = new Transliterator();
   const entries = table();
   keys = new Set(["/", ...entries.flatMap(([k]) => [...k])]);
   $("keys").replaceChildren(

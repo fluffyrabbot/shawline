@@ -90,6 +90,8 @@
           <button type="button" id="zoom-in" class="quiet" aria-label="Zoom in" title="Zoom in (+)">+</button>
           <button type="button" id="zoom-fit" class="quiet" title="Fit the sheet in the pane (0)">Fit</button>
         </div>
+        <button type="button" id="box-tool" class="quiet" aria-pressed="false"
+          title="Box tool: drag on blank sheet to draw a box, a definition at top level or a switch inside one, and click a box's border to add a port. B draws a box from the cursor.">Box</button>
         <button type="button" id="help" class="quiet" aria-label="Keys" title="Every key the drawing takes (?)">?</button>
         <span id="trace-status" class="meta trace-status" role="status"></span>
         <label class="switch" title="Show the value each wire carried during the first call of its definition">
@@ -100,7 +102,7 @@
       </div>
       <div id="drawing" tabindex="0" role="application" aria-roledescription="drawing" aria-label="Drawing"
         aria-describedby="drawing-status"
-        title="Drag from a source to wire it, drag an arrowhead off to unwire it, drag a box to move it, double-click space for a node. Press ? for the keys."></div>
+        title="Drag from a source to wire it, drag an arrowhead off to unwire it, drag a box to move it, double-click space for a node or a wire to splice one in. The Box tool draws boxes and ports. Press ? for the keys."></div>
       <p id="drawing-status" class="drawing-status" role="status"></p>
       <p id="drawing-live" class="visually-hidden" aria-live="polite"></p>
       <div id="keys-help" class="keys-help" role="dialog" aria-label="Keys in the drawing" hidden></div>

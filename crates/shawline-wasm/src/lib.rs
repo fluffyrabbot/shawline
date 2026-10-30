@@ -17,10 +17,10 @@
 use js_sys::{Array, Object, Reflect};
 use shawline_doc::TRACE_STEPS;
 use shawline_doc::position::{self, Encoding};
-use shawline_edit::{Anchor, Axis, Edit, Insertion, NewSource, Refusal, RefusalKind};
+use shawline_edit::{Anchor, Axis, BoxKind, Edit, Insertion, NewSource, Refusal, RefusalKind};
 use shawline_grid::{Diagnostic, Dir, Pos, Rect};
 use shawline_render::{Options, SCALE, Theme};
-use shawline_shape::{Diagram, TextKind};
+use shawline_shape::{Diagram, PortKind, Text, TextKind};
 use wasm_bindgen::prelude::*;
 
 #[wasm_bindgen]
@@ -118,23 +118,81 @@ impl Doc {
             .collect()
     }
 
-    /// Every box, for hit-testing: an array of `{ top, left, bottom, right,
-    /// kind }` (inclusive cell rectangles, `kind` `"definition"`,
-    /// `"switch"` or `"node"`), empty when the text has grid errors.
+    /// Every box, in row-major order of its top-left corner, for
+    /// hit-testing and drawing boxes, ports and arms: an array of `{ top,
+    /// left, bottom, right, kind, parent, word, title, gap, ports,
+    /// dividers }`. Empty when the text has grid errors.
+    ///
+    /// - `top`…`right` is the inclusive cell rectangle, and `kind` is
+    ///   `"definition"`, `"switch"` or `"node"` (`shawline_edit::box_kind`).
+    ///   The square box `place_switch` draws is a `"node"` with no `word`
+    ///   until it has a selector or a divider.
+    /// - `parent` is the index in this array of the innermost box around
+    ///   it, or `null` at top level.
+    /// - `word` is a node's word and `title` the text in its top border's
+    ///   gap (a definition's `·`-name, a switch's first guard), each a text
+    ///   as [`Doc::texts`] gives it, or `null`. `gap` is that gap's cells,
+    ///   `{ col, span }`, or `null`.
+    /// - `ports` are its border's ports in row-major order, each `{ row,
+    ///   col, side, kind, name }`: `side` is `"north"`, `"east"`, `"south"`
+    ///   or `"west"`, `kind` is `"arrowhead"` or `"tee"`, and `name` is a
+    ///   definition port's name as a text, or `null`.
+    /// - `dividers` are a switch's dividers top to bottom, each `{ row,
+    ///   gap, guard }`, with `guard` the text in its gap, or `null` above a
+    ///   default arm.
     pub fn boxes(&self) -> Array {
         let Some(diagram) = self.0.diagram() else { return Array::new() };
+        // The text recognition put in box `b`'s top border or in its
+        // divider on `row`.
+        let titled = |b: usize, row: usize| -> JsValue {
+            let t = diagram.texts.iter().find(|t| {
+                t.pos.row == row && (t.title_of == Some(b) || t.divider_of == Some(b))
+            });
+            t.map_or(JsValue::NULL, |t| text_object(t).into())
+        };
         diagram
             .boxes
             .iter()
-            .map(|b| {
+            .enumerate()
+            .map(|(i, b)| {
                 let corner = Pos::new(b.rect.top, b.rect.left);
-                let kind = shawline_edit::box_kind(&self.0, corner).map_or("node", |k| k.name());
+                let kind = shawline_edit::box_kind(&self.0, corner).unwrap_or(BoxKind::Node);
                 let o = Object::new();
                 set(&o, "top", &(b.rect.top as u32).into());
                 set(&o, "left", &(b.rect.left as u32).into());
                 set(&o, "bottom", &(b.rect.bottom as u32).into());
                 set(&o, "right", &(b.rect.right as u32).into());
-                set(&o, "kind", &kind.into());
+                set(&o, "kind", &kind.name().into());
+                set(&o, "parent", &b.parent.map_or(JsValue::NULL, |p| (p as u32).into()));
+                let word = (kind == BoxKind::Node)
+                    .then(|| diagram.texts.iter().find(|t| t.owner == Some(i) && t.kind == TextKind::Word))
+                    .flatten();
+                set(&o, "word", &word.map_or(JsValue::NULL, |t| text_object(t).into()));
+                set(&o, "title", &titled(i, b.rect.top));
+                set(&o, "gap", &b.title_gap.map_or(JsValue::NULL, |gap| columns(gap).into()));
+                let names = self.port_names(b.rect);
+                let ports = b.ports.iter().map(|p| {
+                    let o = cell_object(p.pos);
+                    set(&o, "side", &side(p.side).into());
+                    let kind = match p.kind {
+                        PortKind::Arrow => "arrowhead",
+                        PortKind::Tee => "tee",
+                    };
+                    set(&o, "kind", &kind.into());
+                    let name = names.iter().find(|(arrow, _)| *arrow == p.pos).map(|(_, name)| *name);
+                    let name = name.and_then(|at| diagram.texts.iter().find(|t| t.pos == at));
+                    set(&o, "name", &name.map_or(JsValue::NULL, |t| text_object(t).into()));
+                    JsValue::from(o)
+                });
+                set(&o, "ports", &ports.collect::<Array>());
+                let dividers = b.dividers.iter().map(|d| {
+                    let o = Object::new();
+                    set(&o, "row", &(d.row as u32).into());
+                    set(&o, "gap", &d.gap.map_or(JsValue::NULL, |gap| columns(gap).into()));
+                    set(&o, "guard", &titled(i, d.row));
+                    JsValue::from(o)
+                });
+                set(&o, "dividers", &dividers.collect::<Array>());
                 JsValue::from(o)
             })
             .collect()
@@ -147,23 +205,7 @@ impl Doc {
     /// delimiters. Empty when the text has grid errors.
     pub fn texts(&self) -> Array {
         let Some(diagram) = self.0.diagram() else { return Array::new() };
-        diagram
-            .texts
-            .iter()
-            .map(|t| {
-                let kind = match t.kind {
-                    TextKind::Word => "word",
-                    TextKind::Number => "number",
-                    TextKind::Literal => "literal",
-                    TextKind::Comment => "comment",
-                };
-                let o = cell_object(t.pos);
-                set(&o, "span", &(t.width as u32).into());
-                set(&o, "kind", &kind.into());
-                set(&o, "content", &t.content.as_str().into());
-                JsValue::from(o)
-            })
-            .collect()
+        diagram.texts.iter().map(|t| JsValue::from(text_object(t))).collect()
     }
 
     /// Every source and sink, for dragging wires: `{ sources, sinks }`,
@@ -284,6 +326,50 @@ impl Doc {
     }
 }
 
+impl Doc {
+    /// The arrowhead and the name's first cell of each port of the
+    /// definition drawn at `rect`, as the syntax tree reads them; empty for
+    /// any other box.
+    fn port_names(&self, rect: Rect) -> Vec<(Pos, Pos)> {
+        let Some(sheet) = self.0.sheet() else { return Vec::new() };
+        let Some(def) = sheet.definitions.iter().find(|d| d.rect == rect) else { return Vec::new() };
+        def.inputs.iter().chain(&def.outputs).map(|p| (p.arrow, p.name.at)).collect()
+    }
+}
+
+/// A text as [`Doc::texts`] gives it: `{ row, col, span, kind, content }`.
+fn text_object(t: &Text) -> Object {
+    let kind = match t.kind {
+        TextKind::Word => "word",
+        TextKind::Number => "number",
+        TextKind::Literal => "literal",
+        TextKind::Comment => "comment",
+    };
+    let o = cell_object(t.pos);
+    set(&o, "span", &(t.width as u32).into());
+    set(&o, "kind", &kind.into());
+    set(&o, "content", &t.content.as_str().into());
+    o
+}
+
+/// Columns `start..end` of a gap in a border, as `{ col, span }`.
+fn columns((start, end): (usize, usize)) -> Object {
+    let o = Object::new();
+    set(&o, "col", &(start as u32).into());
+    set(&o, "span", &(end.saturating_sub(start) as u32).into());
+    o
+}
+
+/// A box's side as the page names it.
+fn side(d: Dir) -> &'static str {
+    match d {
+        Dir::N => "north",
+        Dir::E => "east",
+        Dir::S => "south",
+        Dir::W => "west",
+    }
+}
+
 /// Checks and runs `src`, for the runner worker. Returns `{ outputs, error,
 /// at, diagnostics }`: `outputs` holds main's outputs as printed lines (SPEC
 /// §9), `error` is the runtime error as `error ROW:COL CODE: message` (or
@@ -353,8 +439,11 @@ pub fn trace(src: &str) -> Object {
 // - `{ kind: "move", corner, dr, dc }`
 // - `{ kind: "connect", from, to }`, `{ kind: "rewire", from, to }`
 // - `{ kind: "remove_wire", at }`, `{ kind: "disconnect", at }`,
-//   `{ kind: "remove_node", at }`, `{ kind: "remove_text", at }`
-// - `{ kind: "place_node", corner, word, inputs, outputs }`
+//   `{ kind: "remove_node", at }`, `{ kind: "remove_text", at }`,
+//   `{ kind: "remove_port", at }`, `{ kind: "remove_arm", at }`,
+//   `{ kind: "remove_box", at }`
+// - `{ kind: "place_node", corner, word, inputs, outputs }`,
+//   `{ kind: "set_ports", corner, inputs, outputs }`
 // - `{ kind: "place_connected", at, word, inputs, outputs, from }`
 // - `{ kind: "feed", to, source }`, where `source` is `{ kind: "constant",
 //   content }` or `{ kind: "node", word, inputs, outputs }`
@@ -468,6 +557,14 @@ fn edit_of(value: &JsValue) -> Result<Edit, String> {
         "add_port" => Edit::AddPort { at: pos(value, "at")?, name: optional(value, "name")? },
         "add_arm" => Edit::AddArm { at: pos(value, "at")?, guard: optional(value, "guard")? },
         "place_inline" => Edit::PlaceInline { at: pos(value, "at")?, word: string(value, "word")? },
+        "remove_port" => Edit::RemovePort(pos(value, "at")?),
+        "remove_arm" => Edit::RemoveArm(pos(value, "at")?),
+        "remove_box" => Edit::RemoveBox(pos(value, "at")?),
+        "set_ports" => Edit::SetPorts {
+            corner: pos(value, "corner")?,
+            inputs: count(value, "inputs")?,
+            outputs: count(value, "outputs")?,
+        },
         other => return Err(format!("no edit {other}")),
     };
     Ok(edit)
