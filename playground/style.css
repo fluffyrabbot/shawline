@@ -404,6 +404,9 @@ button[aria-pressed="true"] { background: var(--wash); border-color: var(--wire)
   position: sticky;
   bottom: 8px;
   z-index: 1;
+  /* It sits over the drawing's lower rows, and holds only words: a click
+     there, the second of a double-click say, is the drawing's. */
+  pointer-events: none;
   background: color-mix(in srgb, var(--border) 6%, var(--background));
 }
 .drawing-status.refused { color: var(--text); border-left-color: var(--error); }

@@ -444,7 +444,12 @@ function zoomTo(next, pointer) {
 function zoomBy(how) {
   if (how === "fit") {
     if (!unit) return;
-    return void zoomTo(fitZoom(unit.size(), { width: drawing.clientWidth, height: drawing.clientHeight }));
+    zoomTo(fitZoom(unit.size(), { width: drawing.clientWidth, height: drawing.clientHeight }));
+    // The pane scrolls past the sheet onto blank sheet, so a fitted sheet
+    // is shown from its top-left corner, wherever the pane was.
+    drawing.scrollLeft = 0;
+    drawing.scrollTop = 0;
+    return;
   }
   zoomTo(how === "in" ? zoom * ZOOM_STEP : zoom / ZOOM_STEP);
 }
@@ -1352,11 +1357,13 @@ function textField(target) {
     name.title = "Drag sideways to change it; Shift for steps of ten";
     scrubbing(name);
   }
-  // Enter commits, and the blur that follows mustn't commit again.
-  let done = false;
+  // Enter commits, and the blur that follows mustn't commit again. A
+  // refused value stays in the field to be corrected, and Enter tries it
+  // again once it has changed.
+  let tried = text.content;
   const commit = () => {
-    if (done) return;
-    done = true;
+    if (input.value === tried) return;
+    tried = input.value;
     commitText(target, input.value);
   };
   input.addEventListener("keydown", (e) => {
