@@ -109,7 +109,7 @@ fn new_arrowhead(doc: &Doc, edited: &Edited) -> Option<Pos> {
     let model = Model::new(grid, diagram);
     let mut fresh: Vec<Pos> = Vec::new();
     for (b, shape) in diagram.boxes.iter().enumerate() {
-        let before = edited.map.boxes.iter().position(|&m| m == Some(b)).map_or(0, |o| had[o]);
+        let before = edited.map.boxes.iter().position(|&m| m == Some(b)).and_then(|o| had.get(o)).copied().unwrap_or(0);
         let sinks = shape.ports.iter().filter_map(|p| model.sink(p.pos).ok()).skip(before);
         fresh.extend(sinks.filter(|s| model.wire_of(s.term()).is_none()).map(|s| s.at));
     }

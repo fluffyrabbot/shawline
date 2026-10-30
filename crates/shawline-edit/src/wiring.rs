@@ -694,6 +694,11 @@ fn search_from_sink(wiring: &Wiring, sink: &Sink) -> Result<Found, Miss> {
 
 pub(crate) fn connect(doc: &Doc, from: Pos, to: Pos) -> Result<Doc, Refusal> {
     let sheets = Sheets::read(doc, to)?;
+    if sheets.entity(from).is_none()
+        && let Some(extended) = extend(&sheets, from, to)
+    {
+        return extended;
+    }
     let source = sheets.entity(from).ok_or_else(|| no_source(from))?;
     let sink = sheets.endpoint(to).ok_or_else(|| no_sink(to))?;
     let (grid, diagram) = sheets.canon();
@@ -737,6 +742,101 @@ pub(crate) fn connect(doc: &Doc, from: Pos, to: Pos) -> Result<Doc, Refusal> {
     let named = |t| model.named(t).expect("sources and sinks are ports or texts");
     expected.connect(named(source.term), named(sink.term()));
     finish(canvas.render(), diagram, to, "the wire can't go there", |map| expected.relabel(map))
+}
+
+/// The router's view while extending a dangling end to a sink: [`Wiring`]'s
+/// ground, ending at the dangling end, entered from the cell it faces.
+struct Extension<'a> {
+    wiring: Wiring<'a>,
+    end: Pos,
+    facing: Dir,
+}
+
+impl Terrain for Extension<'_> {
+    fn cell(&self, p: Pos) -> Cell {
+        // The cell the end faces is kept clear for it, and it is the way in.
+        if Some(p) == self.end.step(self.facing) && self.wiring.model.grid.get(p) == ' ' {
+            return Cell::Free;
+        }
+        self.wiring.cell(p)
+    }
+
+    fn extra(&self, p: Pos) -> u32 {
+        self.wiring.extra(p)
+    }
+
+    fn goal(&self, p: Pos, heading: Dir) -> Option<u32> {
+        (p == self.end && heading == self.facing.opposite()).then_some(0)
+    }
+
+    fn bend_extra(&self, p: Pos) -> u32 {
+        self.wiring.bend_extra(p)
+    }
+}
+
+/// [`connect`] from a dangling end at given cell `from` (`Y003`): the wire
+/// runs on from that end to sink `to`, so the end is no longer loose.
+/// `None` when `from` is no dangling end, for `connect` to refuse it as it
+/// refuses any other cell that isn't a source.
+fn extend(sheets: &Sheets, from: Pos, to: Pos) -> Option<Result<Doc, Refusal>> {
+    let (g, d) = sheets.given();
+    let dangling = |d: &Diagram, g: &Grid, p: Pos| {
+        let model = Model::new(g, d);
+        d.wires.iter().enumerate().find_map(|(w, wire)| {
+            let e = wire.ends.iter().find(|e| e.pos == p && e.kind == EndKind::Open)?;
+            let loose = model.terms[w].contains(&Term::Loose(e.pos, e.facing, false));
+            loose.then_some((w, *e))
+        })
+    };
+    dangling(d, g, from)?;
+    let (grid, diagram) = sheets.canon();
+    let end_at = sheets.place(from).unwrap_or(from);
+    let refuse = |kind, why: &str| Refusal::new(to, kind, why);
+    let Some((w, end)) = dangling(diagram, grid, end_at) else {
+        return Some(Err(refuse(RefusalKind::Unreadable, "format the sheet first, then connect this end")));
+    };
+    let model = Model::new(grid, diagram);
+    let source = model.terms[w].iter().find_map(|&t| match t {
+        Term::Port(p, Dir::W) | Term::Text(p, Dir::W) => model.source(p).ok().filter(|s| s.term == t),
+        _ => None,
+    });
+    let Some(source) = source else {
+        return Some(Err(refuse(RefusalKind::Target, "this wire has no source to connect from")));
+    };
+    let result = (|| {
+        let sink = sheets.endpoint(to).ok_or_else(|| no_sink(to))?;
+        let sink = model.sink(sink).map_err(here(to))?;
+        if model.wire_of(sink.term()).is_some() {
+            return Err(refuse(RefusalKind::Target, "this arrowhead already has a wire; disconnect it first"));
+        }
+        if source.scope != sink.scope {
+            return Err(refuse(RefusalKind::Target, "this wire can't reach that arrowhead: they're in different boxes or arms"));
+        }
+        let wiring = Wiring::new(&model, &source, Some(&sink));
+        let terrain = Extension { wiring, end: end.pos, facing: end.facing };
+        let start = Start { pos: sink.at, heading: Some(sink.dir.opposite()), straight: true };
+        let found = router::search(&terrain, start, &mut { BUDGET }).map_err(|miss| {
+            Refusal::new(to, miss.kind(), "no free path from this end to the arrowhead; try Make room")
+        })?;
+        let mut canvas = Canvas::new(grid);
+        draw(&mut canvas, &terrain.wiring, &found.path);
+        let mut expected = Structure::of(grid, diagram);
+        let loose = Structure::wire(grid, diagram, w)
+            .terms
+            .into_iter()
+            .find(|t| t.facing == end.facing && matches!(t.end, shawline_shape::structure::End::Open(_)));
+        let named = model.named(source.term).expect("a source is a port or a text");
+        let sink_term = model.named(sink.term()).expect("a sink is a port or an inline node's input");
+        if let (Some(part), Some(loose)) = (expected.wires.iter_mut().find(|p| p.terms.contains(&named)), loose)
+            && let Some(k) = part.terms.iter().position(|t| *t == loose)
+        {
+            part.terms[k] = sink_term;
+            part.terms.sort();
+        }
+        expected.wires.sort();
+        finish(canvas.render(), diagram, to, "the wire can't go there", |map| expected.relabel(map))
+    })();
+    Some(result)
 }
 
 /// Routes a new branch from `sink` back to `source`'s wire, joining it

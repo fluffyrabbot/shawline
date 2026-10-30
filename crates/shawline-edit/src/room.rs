@@ -41,7 +41,7 @@ pub(crate) fn make_room(doc: &Doc, edit: &Edit) -> Result<Roomed, Refusal> {
     let canon = sheets.doc();
     let diagram = mapped::read(canon).1;
 
-    for candidate in candidates(diagram, &edit, at).into_iter().take(ATTEMPTS) {
+    for candidate in candidates(canon, diagram, &edit, at).into_iter().take(ATTEMPTS) {
         if let Some((edited, inserted)) = attempt(canon, diagram, &edit, &candidate) {
             let edited = Edited { tidied: sheets.tidied(), ..edited };
             return Ok(Roomed { edited, inserted });
@@ -102,8 +102,35 @@ fn stays_put(diagram: &Diagram, edited: &Edited, i: usize, dr: isize, dc: isize)
 }
 
 /// The insertions to try, in order.
-fn candidates(diagram: &Diagram, edit: &Edit, at: Pos) -> Vec<Vec<Insertion>> {
+fn candidates(canon: &Doc, diagram: &Diagram, edit: &Edit, at: Pos) -> Vec<Vec<Insertion>> {
     let mut out: Vec<Vec<Insertion>> = Vec::new();
+    // Past what the edit widens: an extracted call is wider than a node
+    // for a shorter word, and a default arm's stubs join right of its
+    // switch.
+    let beyond = match edit {
+        Edit::Extract { picks, name } => crate::extract::landing(canon, picks, name).map(|(parent, call, span)| {
+            if let Some(grow) = overshoot(diagram, parent, span.top, call) {
+                out.push(grow);
+            }
+            let wider = call.right.saturating_sub(span.right);
+            let taller = call.bottom.saturating_sub(span.bottom);
+            (Pos::new(span.top, span.right + 1), Pos::new(span.bottom + 1, span.left), wider, taller)
+        }),
+        Edit::AddDefaultArm(corner) => diagram
+            .boxes
+            .iter()
+            .find(|b| (b.rect.top, b.rect.left) == (corner.row, corner.col))
+            .map(|b| (Pos::new(b.rect.top, b.rect.right + 1), Pos::new(b.rect.bottom, b.rect.left), 0, 0)),
+        _ => None,
+    };
+    if let Some((right, below, wider, taller)) = beyond {
+        for count in [wider, 1, 2, 3].into_iter().filter(|&c| c > 0) {
+            out.push(vec![Insertion { axis: Axis::Column, at: right, count }]);
+        }
+        if taller > 0 {
+            out.push(vec![Insertion { axis: Axis::Row, at: below, count: taller }]);
+        }
+    }
     let moved = match *edit {
         Edit::Move { corner, dr, dc } => diagram
             .boxes

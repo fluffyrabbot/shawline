@@ -26,7 +26,7 @@ use crate::drawing::{is_word, items, put, rows, rule, write};
 use crate::mapped::{self, Read};
 use crate::model::{Model, Scope, Sink, Term};
 use crate::sheet::{across, glyph};
-use crate::wiring::{Canvas, cut_branch, erase_wire, read};
+use crate::wiring::{Canvas, cut_branch, erase_wire, node_rect, read};
 use crate::{BoxKind, Blockage, Edited, Extracted, PORT_NAMES, Refusal, RefusalKind, connect, place_node};
 
 /// Wire cells between the input names and the pick, and between the pick
@@ -84,6 +84,31 @@ pub(crate) fn extract(doc: &Doc, picks: &[Pos], name: &str) -> Result<Extracted,
     }
     let edited = Edited { doc: done, map, tidied: sheets.tidied() };
     Ok(Extracted { edited, definition: Pos::new(defined.top, 0), call })
+}
+
+/// Where [`extract`] on canonical `doc` would put the call, for
+/// [`crate::make_room`]: the box it goes in, its rectangle, and the
+/// rectangle of the pick's own cells.
+pub(crate) fn landing(doc: &Doc, picks: &[Pos], name: &str) -> Option<(usize, Rect, Rect)> {
+    let sheets = Sheets::read(doc, *picks.first()?).ok()?;
+    let (grid, diagram) = sheets.canon();
+    let model = Model::new(grid, diagram);
+    let pick = Pick::read(&sheets, &model, picks).ok()?;
+    let flows = Flows::of(&model, &pick).ok()?;
+    let lone = match pick.boxes[..] {
+        [b] if pick.texts.is_empty() && model.kind(b) == BoxKind::Node => Some(b),
+        _ => None,
+    };
+    let corner = lone.map_or_else(|| pick.corner(&model), |b| sheets.corner(b));
+    let call = node_rect(corner, name, flows.inputs.len() as u16, flows.outputs.len() as u16);
+    let cells = pick.cells(diagram);
+    let span = Rect {
+        top: cells.iter().map(|p| p.row).min()?,
+        left: cells.iter().map(|p| p.col).min()?,
+        bottom: cells.iter().map(|p| p.row).max()?,
+        right: cells.iter().map(|p| p.col).max()?,
+    };
+    Some((pick.scope.0, call, span))
 }
 
 // ---------------------------------------------------------------------------
@@ -169,7 +194,10 @@ impl Pick {
     /// Every box the pick moves: the picked ones and the boxes in them.
     fn moved_boxes(&self, diagram: &Diagram) -> Vec<usize> {
         (0..diagram.boxes.len())
-            .filter(|&b| self.rects(diagram).any(|r| r.encloses(&diagram.boxes[b].rect)))
+            .filter(|&b| {
+                let rect = diagram.boxes[b].rect;
+                self.rects(diagram).any(|r| r == rect || r.encloses(&rect))
+            })
             .collect()
     }
 
