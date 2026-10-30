@@ -178,4 +178,64 @@ retext
   set_text 45:2 7 ok c1aedfc66b16
 build
   place_text 0:0 ※ 𐑰𐑝𐑩𐑯 𐑪𐑛 ok 37b3e0d2e8cd
-  place_definition 2:0-18:46 𐑰𐑝𐑩𐑯 refused unsupported 2:0
+  place_definition 2:0-18:46 𐑰𐑝𐑩𐑯 ok dd1aaccb0cbe
+  add_port 5:0 𐑯 ok d324f4903b72
+  add_port 13:46 𐑬 ok e647968e7175
+  place_definition 20:0-36:46 𐑪𐑛 ok 0e7ce306a92c
+  add_port 23:0 𐑯 ok b3ece92b29c5
+  add_port 31:46 𐑬 ok b0dd65f028f1
+  place_definition 38:0-48:22 𐑥𐑱𐑯 ok 57a0ff4ff51e
+  add_port 41:22 𐑢𐑳𐑯 ok 670918ba753a
+  add_port 45:22 𐑑𐑵 ok dc1b2f20574a
+  place_node 4:14 𐑦 2 1 ok da924c5994da
+  place_switch 9:9-16:38 1 ok 3464bf795d45
+  add_port 9:20 ok a6a197d8f023
+  add_port 10:38 ok 2c9ecb987ab4
+  add_port 13:9 ok dcc848be0e78
+  add_port 13:38 ok 7f03e025170d
+  add_arm 11:9 ok 086bb0d9e0ad
+  place_node 12:16 𐑚 2 1 ok 2c526870501b
+  place_node 12:25 𐑪𐑛 1 1 ok d2cb594dde51
+  place_node 22:14 𐑦 2 1 ok 0f544544156a
+  place_switch 27:9-34:38 1 ok 90a4d1270ba8
+  add_port 27:20 ok 6766081782bb
+  add_port 28:38 ok ea34e7842cdd
+  add_port 31:9 ok e84b8211b4fc
+  add_port 31:38 ok be1ed0f23ccb
+  add_arm 29:9 ok 816dc96e2eed
+  place_node 30:16 𐑚 2 1 ok 19b965379ef8
+  place_node 30:25 𐑰𐑝𐑩𐑯 1 1 ok 84bd66ba7eda
+  place_node 40:8 𐑰𐑝𐑩𐑯 1 1 ok c3ebd948a2dc
+  place_node 44:8 𐑪𐑛 1 1 ok c53d1c75d452
+  place_text 6:11 0 ok 962453843af4
+  place_text 10:11 1 ok fca9bd8427ed
+  place_text 14:13 1 ok 0e91670df7f4
+  place_text 24:11 0 ok e0fa57a3ea61
+  place_text 28:11 0 ok 1cdd7ab83479
+  place_text 32:13 1 ok ff7e1fdbe961
+  place_text 41:3 7 ok d8cc4cfcc20c
+  place_text 45:3 7 ok d992a00b1555
+  connect 5:0 5:14 ok bb23e271686d
+  connect 6:11 6:14 ok afd03745ae44
+  connect 5:18 9:20 ok b8246bf0f5c3
+  connect 10:11 10:38 ok e75af89045d6
+  connect 5:0 13:9 ok e27a930cecc4
+  connect 13:9 13:16 ok 3d51f429e807
+  connect 13:20 13:25 ok 614e10827d0e
+  connect 13:30 13:38 ok 2762f3cd2972
+  connect 10:38 13:46 ok 927741ba8587
+  connect 14:13 14:16 ok cf3ccd0ffd85
+  connect 23:0 23:14 ok 76cd99ab7534
+  connect 24:11 24:14 ok 22c207aae6f0
+  connect 23:18 27:20 ok d79d07d2571b
+  connect 28:11 28:38 ok bd396db5759b
+  connect 23:0 31:9 ok 2a996d4e34a9
+  connect 31:9 31:16 ok aae6ec805d4f
+  connect 31:20 31:25 ok b23e50bc5d00
+  connect 31:32 31:38 ok 0317aa48f080
+  connect 28:38 31:46 ok 330ccea1425d
+  connect 32:13 32:16 ok 1b4f97ba025c
+  connect 41:3 41:8 ok a06750a71224
+  connect 41:15 41:22 ok 6bade6bbc089
+  connect 45:3 45:8 ok a3023d977b03
+  connect 45:13 45:22 ok 07dcd39cbc14

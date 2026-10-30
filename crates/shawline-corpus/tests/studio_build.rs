@@ -4,9 +4,6 @@
 //! Every intermediate state must be canonical and may gain only codes from
 //! `WHILE_BUILDING`. The final sheet must have the original's codes, output
 //! and wiring (each source cell with its sink cells).
-//!
-//! Red until P10's wave 2 lands the edits that draw boxes, ports, arms and
-//! inline nodes, so it is ignored until then: run it with `--ignored`.
 
 use std::collections::BTreeSet;
 use std::fs;
@@ -31,7 +28,8 @@ use shawline_grid::Pos;
 ///   as in `studio_sequences`' `WHILE_UNWIRED`.
 ///
 /// Measured at `b2a59e1`, before the edits existed, over states painted
-/// from each program's own cells step by step; re-measured at the gate.
+/// from each program's own cells step by step, and confirmed at the wave 2
+/// gate: the real run gains exactly these.
 const WHILE_BUILDING: &[&str] = &["C005", "W002", "Y002", "Y011", "Y012", "Y016", "Y019"];
 
 fn codes(doc: &Doc) -> BTreeSet<String> {
@@ -43,7 +41,6 @@ fn wiring(doc: &Doc) -> BTreeSet<(Pos, Vec<Pos>)> {
 }
 
 #[test]
-#[ignore = "red until P10 wave 2"]
 fn studio_build() {
     let out = STAGES.iter().find(|s| s.name == "out").unwrap().run;
     let mut failures = Vec::new();

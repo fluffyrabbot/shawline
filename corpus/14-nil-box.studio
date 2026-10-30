@@ -20,4 +20,7 @@ insert 2:0
   delete column 2:9 1 ok 1ed516787413
 build
   place_text 0:0 ※ 𐑯𐑦𐑤 𐑚𐑪𐑒𐑕 ok cc15f18f8831
-  place_definition 2:0-8:19 𐑥𐑱𐑯 refused unsupported 2:0
+  place_definition 2:0-8:19 𐑥𐑱𐑯 ok 3f58c053399e
+  add_port 5:19 𐑬 ok f743b64de20b
+  place_node 4:4 𐑯𐑦𐑤 0 1 ok f78858e6a061
+  connect 5:10 5:19 ok 1ed516787413

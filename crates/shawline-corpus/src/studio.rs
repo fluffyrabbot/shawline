@@ -296,8 +296,11 @@ fn collect_constants(graph: &Graph, out: &mut Vec<Pos>) {
 /// 3. the boxes inside definitions: a node, or a switch followed by its
 ///    selector and through-ports and a divider per arm after the first;
 /// 4. constants and comments inside boxes;
-/// 5. every connection, sinks in row-major order, with each inline node's
-///    wire connected straight through;
+/// 5. every connection: first each inline chain's, from its first source
+///    straight through to its sinks, then the rest, each group with sinks
+///    in row-major order. A branch that fans out beside a chain then tees
+///    off the chain's wire, which leaves the chain's stretch straight for
+///    its nodes;
 /// 6. inline nodes, each placed on that wire.
 pub fn build(src: &str, sheet: &Sheet) -> Vec<Edit> {
     let grid = Grid::parse(src).expect("a valid program");
@@ -388,14 +391,14 @@ pub fn build(src: &str, sheet: &Sheet) -> Vec<Edit> {
         }
         from
     };
-    let mut connects: Vec<(Pos, Pos)> = all
+    let mut connects: Vec<(bool, Pos, Pos)> = all
         .iter()
         .flat_map(|l| l.to.iter().map(move |&to| (l.from, to)))
         .filter(|&(_, to)| !inline.iter().any(|n| n.input == to))
-        .map(|(from, to)| (resolve(from), to))
+        .map(|(from, to)| (!inline.iter().any(|n| n.output == from), resolve(from), to))
         .collect();
-    connects.sort_by_key(|&(_, to)| to);
-    steps.extend(connects.into_iter().map(|(from, to)| Edit::Connect { from, to }));
+    connects.sort_by_key(|&(later, _, to)| (later, to));
+    steps.extend(connects.into_iter().map(|(_, from, to)| Edit::Connect { from, to }));
 
     // 6. Inline nodes.
     inline.sort_by_key(|n| n.at);

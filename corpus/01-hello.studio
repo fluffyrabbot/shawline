@@ -12,4 +12,7 @@ insert 2:0
   delete column 2:10 1 ok 9f3fc559d89f
 build
   place_text 0:0 ※ 𐑣𐑧𐑤𐑴 ok d031c30981d1
-  place_definition 2:0-6:20 𐑥𐑱𐑯 refused unsupported 2:0
+  place_definition 2:0-6:20 𐑥𐑱𐑯 ok abcb4d9cce22
+  add_port 4:20 𐑬 ok 07932e99b6ac
+  place_text 4:2 «𐑣𐑧𐑤𐑴 𐑢𐑻𐑤𐑛» ok 2a4016bc45d5
+  connect 4:2 4:20 ok 9f3fc559d89f

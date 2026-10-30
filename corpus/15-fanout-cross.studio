@@ -16,4 +16,9 @@ retext
   set_text 2:2 20 ok da4b621c42f0
   set_text 2:1 1 ok fae102cac20f
 build
-  place_definition 0:0-9:22 𐑥𐑱𐑯 refused unsupported 0:0
+  place_definition 0:0-9:22 𐑥𐑱𐑯 ok 5324af718be4
+  add_port 6:22 𐑩 ok 03dba6f22ccd
+  add_port 7:22 𐑚 ok c36f859e2409
+  place_text 2:2 1 ok 1d104b3f637e
+  connect 2:2 6:22 ok 9466815b25ba
+  connect 2:2 7:22 ok 9cfea41f00dc

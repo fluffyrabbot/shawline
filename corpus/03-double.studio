@@ -51,4 +51,16 @@ retext
   set_text 14:1 21 ok 34cd867b67e3
 build
   place_text 0:0 ※ 𐑛𐑳𐑚𐑩𐑤 ok afcc81eb4753
-  place_definition 2:0-9:22 𐑛𐑳𐑚𐑩𐑤 refused unsupported 2:0
+  place_definition 2:0-9:22 𐑛𐑳𐑚𐑩𐑤 ok d67d9f8aadaa
+  add_port 5:0 𐑯 ok e10ce69c8e53
+  add_port 5:22 𐑬 ok b43fe36b9627
+  place_definition 11:0-17:22 𐑥𐑱𐑯 ok 66b4c39250a3
+  add_port 14:22 𐑬 ok bc3217fe7c30
+  place_node 4:10 𐑐 2 1 ok 34cb1e534625
+  place_node 13:8 𐑛𐑳𐑚𐑩𐑤 1 1 ok 852295d006d2
+  place_text 14:2 21 ok a63dd3c6f47d
+  connect 5:0 5:10 ok dfe15ad36580
+  connect 5:14 5:22 ok 1e5ce423908e
+  connect 5:0 6:10 ok 07940300a9eb
+  connect 14:2 14:8 ok 938e011b996e
+  connect 14:16 14:22 ok 6f8b02b839bf

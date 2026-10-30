@@ -80,4 +80,25 @@ retext
   set_text 5:27 1 ok b47ff9a18ce8
 build
   place_text 0:0 ※ 𐑤𐑦𐑕𐑑 ok 2d55ad60b1d0
-  place_definition 2:0-13:50 𐑥𐑱𐑯 refused unsupported 2:0
+  place_definition 2:0-13:50 𐑥𐑱𐑯 ok d6b37cb35984
+  add_port 5:50 𐑢𐑳𐑯 ok f5c472f0fe7d
+  add_port 9:50 𐑑𐑵 ok 17ad0d721891
+  add_port 10:50 𐑔𐑮𐑰 ok 3a228d004129
+  place_node 4:8 𐑟 2 1 ok 3804d8e3355c
+  place_node 4:20 𐑟 2 1 ok c70e6be8697a
+  place_node 4:32 𐑟 2 1 ok b6565aa4c331
+  place_node 8:40 𐑕 1 2 ok a832a60b8a72
+  place_text 5:4 3 ok 336abb0f5892
+  place_text 5:16 2 ok 19eedc7aeb1f
+  place_text 5:28 1 ok f75d8524ae44
+  place_text 6:2 𐑯𐑦𐑤 ok 240f8dca80ef
+  connect 5:4 5:8 ok 36846508479f
+  connect 5:16 5:20 ok 553a351efbf4
+  connect 5:28 5:32 ok 0992149d88cd
+  connect 5:36 5:50 ok 0a6da822c274
+  connect 6:2 6:8 ok 2156f97b4e3f
+  connect 5:12 6:20 ok c6fdda63bda2
+  connect 5:24 6:32 ok 8416fcd9292a
+  connect 5:36 9:40 ok 5f2ed6fcd53c
+  connect 9:44 9:50 ok eb1e9655c9b1
+  connect 10:44 10:50 ok b47ff9a18ce8

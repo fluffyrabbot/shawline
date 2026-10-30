@@ -119,4 +119,42 @@ retext
   set_text 26:2 5 ok 1d0ee8b1c254
 build
   place_text 0:0 ※ 𐑨𐑚𐑕𐑩𐑤𐑵𐑑 ok 52479497f34b
-  place_definition 2:0-18:34 𐑨𐑚𐑕 refused unsupported 2:0
+  place_definition 2:0-18:34 𐑨𐑚𐑕 ok 20d37110b3e2
+  add_port 5:0 𐑯 ok 962a6d78b110
+  add_port 13:34 𐑬 ok 819562965b78
+  place_definition 20:0-29:30 𐑥𐑱𐑯 ok 890f5c9c4b45
+  add_port 23:30 𐑢𐑳𐑯 ok 10b6434626d5
+  add_port 26:30 𐑑𐑵 ok 6933847ad230
+  place_node 4:14 𐑤 2 1 ok 86f946fa1ef5
+  place_switch 9:12-16:26 0 ok 4073dc41b873
+  add_port 9:20 ok 7909cb26d07a
+  add_port 10:12 ok 3755df5e21f4
+  add_port 10:26 ok b639897b8db4
+  add_port 13:26 ok e07a8eebe549
+  add_port 14:12 ok 732ffe5b1c44
+  add_arm 11:12 ok c74506555505
+  place_node 12:18 𐑚 2 1 ok 8cefc9770f76
+  place_node 22:6 𐑚 2 1 ok 1a7b7734b875
+  place_node 22:16 𐑨𐑚𐑕 1 1 ok 57b5cbaf85fb
+  place_node 25:16 𐑨𐑚𐑕 1 1 ok e69e0b4495c0
+  place_text 6:11 0 ok 15fc02009ed3
+  place_text 13:15 0 ok 1d2991a88c3e
+  place_text 23:3 0 ok b8b9be4db90b
+  place_text 24:3 7 ok 820e9f04cdea
+  place_text 26:3 5 ok 9825a1898306
+  connect 5:0 5:14 ok 1bbc52d36d5f
+  connect 6:11 6:14 ok 5c76daa69a68
+  connect 5:18 9:20 ok 8abc10e91420
+  connect 5:0 10:12 ok b608e905c9d2
+  connect 10:12 10:26 ok 1e5af93e322b
+  connect 13:15 13:18 ok 99861020004b
+  connect 13:22 13:26 ok b4551e352193
+  connect 10:26 13:34 ok cba814a726eb
+  connect 5:0 14:12 ok 9c7d6924a78d
+  connect 14:12 14:18 ok 5ad55072670c
+  connect 23:3 23:6 ok f8ae31de0136
+  connect 23:10 23:16 ok 0cb558ef74e7
+  connect 23:22 23:30 ok 2d6d7b1a6409
+  connect 24:3 24:6 ok 045e82c90b88
+  connect 26:3 26:16 ok c0269d135215
+  connect 26:22 26:30 ok b7342c9a4327
