@@ -1636,5 +1636,96 @@ pendingE2("04-abs builds from an empty sheet through the page's own gestures", (
   assert.equal(sheet(host.current).formatted(), host.current);
 });
 
+// The Box tool through the pointer path the page uses (studio.js's BoxTool
+// with view.js's hit-testing), on blank sheet past the text, where the
+// drawn <svg> ends.
+
+const { BoxTool } = await import("./studio.js");
+const { sheetExtent, sheetBox, ROOM_ROWS, ROOM_COLUMNS } = await import("./view.js");
+
+/**
+ * A Box tool on `text`, hit-tested as app.js does: the drawn <svg> at a
+ * fixed place on the page, the sheet stretched past it to `pane` and the
+ * room beyond the text. `point(row, col)` is a cell's centre in client
+ * pixels; `drawn(x, y)` says whether a point lies on the <svg> itself.
+ */
+function boxToolOn(text, pane = { width: 640, height: 420 }) {
+  const on = studioOn(text);
+  const origin = { left: 120, top: 260 };
+  const geometry = () => sheet(on.host.current).geometry(true, 1);
+  const svgBox = () => {
+    const { width, height } = geometry().size();
+    return { left: origin.left, top: origin.top, right: origin.left + width, bottom: origin.top + height };
+  };
+  const extent = () => {
+    const g = geometry();
+    return sheetExtent(g.size(), g.cell_rect(0, 0, 0, 0, true, false), pane);
+  };
+  const locate = (e) => cellUnder(geometry(), e.clientX, e.clientY, sheetBox(svgBox(), extent()));
+  const tool = new BoxTool(on.studio, locate);
+  tool.on = true;
+  const point = (row, col) => {
+    const { x, y } = geometry().cell_centre(row, col);
+    return { clientX: origin.left + x, clientY: origin.top + y, button: 0, pointerId: 7 };
+  };
+  const drawn = (e) => cellUnder(geometry(), e.clientX, e.clientY, svgBox()) !== null;
+  return { ...on, tool, point, drawn, extent };
+}
+
+test("the sheet past the text is the pane at least, and room past the text's last row and widest column", () => {
+  const pane = { width: 640, height: 420 };
+  const empty = sheet("").geometry(true, 1);
+  assert.deepEqual(sheetExtent(empty.size(), empty.cell_rect(0, 0, 0, 0, true, false), pane), pane, "an empty sheet is the pane");
+  const g = sheet(double).geometry(true, 1);
+  const cell = g.cell_rect(0, 0, 0, 0, true, false);
+  const small = sheetExtent(g.size(), cell, { width: 10, height: 10 });
+  assert.ok(Math.abs(small.width - (g.size().width + ROOM_COLUMNS * cell.width)) < 1e-6);
+  assert.ok(Math.abs(small.height - (g.size().height + ROOM_ROWS * cell.height)) < 1e-6);
+  // A cell past the text hit-tests within the sheet, and not off its end.
+  const box = sheetBox({ left: 0, top: 0 }, small);
+  const below = g.cell_centre(20, 30);
+  assert.deepEqual({ ...cellUnder(g, below.x, below.y, box) }, { row: 20, col: 30 });
+  assert.equal(cellUnder(g, small.width + 1, 5, box), null);
+});
+
+test("on an empty sheet, a Box tool drag outside the one-cell <svg> places a definition", () => {
+  const { tool, point, drawn, host, studio } = boxToolOn("");
+  const [from, to] = [point(1, 2), point(5, 18)];
+  assert.ok(!drawn(from) && !drawn(to), "both ends lie past the drawn <svg>");
+  assert.equal(tool.down(from), true);
+  assert.equal(tool.move(to), true);
+  assert.deepEqual(tool.rect, { top: 1, left: 2, bottom: 5, right: 18 });
+  assert.equal(tool.drag.verdict, null, "the live verdict: it would fit");
+  assert.equal(tool.up(to), "edit");
+  assert.equal(host.steps.length, 1, host.refusals[0]?.reason);
+  const made = sheet(host.current).boxes().find((b) => b.kind === "definition");
+  assert.deepEqual([made.top, made.left, made.bottom, made.right, made.title.content], [0, 2, 4, 18, "·𐑥𐑱𐑯"]);
+  assert.equal(host.naming.length, 1, "its name's field opens");
+  // A press let go where it began is a click, for the page; nothing is sent.
+  const before = host.sent.length;
+  const blank = point(12, 30);
+  assert.equal(tool.down(blank), true);
+  assert.equal(tool.up(blank), "click");
+  assert.equal(host.sent.length, before);
+  // Off, the tool takes nothing.
+  tool.on = false;
+  assert.equal(tool.down(point(14, 2)), false);
+  assert.ok(studio.selection, "the new name stays selected");
+});
+
+test("below the last definition, a Box tool drag places another one blank line under it", () => {
+  const { tool, point, drawn, host } = boxToolOn(double);
+  const [from, to] = [point(19, 0), point(23, 16)];
+  assert.ok(!drawn(from) && !drawn(to), "both ends lie below the drawn <svg>");
+  assert.equal(tool.down(from), true);
+  tool.move(point(21, 8));
+  tool.move(to);
+  assert.equal(tool.up(to), "edit");
+  assert.equal(host.steps.length, 1, host.refusals[0]?.reason);
+  const made = sheet(host.current).boxes().find((b) => b.kind === "definition" && b.top > 17);
+  assert.deepEqual([made.top, made.left, made.bottom, made.right, made.title.content], [19, 0, 23, 16, "·𐑯𐑿"]);
+  assert.deepEqual(outputsOf(host.current), outputsOf(double), "main is untouched");
+});
+
 if (skipped) console.log(`${skipped} skipped until E1's or E2's edits land`);
 process.exit(failed ? 1 : 0);

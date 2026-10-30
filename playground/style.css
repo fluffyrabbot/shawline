@@ -253,8 +253,13 @@ main {
 
 /* Drawn at the drawing's zoom, sized by wasm's Geometry, so a wide sheet
    scrolls rather than shrinks. */
-#drawing { position: relative; overflow: auto; font: var(--cell)/0 var(--mono); }
-#drawing > svg { display: block; cursor: text; }
+#drawing { position: relative; overflow: auto; font: var(--cell)/0 var(--mono); cursor: text; }
+/* Past the text the pane is blank sheet, the same paper as the drawing's
+   own: overlays drawn there (the cursor, a box being drawn) show through
+   the <svg>'s edge, and `.sheet-end` stretches the scrolling to the
+   sheet's width. */
+#drawing > svg { display: block; cursor: text; overflow: visible; }
+#drawing .sheet-end { position: absolute; left: 0; top: 0; height: 1px; visibility: hidden; pointer-events: none; }
 #drawing svg.stale { opacity: 0.35; transition: opacity 0.2s; }
 #drawing .cell { fill: var(--ink); opacity: 0.22; transition: opacity 0.15s; }
 #drawing .cell.hot { opacity: 0.45; }
@@ -311,7 +316,7 @@ main {
 /* The Box tool: a crosshair over blank sheet, and a copy cursor over
    plain border, where a click adds a port. */
 button[aria-pressed="true"] { background: var(--wash); border-color: var(--wire); color: var(--text); }
-#drawing.box-tool svg, #drawing.drawing-box svg { cursor: crosshair; user-select: none; }
+#drawing.box-tool, #drawing.box-tool svg, #drawing.drawing-box, #drawing.drawing-box svg { cursor: crosshair; user-select: none; }
 #drawing.box-tool svg.over-border { cursor: copy; }
 /* `+ arm` on a selected switch's lower edge. */
 #drawing .arm-handle {

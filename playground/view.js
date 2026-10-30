@@ -31,9 +31,35 @@ export function zoomAbout(zoom, next, scroll, pointer) {
 
 /**
  * The cell under a client point, through `geometry` made at the drawing's
- * zoom, given the drawn `<svg>`'s client rectangle; null off the drawing.
+ * zoom, given the client rectangle of the sheet the drawing offers (its
+ * top-left corner is the drawn `<svg>`'s; see `sheetBox`); null off it.
+ * Past the text's last row and widest column the cells are blank sheet, as
+ * `Geometry.cell_at` gives them.
  */
 export function cellUnder(geometry, x, y, box) {
   if (x < box.left || x >= box.right || y < box.top || y >= box.bottom) return null;
   return geometry.cell_at(x - box.left, y - box.top) ?? null;
 }
+
+/** Rows and columns of blank sheet the drawing offers past the text, to draw the next box in. */
+export const ROOM_ROWS = 8;
+export const ROOM_COLUMNS = 16;
+
+/**
+ * The size of the sheet the drawing offers, in CSS pixels from the drawn
+ * `<svg>`'s top-left corner: the drawing (`size`, at the zoom) with
+ * `ROOM_ROWS` rows and `ROOM_COLUMNS` columns of blank sheet past it, and
+ * never less than `pane`, the part of the pane on show. `cell` is one
+ * cell's area at the zoom, its strip included.
+ */
+export function sheetExtent(size, cell, pane) {
+  return {
+    width: Math.max(size.width + ROOM_COLUMNS * cell.width, pane.width),
+    height: Math.max(size.height + ROOM_ROWS * cell.height, pane.height),
+  };
+}
+
+/** The client rectangle `cellUnder` takes: from the drawn `<svg>`'s client rectangle out to the sheet's extent. */
+export const sheetBox = (svg, extent) => ({
+  left: svg.left, top: svg.top, right: svg.left + extent.width, bottom: svg.top + extent.height,
+});

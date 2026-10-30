@@ -897,6 +897,15 @@ export class Studio {
     return this.edit({ kind: "add_arm", at: { row: this.dividerRow(box, arm), col: box.left }, guard });
   }
 
+  /** The refusal an edit would meet on the shown revision, or null: a trial, for a live verdict. Nothing is written. */
+  verdict(edit) {
+    const trial = this.host.apply(this.doc(), edit);
+    if (!trial.ok) return trial;
+    trial.map?.free();
+    trial.doc.free();
+    return null;
+  }
+
   /** Gives a node box `inputs` inputs and `outputs` outputs: the inspector's steppers. */
   setPorts(box, inputs, outputs) {
     return this.edit({ kind: "set_ports", corner: { row: box.top, col: box.left }, inputs, outputs });
@@ -1022,6 +1031,78 @@ export class Studio {
     else this.edit({ kind: "rewire", from: cell(end), to: cell(from.sink) });
     this.host.changed();
     return true;
+  }
+}
+
+/**
+ * The Box tool's pointer gestures, without the page (PLAN P10, Gesture
+ * details: Drawing boxes). While it is on, a drag that starts on blank
+ * sheet draws a box, and a press let go on the plain border it started on
+ * adds a port there. The page hands it its pointer events; `locate(e)`
+ * gives the cell under one, or null off the sheet.
+ */
+export class BoxTool {
+  constructor(studio, locate) {
+    this.studio = studio;
+    this.locate = locate;
+    this.on = false;
+    /** The press under way: `{ kind, start, at, pointerId, verdict }`, `kind` `"rect"` or `"port"`. */
+    this.drag = null;
+  }
+
+  /** A press: true when the tool takes it, so nothing else does. */
+  down(e) {
+    if (!this.on || this.drag || e.button !== 0) return false;
+    const at = this.locate(e);
+    if (!at) return false;
+    const view = this.studio.view();
+    const kind = portSpot(view, at) ? "port" : charOf(view, at) === " " ? "rect" : null;
+    if (!kind) return false;
+    this.drag = { kind, start: at, at, pointerId: e.pointerId, verdict: null };
+    return true;
+  }
+
+  /**
+   * The pointer moved. A drawn box gets a live verdict, as a moved box
+   * does: the refusal its edit would meet, or null. True when the box to
+   * show changed.
+   */
+  move(e) {
+    const d = this.drag;
+    if (!d || e.pointerId !== d.pointerId) return false;
+    const at = this.locate(e);
+    if (!at || same(at, d.at)) return false;
+    d.at = at;
+    if (d.kind === "rect") d.verdict = this.studio.verdict(this.studio.boxEdit(rectOf(d.start, at)));
+    return d.kind === "rect";
+  }
+
+  /**
+   * The press ends: a box is drawn where a drag ended, or a port added
+   * where a press began and ended. Returns `"edit"` when it sent one,
+   * `"click"` for a press on blank sheet let go where it began (a click,
+   * for the page to handle), and null otherwise.
+   */
+  up(e) {
+    const d = this.drag;
+    if (!d || e.pointerId !== d.pointerId) return null;
+    this.drag = null;
+    const at = this.locate(e);
+    if (!at) return null;
+    if (d.kind === "port") return same(at, d.start) ? (this.studio.addPort(at), "edit") : null;
+    if (same(at, d.start)) return "click";
+    this.studio.placeBox(rectOf(d.start, at));
+    return "edit";
+  }
+
+  /** Drops the press under way without an edit. */
+  cancel() {
+    this.drag = null;
+  }
+
+  /** The box a drag would draw, or null. */
+  get rect() {
+    return this.drag?.kind === "rect" ? rectOf(this.drag.start, this.drag.at) : null;
   }
 }
 

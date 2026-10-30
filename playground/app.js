@@ -12,10 +12,10 @@ import { Flight } from "./flight.js";
 import { Layer } from "./layer.js";
 import {
   Studio, KEYS, SCRUB_PX, readView, anchorOf, sameTarget, keyOf, same, sourceAt, sinkAt, wireAt, boxAt,
-  portSpot, switchLike, portCounts, rectOf,
+  portSpot, switchLike, portCounts, BoxTool,
 } from "./studio.js";
 import { Choices, offer, placing } from "./palette.js";
-import { ZOOM_STEP, clampZoom, defaultZoom, fitZoom, zoomAbout, cellUnder } from "./view.js";
+import { ZOOM_STEP, clampZoom, defaultZoom, fitZoom, zoomAbout, cellUnder, sheetExtent, sheetBox } from "./view.js";
 
 const $ = (id) => document.getElementById(id);
 const editor = $("editor");
@@ -218,7 +218,7 @@ function relayer() {
   if (drag) {
     if (drag.kind === "wire" || drag.kind === "sink" || (drag.kind === "branch" && drag.view)) glow();
     if (drag.at && drag.kind === "box") showGhost();
-    else if (drag.at && drag.kind === "rect") showRect();
+    else if (drag.kind === "tool") showRect();
     else if (drag.at && ["wire", "sink", "branch"].includes(drag.kind)) showPath();
   }
   if (menu) {
@@ -393,14 +393,33 @@ function drawSheet(src) {
   return true;
 }
 
+/**
+ * The sheet the drawing offers past the text (view.js's `sheetExtent`), in
+ * CSS pixels from the <svg>'s top-left corner: blank sheet to draw the
+ * next box in, which hit-tests like any other.
+ */
+let sheet = { width: 0, height: 0 };
+/** Stretches the pane's scrolling to the sheet's width; its height is the pane's own. */
+const sheetEnd = el("div", "sheet-end keep");
+sheetEnd.setAttribute("aria-hidden", "true");
+drawing.append(sheetEnd);
+/** The least height of blank sheet the pane shows, in CSS pixels. */
+const PANE_MIN_PX = 320;
+
 /** Sizes the drawing for the zoom, and remakes the hit-testing geometry. */
 function sizeDrawing() {
   const svg = drawing.querySelector("svg");
   if (!svg || drawn === null) return;
   geo?.free();
   geo = docs.get(drawn).geometry(layer.shown, zoom);
-  const { width, height } = geo.size();
-  Object.assign(svg.style, { width: `${width}px`, height: `${height}px` });
+  const size = geo.size();
+  Object.assign(svg.style, { width: `${size.width}px`, height: `${size.height}px` });
+  // At least the pane on show: its width, and down to the window's foot.
+  const top = drawing.getBoundingClientRect().top + scrollY;
+  const pane = { width: drawing.clientWidth, height: Math.max(PANE_MIN_PX, innerHeight - top - 16) };
+  sheet = sheetExtent(size, geo.cell_rect(0, 0, 0, 0, true, false), pane);
+  drawing.style.minHeight = `${sheet.height}px`;
+  sheetEnd.style.width = `${sheet.width}px`;
   $("zoom-level").textContent = `${Math.round(zoom * 100)}%`;
   if (menu) placeMenu();
   if (inline) placeInline();
@@ -476,11 +495,15 @@ function showDrawing() {
   }
   const background = drawing.querySelector("svg > rect");
   if (!studio?.held) {
+    // A diagnostic marks the cell it points at when that cell holds
+    // something. A blank one, as `C005`'s 0:0 on an empty sheet, is the
+    // sheet's and no cell's; the list below says it.
     background?.after(
-      ...shown.map((d, i) => {
+      ...shown.flatMap((d, i) => {
+        if (charAt(d) === " ") return [];
         const cell = cellRect(`cell ${d.severity}`, d);
         cell.dataset.i = i;
-        return cell;
+        return [cell];
       }),
     );
   }
@@ -512,11 +535,11 @@ function showWords() {
   svg.append(group);
 }
 
-/** The drawing's cell under a pointer event, or null off the sheet. */
+/** The drawing's cell under a pointer event, or null off the sheet; past the text, blank sheet. */
 function cellAt(e) {
   const svg = drawing.querySelector("svg");
   if (!svg || !geo) return null;
-  return cellUnder(geo, e.clientX, e.clientY, svg.getBoundingClientRect());
+  return cellUnder(geo, e.clientX, e.clientY, sheetBox(svg.getBoundingClientRect(), sheet));
 }
 
 // The drawing as an editor (Studio Phases 1 and 2). Every gesture is one
@@ -604,16 +627,17 @@ drawing.addEventListener("dblclick", (e) => {
   if (charAt(at) === " " && box && box.kind !== "node") openMenu(at, { mode: "place" });
 });
 
-// The Box tool (PLAN P10, Gesture details: Drawing boxes): while it is on,
-// a drag on blank sheet draws a box and a click on a box's border adds a
-// port. Escape or the button turns it off; `B` draws a box from the
-// keyboard either way.
+// The Box tool (PLAN P10, Gesture details: Drawing boxes; studio.js's
+// BoxTool): while it is on, a drag on blank sheet draws a box and a click
+// on a box's border adds a port. Escape or the button turns it off; `B`
+// draws a box from the keyboard either way.
 
-let boxTool = false;
+/** Made with the Studio, once the wasm package has loaded. */
+let boxTool = null;
 const boxButton = $("box-tool");
 
 function setBoxTool(on) {
-  boxTool = on;
+  boxTool.on = on;
   boxButton.setAttribute("aria-pressed", String(on));
   drawing.classList.toggle("box-tool", on);
   if (on) showStatus("Box tool: drag on blank sheet to draw a box, click a border to add a port. Escape stops.", "hint");
@@ -621,7 +645,8 @@ function setBoxTool(on) {
 }
 
 boxButton.addEventListener("click", () => {
-  setBoxTool(!boxTool);
+  if (!boxTool) return;
+  setBoxTool(!boxTool.on);
   focusDrawing(false);
 });
 
@@ -823,6 +848,7 @@ function endDrag() {
   drawing.classList.remove("dragging", "wiring", "panning", "drawing-box");
   if (drawing.hasPointerCapture(pointerId)) drawing.releasePointerCapture(pointerId);
   if (kind === "scrub") studio.drop();
+  if (kind === "tool") boxTool.cancel();
   if (view) showDrawing();
 }
 
@@ -961,15 +987,20 @@ drawing.addEventListener("pointerdown", (e) => {
   const at = cellAt(e);
   pressed = at;
   if (!at) return;
+  // The Box tool takes a press on plain border, or on blank sheet.
+  if (boxTool.down(e)) {
+    e.preventDefault();
+    focusDrawing(false);
+    drawing.setPointerCapture(e.pointerId);
+    drag = { kind: "tool", start: at, at, pointerId: e.pointerId, ghost: null };
+    drawing.classList.add("drawing-box");
+    return;
+  }
   const view = current();
   const chosen = studio.selection;
   let start = null;
-  // The Box tool: a press on plain border adds a port when it is let go
-  // there; one on blank sheet draws a box.
-  if (boxTool && portSpot(view, at)) start = { kind: "port" };
-  else if (boxTool && charAt(at) === " ") start = { kind: "rect", ghost: null, verdict: null };
   // A selected number constant scrubs; an unselected one starts a wire.
-  if (!start && studio.scrubbable && chosen.at.row === at.row && at.col >= chosen.at.col && at.col < chosen.at.col + chosen.at.span) {
+  if (studio.scrubbable && chosen.at.row === at.row && at.col >= chosen.at.col && at.col < chosen.at.col + chosen.at.span) {
     if (studio.scrubStart()) start = { kind: "scrub", x: e.clientX };
   }
   const source = !start && sourceOf(at, view);
@@ -1002,31 +1033,23 @@ drawing.addEventListener("pointerdown", (e) => {
   focusDrawing(false);
   drawing.setPointerCapture(e.pointerId);
   drag = { ...start, start: at, at, pointerId: e.pointerId, moved: false };
-  const look = { box: "dragging", scrub: "dragging", rect: "drawing-box", port: "drawing-box" };
-  drawing.classList.add(look[drag.kind] ?? "wiring");
+  drawing.classList.add(drag.kind === "box" || drag.kind === "scrub" ? "dragging" : "wiring");
   if (drag.kind === "wire" || drag.kind === "sink") glow();
 });
 
 /**
- * A live verdict on a Box tool drag, as on a box move: a trial of the edit
- * the rectangle would make, the ghost tinted and the reason said while it
- * would be refused.
+ * The box a Box tool drag would draw, with its live verdict, as on a box
+ * move: the ghost tinted and the reason said while it would be refused.
  */
-function judgeBox() {
-  const trial = applyEdit(doc(), studio.boxEdit(rectOf(drag.start, drag.at)));
-  drag.verdict = trial.ok ? null : trial;
-  if (trial.ok) {
-    trial.map?.free();
-    trial.doc.free();
-  }
-  showStatus(drag.verdict?.reason ?? "", drag.verdict ? "refused" : "");
-}
-
-/** The box a Box tool drag would draw. */
 function showRect() {
   drag.ghost?.remove();
-  drag.ghost = svgRect(`ghost${drag.verdict ? " refused" : ""}`, rectOf(drag.start, drag.at));
+  drag.ghost = null;
+  const rect = boxTool.rect;
+  if (!rect) return;
+  const { verdict } = boxTool.drag;
+  drag.ghost = svgRect(`ghost${verdict ? " refused" : ""}`, rect);
   drawing.querySelector("svg")?.append(drag.ghost);
+  showStatus(verdict?.reason ?? "", verdict ? "refused" : "");
 }
 
 /** Lights up where the drag can end: free sinks for a source, sources for a sink. */
@@ -1098,12 +1121,16 @@ drawing.addEventListener("pointermove", (e) => {
     }
     return;
   }
+  if (drag?.kind === "tool") {
+    if (boxTool.move(e)) showRect();
+    return;
+  }
   const at = cellAt(e);
   if (!drag) {
     const svg = drawing.querySelector("svg");
     const chosen = studio.selection;
-    const border = at && boxTool && portSpot(current(), at);
-    const blank = at && boxTool && !border && charAt(at) === " ";
+    const border = at && boxTool.on && portSpot(current(), at);
+    const blank = at && boxTool.on && !border && charAt(at) === " ";
     const tool = border || blank;
     const scrub = at && !tool && studio.scrubbable && chosen.at.row === at.row && at.col >= chosen.at.col && at.col < chosen.at.col + chosen.at.span;
     const sink = at && !tool && sinkOf(at);
@@ -1132,10 +1159,7 @@ drawing.addEventListener("pointermove", (e) => {
     Object.assign(drag, { dr: at.row - drag.start.row, dc: at.col - drag.start.col });
     judgeMove();
     showGhost();
-  } else if (drag.kind === "rect") {
-    judgeBox();
-    showRect();
-  } else if (drag.kind !== "port") {
+  } else {
     showPath();
   }
 });
@@ -1151,23 +1175,24 @@ drawing.addEventListener("pointerup", (e) => {
     dragged = finished.moved;
     return void studio.scrubEnd();
   }
-  const at = cellAt(e);
-  endDrag();
-  // A click on plain border with the Box tool adds a port there; the click
-  // that follows mustn't select as well.
-  if (finished.kind === "port") {
-    dragged = true;
-    if (same(at, finished.start)) studio.addPort(at);
+  if (finished.kind === "tool") {
+    // Taken before endDrag, which would drop the press. A press on blank
+    // sheet let go where it began is a click, which the click handler takes.
+    drag = null;
+    finished.ghost?.remove();
+    drawing.classList.remove("drawing-box");
+    if (drawing.hasPointerCapture(finished.pointerId)) drawing.releasePointerCapture(finished.pointerId);
+    showStatus();
+    dragged = boxTool.up(e) !== "click";
     return;
   }
+  const at = cellAt(e);
+  endDrag();
   // Off the sheet, or back where it started: nothing. A press that never
   // moved is a click, which selects.
   if (!at || same(at, finished.start)) return void (dragged ||= finished.moved || !at);
   dragged = true;
-  if (finished.kind === "rect") {
-    showStatus();
-    studio.placeBox(rectOf(finished.start, at));
-  } else if (finished.kind === "box") {
+  if (finished.kind === "box") {
     studio.edit({ kind: "move", corner: { row: finished.box.top, col: finished.box.left }, dr: finished.dr, dc: finished.dc });
   } else if (finished.kind === "branch") {
     // One edit either way: off, or off and onto the new source.
@@ -1228,7 +1253,7 @@ drawing.addEventListener("keydown", (e) => {
     if (helpShown()) return void (e.preventDefault(), toggleHelp(false));
     if (menu) return void (e.preventDefault(), closeMenu());
     if (cancelled) return void (e.preventDefault(), showStatus());
-    if (boxTool && !studio.sketch && !studio.wiring) return void (e.preventDefault(), setBoxTool(false));
+    if (boxTool.on && !studio.sketch && !studio.wiring) return void (e.preventDefault(), setBoxTool(false));
   }
   if (drag) return;
   if (studio.keydown(e)) e.preventDefault();
@@ -2004,6 +2029,7 @@ async function main() {
     zoom: zoomBy,
     gloss: () => layer.shown,
   });
+  boxTool = new BoxTool(studio, cellAt);
   showInspector();
   // The page's own Shavian, marked in index.html, shows its readings too.
   layer.resay(document);
