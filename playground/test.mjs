@@ -224,8 +224,10 @@ test("wires gives each wire's cells and editable source", () => {
   const input = list.find((w) => w.cells.some((c) => c.row === 5 && c.col === 4));
   assert.deepEqual({ ...input.source }, { row: 5, col: 2 });
   assert.ok(input.cells.some((c) => c.row === 6 && c.col === 9));
+  // Wave 2 made wires at inline nodes editable: 13-fanout's 7 also feeds 𐑖.
   const inline = sheet(corpus("13-fanout.shaw")).wires().find((w) => w.cells.some((c) => c.row === 5 && c.col === 4));
-  assert.equal(inline.source, null);
+  assert.deepEqual({ ...inline.source }, { row: 5, col: 2 });
+  assert.ok(inline.cells.some((c) => c.row === 14 && c.col === 7), "its branch into 𐑖's arrowhead");
 });
 
 test("trace returns values per wire, or no badges with the reason", () => {
@@ -288,13 +290,17 @@ test("the last branch's disconnect removes the whole wire", () => {
   assert.equal(sheet(cut.text).wires().length, sheet(double).wires().length - 1);
 });
 
-test("wires the mouse can't edit refuse disconnect with the reason", () => {
+test("an inline node keeps its wires: its arrowhead's disconnect is refused, naming it, and other branches come off", () => {
   const fanout = corpus("13-fanout.shaw");
-  const locked = sheet(fanout).wires().find((w) => w.source === null);
-  assert.ok(locked, "13-fanout has an inline node's wire");
-  const refused = edits.disconnect(fanout, 5, 10);
-  assert.deepEqual([refused.ok, refused.row, refused.col], [false, 5, 10]);
-  assert.match(refused.reason, /can't be edited by mouse/);
+  assert.ok(sheet(fanout).wires().every((w) => w.source !== null), "every wire is editable");
+  const refused = edits.disconnect(fanout, 14, 8);
+  assert.deepEqual([refused.ok, refused.kind, refused.row, refused.col], [false, "target", 14, 8]);
+  assert.match(refused.reason, /𐑖/);
+  const cut = edits.disconnect(fanout, 5, 10);
+  assert.equal(cut.ok, true, cut.reason);
+  assert.ok(!wiredSinks(cut.text).includes("5:10"));
+  assert.ok(sheet(cut.text).texts().some((t) => t.row === 14 && t.col === 10 && t.content === "𐑖"), "𐑖 stays");
+  assert.ok(wiredSinks(cut.text).includes("14:8"), "and keeps its wire in");
 });
 
 test("preview from a wired source ends on its wire, not at the source", () => {
@@ -1425,13 +1431,14 @@ test("a double-click on a straight stretch of wire opens the 1→1 palette, and 
   assert.deepEqual(["𐑖", "𐑠", "𐑛𐑳𐑚𐑩𐑤"].map((w) => offered.some((c) => c.word === w)), [true, true, true]);
   assert.ok(!offered.some((c) => c.word === "𐑐"), "𐑐 takes two");
   const show = offered.find((c) => c.word === "𐑖");
-  studio.pick(placing(show, cell(5, 18), { mode: "inline" }));
-  assert.deepEqual(lastSent(host), { kind: "place_inline", at: cell(5, 18), word: "𐑖" });
+  // Asked before the pick, which puts 𐑖's word where the wire was.
   studio.cursor = cell(5, 18);
   press("/");
   studio.cursor = cell(3, 5);
   press("/");
   assert.deepEqual(host.palettes.map((p) => p.mode), ["inline", "place"], "/ on a wire splices, elsewhere it places");
+  studio.pick(placing(show, cell(5, 18), { mode: "inline" }));
+  assert.deepEqual(lastSent(host), { kind: "place_inline", at: cell(5, 18), word: "𐑖" });
 });
 
 test("a node is renamed with one set_text on its word, from the inspector or in place; a definition keeps its dot", () => {
