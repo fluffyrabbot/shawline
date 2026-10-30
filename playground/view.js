@@ -59,6 +59,14 @@ export function sheetExtent(size, cell, pane) {
   };
 }
 
+/**
+ * What the drawing says while the text can't be drawn (a tab, a character
+ * outside the repertoire): over the last drawing it could, kept and faded
+ * (review item 27), or alone when it has drawn none yet.
+ */
+export const undrawable = (kept) =>
+  kept ? "Last valid drawing" : "No drawing yet: the text has characters Studio can't draw, which Diagnostics lists.";
+
 /** The client rectangle `cellUnder` takes: from the drawn `<svg>`'s client rectangle out to the sheet's extent. */
 export const sheetBox = (svg, extent) => ({
   left: svg.left, top: svg.top, right: svg.left + extent.width, bottom: svg.top + extent.height,

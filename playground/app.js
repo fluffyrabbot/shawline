@@ -3,7 +3,7 @@
 // wires it to the page.
 import init, {
   Doc, table, apply as applyEdit, cell_of_offset, offset_of_cell,
-  Transliterator, annotate, reading, keys as keysOf, panic_message,
+  Transliterator, annotate, reading, keys as keysOf, panic_message, port_names,
 } from "./pkg/shawline_wasm.js";
 import { Tour, TOUR_EXAMPLE } from "./tour.js";
 import { Store, TOUR_SLOT } from "./drafts.js";
@@ -12,10 +12,12 @@ import { Flight } from "./flight.js";
 import { Layer } from "./layer.js";
 import {
   Studio, KEYS, SCRUB_PX, readView, anchorOf, sameTarget, keyOf, same, sourceAt, sinkAt, wireAt, boxAt,
-  portSpot, switchLike, portCounts, BoxTool,
+  portSpot, switchLike, portCounts, BoxTool, Marquee, RepairGhost, partAt, partsIn,
 } from "./studio.js";
 import { Choices, offer, placing } from "./palette.js";
-import { ZOOM_STEP, clampZoom, defaultZoom, fitZoom, zoomAbout, cellUnder, sheetExtent, sheetBox } from "./view.js";
+import {
+  ZOOM_STEP, clampZoom, defaultZoom, fitZoom, zoomAbout, cellUnder, sheetExtent, sheetBox, undrawable,
+} from "./view.js";
 
 const $ = (id) => document.getElementById(id);
 const editor = $("editor");
@@ -219,6 +221,7 @@ function relayer() {
     if (drag.kind === "wire" || drag.kind === "sink" || (drag.kind === "branch" && drag.view)) glow();
     if (drag.at && drag.kind === "box") showGhost();
     else if (drag.kind === "tool") showRect();
+    else if (drag.kind === "marquee") showMarquee();
     else if (drag.at && ["wire", "sink", "branch"].includes(drag.kind)) showPath();
   }
   if (menu) {
@@ -282,9 +285,9 @@ function refresh() {
 }
 
 /** Whether the selection still names something on the shown sheet. */
-function selectionFits() {
-  const target = studio.selection;
+function selectionFits(target = studio.selection) {
   const view = current();
+  if (target.kind === "parts") return target.parts.every((p) => selectionFits(p));
   if (target.kind === "box") {
     const { top, left, bottom, right } = target.box;
     return view.boxes.some((b) => b.top === top && b.left === left && b.bottom === bottom && b.right === right);
@@ -326,8 +329,16 @@ function showProblems() {
     .map(([kind, n]) => `${n} ${kind}${n > 1 ? "s" : ""}`)
     .join(", ");
 
+  // A ghost drawn for the rows being replaced is for a text gone by.
+  repairGhost?.leave();
+  // At most one repair per diagnostic, in diagnostic order.
+  const offered = doc().repairs();
+  const repairOf = (d) => {
+    const i = offered.findIndex((r) => r.code === d.code && same(r.at, d));
+    return i < 0 ? null : offered.splice(i, 1)[0];
+  };
   problems.replaceChildren(
-    ...(shown.length ? shown.map(problem) : [el("li", "clear", "Nothing to report.")]),
+    ...(shown.length ? shown.map((d, i) => problem(d, i, repairOf(d))) : [el("li", "clear", "Nothing to report.")]),
   );
   marks.replaceChildren(
     ...shown.map((d, i) => {
@@ -340,16 +351,49 @@ function showProblems() {
   );
 }
 
-function problem(d, i) {
+function problem(d, i, repair) {
   const item = el("li", d.severity);
   item.dataset.i = i;
   // One-based, like the CLI's diagnostic report.
   item.append(el("span", "pos", `${d.row + 1}:${d.col + 1}`), el("span", "code", d.code), layer.say(el("span", "message"), d.message));
+  if (repair) item.append(fixButton(repair, i));
   item.title = d.severity;
   item.addEventListener("click", () => jumpTo(d));
   item.addEventListener("mouseenter", () => highlight(i, true));
   item.addEventListener("mouseleave", () => highlight(i, false));
   return item;
+}
+
+// Ghost repairs (PLAN P10, Decisions: Repairs). A diagnostic with a known
+// fix has a Fix button in its row, labelled as the repair says. Hovered or
+// focused for a beat, it draws the repaired drawing as a ghost; pressed, it
+// makes the repair as one undo step and then its follow-up. A click on the
+// row still jumps to the cell.
+
+/** Made with the Studio, once the wasm package has loaded. */
+let repairGhost = null;
+
+function fixButton(repair, i) {
+  const button = layer.say(el("button", "quiet fix"), repair.label);
+  button.type = "button";
+  const fix = repair.edit ? "Hover to see the fix drawn, press to make it" : "Press to start the fix";
+  button.dataset.plainTitle = `${fix}. In the drawing, F fixes the diagnostic at the cursor.`;
+  button.title = button.dataset.plainTitle;
+  const enter = () => (highlight(i, true), repairGhost.enter(repair));
+  const leave = () => (highlight(i, false), repairGhost.leave());
+  button.addEventListener("pointerenter", enter);
+  button.addEventListener("focus", enter);
+  button.addEventListener("pointerleave", leave);
+  button.addEventListener("blur", leave);
+  button.addEventListener("click", (e) => {
+    // The row's own click jumps to the cell in the text.
+    e.stopPropagation();
+    repairGhost.leave();
+    // A follow-up's keys (W's ] [ and Enter) are the drawing's.
+    focusDrawing(false);
+    studio.repair(repair);
+  });
+  return button;
 }
 
 function highlight(i, on) {
@@ -492,12 +536,21 @@ drawing.addEventListener("blur", () => {
   }
 });
 
+/** Says, over the drawing, that it is the last one the text could draw (review item 27). */
+const staleNote = el("p", "stale-note keep");
+staleNote.hidden = true;
+drawing.append(staleNote);
+
 function showDrawing() {
   if (!drawSheet(studio?.text ?? editor.value)) {
     // Unreadable text (a tab, a stray character): keep the last drawing, faded.
-    drawing.querySelector("svg")?.classList.add("stale");
+    const svg = drawing.querySelector("svg");
+    svg?.classList.add("stale");
+    staleNote.textContent = undrawable(Boolean(svg));
+    staleNote.hidden = false;
     return;
   }
+  staleNote.hidden = true;
   const background = drawing.querySelector("svg > rect");
   if (!studio?.held) {
     // A diagnostic marks the cell it points at when that cell holds
@@ -560,10 +613,14 @@ function cellAt(e) {
 //   blank sheet to pick a source for it: a number, a text or a callee.
 // - Drag a wired arrowhead away: its branch comes off. Release on a source
 //   or a wire to rewire it there, anywhere else to leave it off.
-// - Drag anything else on a box to move the box; the ghost says at once
-//   whether the move would be refused.
+// - Drag a node box by any of its cells to move it, and a definition or a
+//   switch by its border or title; the ghost says at once whether the move
+//   would be refused.
 // - Click to select; click a source and then an arrowhead to connect them.
 //   A selected number constant scrubs: drag its digits sideways.
+// - Shift-click nodes, switches and constants to select several, or drag
+//   round them on blank sheet (studio.js's Marquee); Make definition takes
+//   the selection out into a new definition.
 // - With the Box tool on, drag on blank sheet to draw a box (a definition
 //   at top level, a switch inside one), and click a box's border to add a
 //   port. A selected switch has a `+ arm` handle on its lower edge.
@@ -596,6 +653,12 @@ drawing.addEventListener("click", (e) => {
   const at = cellAt(e);
   // Pressed on one cell and let go on another isn't a click on either.
   if (!at || !same(at, pressed)) return;
+  // Shift-click adds a part to the selection or takes it away, for Make definition.
+  if (e.shiftKey) {
+    studio.toggle(partAt(current(), at));
+    focusDrawing(false);
+    return;
+  }
   const target = studio.targetAt(at);
   const chosen = studio.selection;
   // A source and then an arrowhead, or the other way round, connect.
@@ -639,6 +702,8 @@ drawing.addEventListener("dblclick", (e) => {
 
 /** Made with the Studio, once the wasm package has loaded. */
 let boxTool = null;
+/** The marquee (studio.js's Marquee), made with the Studio: with the Box tool off, a drag on blank sheet selects. */
+let marquee = null;
 const boxButton = $("box-tool");
 
 function setBoxTool(on) {
@@ -742,8 +807,17 @@ function showOverlays() {
     const { box, divider } = selected;
     svg.append(svgRect("overlay selected", { top: divider, left: box.left, bottom: divider, right: box.right }));
   }
-  // `B`'s box, from its first corner to the cursor.
-  if (studio?.sketched) svg.append(svgRect("overlay ghost", studio.sketched));
+  if (selected?.kind === "parts") {
+    svg.append(...selected.parts.map((p) => partShape(p.kind === "box" ? "overlay selected" : "overlay selected-text", p)));
+  }
+  // `B`'s box, or `S`'s rectangle with the parts it would select, from its
+  // first corner to the cursor.
+  const sketched = studio?.sketched;
+  if (sketched && studio.sketch.mode === "select") {
+    const group = svgEl("g", "overlay marquee");
+    group.append(svgRect("sweep", sketched), ...partsIn(current(), sketched).map((p) => partShape("swept", p)));
+    svg.append(group);
+  } else if (sketched) svg.append(svgRect("overlay ghost", sketched));
   if (studio?.wiring) {
     const { ends } = studio.wiring;
     const end = studio.end;
@@ -850,10 +924,11 @@ function endDrag() {
   hidePreview();
   drag.marks?.forEach((n) => n.remove());
   drag = null;
-  drawing.classList.remove("dragging", "wiring", "panning", "drawing-box");
+  drawing.classList.remove("dragging", "wiring", "panning", "drawing-box", "selecting");
   if (drawing.hasPointerCapture(pointerId)) drawing.releasePointerCapture(pointerId);
   if (kind === "scrub") studio.drop();
   if (kind === "tool") boxTool.cancel();
+  if (kind === "marquee") marquee.cancel();
   if (view) showDrawing();
 }
 
@@ -886,16 +961,7 @@ function refused(refusal, edit, then = null) {
   const base = studio.text;
   const roomed = applyEdit(docs.get(base), { kind: "make_room", edit });
   if (!roomed.ok) return;
-  const ghost = el("div", "room-ghost keep");
-  ghost.innerHTML = roomed.doc.render(document.documentElement.dataset.theme === "dark", layer.shown) ?? "";
-  const g = roomed.doc.geometry(layer.shown, zoom);
-  const svg = ghost.querySelector("svg");
-  const size = g?.size();
-  g?.free();
-  if (svg && size) Object.assign(svg.style, { width: `${size.width}px`, height: `${size.height}px` });
-  const own = drawing.querySelector("svg");
-  ghost.style.left = `${own?.offsetLeft ?? 0}px`;
-  ghost.style.top = `${own?.offsetTop ?? 0}px`;
+  const ghost = sheetGhost(roomed.doc);
   const button = el("button", "make-room keep", "Make room");
   button.type = "button";
   const added = roomed.inserted.map((i) => `${i.count} ${i.axis}${i.count > 1 ? "s" : ""}`).join(" and ");
@@ -918,6 +984,25 @@ function refused(refusal, edit, then = null) {
   place(button, { row: refusal.row + 1, col: refusal.col });
   drawing.append(ghost, button);
   room = { base, result: roomed, ghost, button, then };
+}
+
+/**
+ * Another revision's drawing, laid over the drawing at its zoom as a
+ * ghost: the sheet Make room or a repair would leave. It shows once given
+ * the class `shown`.
+ */
+function sheetGhost(other) {
+  const ghost = el("div", "sheet-ghost keep");
+  ghost.innerHTML = other.render(document.documentElement.dataset.theme === "dark", layer.shown) ?? "";
+  const g = other.geometry(layer.shown, zoom);
+  const svg = ghost.querySelector("svg");
+  const size = g?.size();
+  g?.free();
+  if (svg && size) Object.assign(svg.style, { width: `${size.width}px`, height: `${size.height}px` });
+  const own = drawing.querySelector("svg");
+  ghost.style.left = `${own?.offsetLeft ?? 0}px`;
+  ghost.style.top = `${own?.offsetTop ?? 0}px`;
+  return ghost;
 }
 
 /** Takes back an offer of room: the next action makes it stale. */
@@ -1028,6 +1113,8 @@ drawing.addEventListener("pointerdown", (e) => {
     start = { kind: "wire", from: cellOf(from), scope: from.scope };
   } else if (lockedAt(at)) {
     return void refuse({ ...at, reason: LOCKED });
+  } else if (marquee.down(e)) {
+    start = { kind: "marquee", ghost: null };
   } else {
     const box = boxAt(view, at);
     if (box) start = { kind: "box", box, dr: 0, dc: 0, ghost: null, verdict: null };
@@ -1038,7 +1125,8 @@ drawing.addEventListener("pointerdown", (e) => {
   focusDrawing(false);
   drawing.setPointerCapture(e.pointerId);
   drag = { ...start, start: at, at, pointerId: e.pointerId, moved: false };
-  drawing.classList.add(drag.kind === "box" || drag.kind === "scrub" ? "dragging" : "wiring");
+  const look = { box: "dragging", scrub: "dragging", marquee: "selecting" };
+  drawing.classList.add(look[drag.kind] ?? "wiring");
   if (drag.kind === "wire" || drag.kind === "sink") glow();
 });
 
@@ -1055,6 +1143,21 @@ function showRect() {
   drag.ghost = svgRect(`ghost${verdict ? " refused" : ""}`, rect);
   drawing.querySelector("svg")?.append(drag.ghost);
   showStatus(verdict?.reason ?? "", verdict ? "refused" : "");
+}
+
+/** A part's outline, with `className`: a box's rectangle, or a text's cells. */
+const partShape = (className, part) =>
+  part.kind === "box" ? svgRect(className, part.box) : cellRect(className, part.at, part.at.span);
+
+/** The rectangle a marquee drag sweeps, with the parts it would select outlined. */
+function showMarquee() {
+  drag.ghost?.remove();
+  drag.ghost = null;
+  const rect = marquee.rect;
+  if (!rect) return;
+  drag.ghost = svgEl("g", "marquee");
+  drag.ghost.append(svgRect("sweep", rect), ...marquee.drag.parts.map((p) => partShape("swept", p)));
+  drawing.querySelector("svg")?.append(drag.ghost);
 }
 
 /** Lights up where the drag can end: free sinks for a source, sources for a sink. */
@@ -1130,6 +1233,13 @@ drawing.addEventListener("pointermove", (e) => {
     if (boxTool.move(e)) showRect();
     return;
   }
+  if (drag?.kind === "marquee") {
+    if (marquee.move(e)) {
+      drag.moved = true;
+      showMarquee();
+    }
+    return;
+  }
   const at = cellAt(e);
   if (!drag) {
     const svg = drawing.querySelector("svg");
@@ -1141,12 +1251,14 @@ drawing.addEventListener("pointermove", (e) => {
     const sink = at && !tool && sinkOf(at);
     const over = at && !tool && !scrub && (sourceOf(at) || sink?.wired === false || wireOf(at));
     const locked = at && !tool && !over && !sink && lockedAt(at);
+    // Blank sheet outside a node box is the marquee's, not a move's.
+    const sweep = at && !tool && !scrub && !over && !sink && !locked && marquee.takes(at);
     svg?.classList.toggle("over-border", Boolean(border));
     svg?.classList.toggle("over-scrub", Boolean(scrub));
     svg?.classList.toggle("over-source", Boolean(over));
     svg?.classList.toggle("over-sink", Boolean(sink?.wired));
     svg?.classList.toggle("over-locked", Boolean(locked));
-    svg?.classList.toggle("over-box", Boolean(at && !tool && !scrub && !over && !sink && !locked && boxAt(current(), at)));
+    svg?.classList.toggle("over-box", Boolean(at && !tool && !scrub && !over && !sink && !locked && !sweep && boxAt(current(), at)));
     return;
   }
   if (e.pointerId !== drag.pointerId) return;
@@ -1189,6 +1301,15 @@ drawing.addEventListener("pointerup", (e) => {
     if (drawing.hasPointerCapture(finished.pointerId)) drawing.releasePointerCapture(finished.pointerId);
     showStatus();
     dragged = boxTool.up(e) !== "click";
+    return;
+  }
+  if (finished.kind === "marquee") {
+    // As for the Box tool: a press let go where it began is a click.
+    drag = null;
+    finished.ghost?.remove();
+    drawing.classList.remove("selecting");
+    if (drawing.hasPointerCapture(finished.pointerId)) drawing.releasePointerCapture(finished.pointerId);
+    dragged = marquee.up(e) !== "click";
     return;
   }
   const at = cellAt(e);
@@ -1341,7 +1462,58 @@ function showInspector() {
       stepper("Outputs", outputs, (n) => studio.setPorts(box, inputs, n)),
     );
   }
+  // Nodes, switches and constants can be taken out into a definition.
+  if (studio.parts.length) parts.push(studio.extraction ? extractField() : extractButton());
   inspector.replaceChildren(...parts);
+}
+
+/** Make definition, before its name is asked for: `M` does the same. */
+function extractButton() {
+  const button = el("button", "quiet make-definition", "Make definition…");
+  button.type = "button";
+  button.title = "Take the selection out into a new definition below the sheet, and call it here (M)";
+  button.addEventListener("click", () => studio.startExtract());
+  return button;
+}
+
+/**
+ * Make definition's name field, holding a free name: Enter or Make takes
+ * the selection out into a definition of that name, as one edit, and
+ * Escape puts the field away. A refused name stays to be corrected.
+ */
+function extractField() {
+  const row = el("div", "extract");
+  const label = el("label", "field");
+  const input = transliterating(el("input"));
+  input.value = studio.extraction.name;
+  input.setAttribute("aria-label", "The new definition's name");
+  const make = el("button", "quiet", "Make");
+  make.type = "button";
+  const commit = () => {
+    studio.extraction.name = input.value;
+    studio.extract(input.value);
+  };
+  input.addEventListener("keydown", (e) => {
+    e.stopPropagation();
+    if (e.key === "Enter") commit();
+    if (e.key === "Escape") {
+      studio.extraction = null;
+      showInspector();
+      focusDrawing(true);
+    }
+  });
+  make.addEventListener("click", commit);
+  label.append(el("span", "name", "Name"), input);
+  row.append(label, make);
+  return row;
+}
+
+/** Opens Make definition's name field, focused with its name selected, so typing replaces it. */
+function focusExtract() {
+  showInspector();
+  const input = inspector.querySelector(".extract input");
+  input?.focus({ preventScroll: true });
+  input?.select();
 }
 
 /** The inspector's field for a text, committing one `set_text` on Enter or when it is left. */
@@ -2032,11 +2204,27 @@ async function main() {
     },
     editText: editInline,
     name: nameField,
+    extracting: focusExtract,
     help: () => toggleHelp(),
     zoom: zoomBy,
     gloss: () => layer.shown,
+    portNames: port_names(),
   });
   boxTool = new BoxTool(studio, cellAt);
+  marquee = new Marquee(studio, cellAt, boxTool);
+  let ghost = null;
+  repairGhost = new RepairGhost({
+    trial: (edit) => studio.trial(edit),
+    show: (other) => {
+      ghost = sheetGhost(other);
+      ghost.classList.add("shown");
+      drawing.append(ghost);
+    },
+    hide: () => {
+      ghost?.remove();
+      ghost = null;
+    },
+  });
   showInspector();
   // The page's own Shavian, marked in index.html, shows its readings too.
   layer.resay(document);

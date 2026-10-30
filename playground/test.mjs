@@ -1,7 +1,7 @@
 // Checks the wasm bindings against the corpus. Run `playground/build.sh`
 // first, then `node playground/test.mjs`.
 import assert from "node:assert/strict";
-import { readFileSync, existsSync } from "node:fs";
+import { readFileSync, readdirSync, existsSync } from "node:fs";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 
@@ -993,6 +993,8 @@ function studioOn(text) {
     sent: [],
     /** The texts whose inspector field was opened for naming. */
     naming: [],
+    /** How many times Make definition's name field was opened. */
+    extractions: 0,
     palettes: [],
     apply: (doc, edit) => (host.sent.push(edit), shawline.apply(doc, edit)),
     text: () => host.current,
@@ -1012,9 +1014,11 @@ function studioOn(text) {
     palette: (at, mode) => host.palettes.push({ at, mode }),
     editText: (target) => host.editing.push(target),
     name: (target) => host.naming.push(target),
+    extracting: () => host.extractions++,
     help() {},
     zoom() {},
     gloss: () => false,
+    portNames: shawline.port_names(),
   };
   const studio = new Studio(host);
   const press = (key, more = {}) =>
@@ -1267,14 +1271,15 @@ function pendingE2(name, body) {
   console.log(`skip  ${name} (pendingE2: its edits refuse as unsupported)`);
 }
 
-const { KEYS, PORT_NAMES, portSpot, armsOf, switchLike, portCounts } = await import("./studio.js");
+const { KEYS, portSpot, armsOf, switchLike, portCounts } = await import("./studio.js");
+const PORT_NAMES = shawline.port_names();
 
 const abs = corpus("04-abs.shaw");
 /** 04-abs without its comment, which no drawing gesture writes. */
 const absBare = abs.split("\n").slice(2).join("\n");
 const boxOf = (src, row, col) => sheet(src).boxes().find((b) => b.top === row && b.left === col);
 const lastSent = (host) => JSON.parse(JSON.stringify(host.sent.at(-1)));
-const unreadable = /^(no edit|the edit has no|.* isn't (a number|text)|.* is (out of range|negative))/;
+const unreadable = /^(no edit|the edit has no|.* isn't (a number|text|a list of cells|true or false)|.* is (out of range|negative))/;
 
 /**
  * A main holding an empty square box guarded 0, as `place_switch` draws
@@ -1669,7 +1674,7 @@ function boxToolOn(text, pane = { width: 640, height: 420 }) {
     return { clientX: origin.left + x, clientY: origin.top + y, button: 0, pointerId: 7 };
   };
   const drawn = (e) => cellUnder(geometry(), e.clientX, e.clientY, svgBox()) !== null;
-  return { ...on, tool, point, drawn, extent };
+  return { ...on, tool, point, drawn, extent, locate };
 }
 
 test("the sheet past the text is the pane at least, and room past the text's last row and widest column", () => {
@@ -1727,5 +1732,383 @@ test("below the last definition, a Box tool drag places another one blank line u
   assert.deepEqual(outputsOf(host.current), outputsOf(double), "main is untouched");
 });
 
-if (skipped) console.log(`${skipped} skipped until E1's or E2's edits land`);
+// Studio Phase 2, wave 3 (PLAN P10): multiple selection, Make definition,
+// and ghost repairs.
+
+const studioModule = await import("./studio.js");
+const { Marquee, RepairGhost, GHOST_MS, partAt, partCell, definitionName } = studioModule;
+const { undrawable } = await import("./view.js");
+
+/**
+ * Whether agent E3's work has landed: until it does, `extract` refuses as
+ * `unsupported` and `repairs` offers nothing, and the checks that need
+ * either are skipped with a marker instead of failing.
+ */
+const EXTRACT = {
+  ready: (() => {
+    const probe = shawline.apply(sheet(double), { kind: "extract", picks: [cell(13, 8)], name: "𐑐𐑸𐑑" });
+    return probe.ok || probe.kind !== "unsupported";
+  })(),
+  why: "extract refuses as unsupported",
+};
+const REPAIRS = { ready: sheet(corpus("static/03-no-namer-dot.shaw")).repairs().length > 0, why: "repairs offers nothing" };
+function pendingE3(name, { ready, why }, body) {
+  if (ready) return test(name, body);
+  skipped++;
+  console.log(`skip  ${name} (pendingE3: ${why})`);
+}
+
+/** The cells naming the selected parts, row-major, as `ROW:COL`. */
+const chosen = (studio) => studio.parts.map(partCell).map((c) => `${c.row}:${c.col}`);
+const codesOf = (src) => sheet(src).diagnostics().map((d) => d.code);
+/** Every program with static diagnostics: the repairs' cases. */
+const repairCases = [
+  ...readdirSync(here("../corpus")).filter((f) => /^9\d-.*\.shaw$/.test(f)),
+  ...readdirSync(here("../corpus/static")).filter((f) => f.endsWith(".shaw")).map((f) => `static/${f}`),
+  ...readdirSync(here("../corpus/fix")).filter((f) => /^[^.]+\.shaw$/.test(f)).map((f) => `fix/${f}`),
+];
+
+test("port_names gives shawline-edit's names for new ports, and studio.js keeps no copy", () => {
+  const names = shawline.port_names();
+  assert.equal(names.length, 23);
+  assert.deepEqual(names.slice(0, 4), ["𐑨", "𐑚", "𐑒", "𐑛"]);
+  assert.ok(names.every((n) => [...n].length === 1));
+  assert.equal(studioModule.PORT_NAMES, undefined);
+});
+
+test("apply reads extract, restyle, fix and add_default_arm, and refuses them written wrong", () => {
+  const [slip] = corpus("fix/01-slipped-edge.check").trim().split("\n").map((l) => l.split(/[: ]/).map(Number));
+  for (const [src, edit] of [
+    [double, { kind: "extract", picks: [cell(13, 8), cell(14, 2)], name: "𐑐𐑸𐑑" }],
+    [corpus("static/07-rounded-node.shaw"), { kind: "restyle", corner: cell(4, 6), rounded: false }],
+    [corpus("fix/01-slipped-edge.shaw"), { kind: "fix", at: cell(slip[0], slip[1]) }],
+    [corpus("static/11-no-default-arm.shaw"), { kind: "add_default_arm", corner: cell(6, 2) }],
+  ]) {
+    const result = shawline.apply(sheet(src), edit);
+    assert.ok(result.ok || !unreadable.test(result.reason), `${edit.kind}: ${result.reason}`);
+  }
+  for (const [wrong, reason] of [
+    [{ kind: "extract", picks: cell(13, 8), name: "𐑐𐑸𐑑" }, "picks isn't a list of cells"],
+    [{ kind: "extract", picks: [cell(13, 8), 4], name: "𐑐𐑸𐑑" }, "the edit has no row"],
+    [{ kind: "extract", picks: [cell(13, 8)] }, "the edit has no name"],
+    [{ kind: "restyle", corner: cell(4, 6) }, "the edit has no rounded"],
+    [{ kind: "restyle", corner: cell(4, 6), rounded: "yes" }, "rounded isn't true or false"],
+    [{ kind: "add_default_arm", at: cell(6, 2) }, "the edit has no corner"],
+  ]) {
+    const refused = shawline.apply(sheet(double), wrong);
+    assert.deepEqual([refused.ok, refused.kind, refused.reason], [false, "target", reason], JSON.stringify(wrong));
+  }
+});
+
+pendingE3("repairs gives each fix's at, code, label, edit and follow-up, apply reads every edit, and every table code has one", REPAIRS, () => {
+  const offered = new Set();
+  for (const name of repairCases) {
+    const d = sheet(corpus(name));
+    const found = d.diagnostics();
+    for (const r of d.repairs()) {
+      offered.add(r.code);
+      const where = `${name} ${r.code}`;
+      assert.deepEqual(Object.keys(r).sort(), ["at", "code", "edit", "label", "then"], where);
+      assert.ok(found.some((f) => f.code === r.code && sameCell(f, r.at)), `${where} is a diagnostic’s`);
+      assert.ok(["none", "name_field", "draw_wire"].includes(r.then.kind), where);
+      assert.equal(r.then.at === null, r.then.kind === "none", where);
+      if (r.then.at) assert.deepEqual(Object.keys(r.then.at).sort(), ["col", "row"]);
+      assert.equal(r.label.startsWith("Fix…"), r.then.kind !== "none", `${where}: ${r.label}`);
+      assert.ok(r.edit || r.then.kind !== "none", `${where} does something`);
+      if (!r.edit) continue;
+      const result = shawline.apply(d, r.edit);
+      assert.ok(result.ok || !unreadable.test(result.reason), `${where}: ${JSON.stringify(r.edit)}: ${result.reason}`);
+    }
+  }
+  const table = ["S012", "Y003", "Y004", "Y009", "Y013", "C004", "Y012", "Y019", "Y001", "Y014", "Y015", "Y018", "C001", "C002", "C005", "C006", "W001", "W002"];
+  assert.deepEqual(table.filter((code) => !offered.has(code)), [], "every code in PLAN's table offers its repair");
+});
+
+test("Shift-click builds a multiple selection of nodes, switches and constants, and takes one away", () => {
+  const { studio, host } = studioOn(double);
+  const view = readView(sheet(double));
+  assert.deepEqual(partCell(partAt(view, cell(14, 10))), cell(13, 8), "a node's word picks its box");
+  assert.equal(partAt(view, cell(5, 2)), null, "an input's name is no part");
+  assert.equal(partAt(view, cell(12, 4)), null, "nor is a definition");
+  studio.toggle(partAt(view, cell(14, 10)));
+  studio.toggle(partAt(view, cell(14, 3)));
+  assert.deepEqual([studio.selection.kind, chosen(studio)], ["parts", ["13:8", "14:2"]]);
+  assert.match(studio.describe(), /^2 parts selected from 14:9: a node and a constant\. M makes a definition/);
+  studio.toggle(partAt(view, cell(14, 2)));
+  assert.deepEqual([studio.selection.kind, chosen(studio)], ["box", ["13:8"]], "a second Shift-click takes it away");
+  studio.toggle(partAt(view, cell(5, 2)));
+  assert.deepEqual(chosen(studio), ["13:8"], "a Shift-click on anything else changes nothing");
+  assert.match(host.statuses.at(-1)[0], /^Shift-click adds a node/);
+  // A switch is picked whole, by any of its cells but a constant's.
+  const absView = readView(sheet(abs));
+  assert.deepEqual(partCell(partAt(absView, cell(12, 14))), cell(9, 12));
+  assert.deepEqual(partCell(partAt(absView, cell(13, 15))), cell(13, 15), "a constant in an arm is its own part");
+  assert.equal(host.sent.length, 0, "selecting edits nothing");
+});
+
+test("with the Box tool off, a drag on blank sheet selects the parts wholly inside it, and with Shift adds them", () => {
+  const { tool, point, locate, studio, host } = boxToolOn(double);
+  tool.on = false;
+  const marquee = new Marquee(studio, locate, tool);
+  assert.equal(marquee.down(point(6, 12)), false, "a node's own blank cells still move it");
+  assert.equal(marquee.down(point(5, 2)), false, "a text isn't blank sheet");
+  assert.equal(marquee.down(point(12, 1)), true, "main's blank sheet");
+  assert.equal(marquee.move(point(14, 12)), true);
+  assert.deepEqual(marquee.drag.parts.map(partCell), [cell(14, 2)], "only the constant lies wholly inside so far");
+  marquee.move(point(16, 21));
+  assert.equal(marquee.up(point(16, 21)), "select");
+  assert.deepEqual([studio.selection.kind, chosen(studio)], ["parts", ["13:8", "14:2"]]);
+  assert.equal(marquee.down({ ...point(3, 1), shiftKey: true }), true);
+  marquee.move(point(8, 20));
+  assert.equal(marquee.up(point(8, 20)), "select");
+  assert.deepEqual(chosen(studio), ["4:10", "13:8", "14:2"], "with Shift, ·𐑛𐑳𐑚𐑩𐑤's 𐑐 is added");
+  assert.match(studio.describe(), /^3 parts selected from 5:11: 2 nodes and a constant\./);
+  // A press let go where it began is a click, for the page to handle.
+  assert.equal(marquee.down(point(12, 3)), true);
+  assert.equal(marquee.up(point(12, 3)), "click");
+  assert.equal(chosen(studio).length, 3);
+  // A switch is swept whole: 04-abs's switch, with the node and constant in its arm.
+  const swept = boxToolOn(abs);
+  swept.tool.on = false;
+  const outer = new Marquee(swept.studio, swept.locate, swept.tool);
+  assert.equal(outer.down(swept.point(8, 11)), true);
+  outer.move(swept.point(17, 27));
+  outer.up(swept.point(17, 27));
+  assert.deepEqual(chosen(swept.studio), ["9:12"]);
+  // While the Box tool is on, blank sheet is its.
+  tool.on = true;
+  assert.equal(marquee.down(point(12, 1)), false);
+  assert.equal(host.sent.length, 0, "selecting edits nothing");
+});
+
+test("Shift+] and Shift+[ add the next or previous part, and S selects a rectangle from the keyboard", () => {
+  const { studio, host, press } = studioOn(double);
+  studio.cursor = cell(12, 0);
+  press("]", { shiftKey: true });
+  assert.deepEqual([studio.selection.kind, chosen(studio)], ["box", ["13:8"]]);
+  press("}");
+  assert.deepEqual(chosen(studio), ["13:8", "14:2"]);
+  press("{");
+  assert.deepEqual(chosen(studio), ["4:10", "13:8", "14:2"], "back from the constant, past the parts already selected");
+  press("Escape");
+  studio.cursor = cell(12, 1);
+  press("s");
+  for (let i = 0; i < 4; i++) press("ArrowDown");
+  for (let i = 0; i < 20; i++) press("ArrowRight");
+  assert.deepEqual(studio.sketched, { top: 12, left: 1, bottom: 16, right: 21 });
+  assert.match(host.statuses.at(-1)[0], /round 2 parts/);
+  press("Enter");
+  assert.deepEqual([studio.selection.kind, chosen(studio)], ["parts", ["13:8", "14:2"]]);
+  assert.equal(studio.sketched, null);
+  assert.equal(host.sent.length, 0);
+});
+
+test("a multiple selection survives an edit elsewhere", () => {
+  const { studio, host } = studioOn(double);
+  const view = readView(sheet(double));
+  studio.selectParts([partAt(view, cell(14, 10)), partAt(view, cell(14, 2))]);
+  assert.equal(studio.edit(EDITS.move_box(4, 10, 1, 0)), true, host.refusals[0]?.reason);
+  assert.deepEqual([studio.selection.kind, chosen(studio)], ["parts", ["13:8", "14:2"]]);
+});
+
+test("M opens Make definition's field with a free name of two or more letters, and sends one extract of the parts' cells", () => {
+  const { studio, host, press } = studioOn(double);
+  press("m");
+  assert.deepEqual([host.extractions, host.sent.length], [0, 0], "nothing is selected");
+  assert.match(host.statuses.at(-1)[0], /^M makes a definition/);
+  const view = readView(sheet(double));
+  studio.selectParts([partAt(view, cell(14, 10)), partAt(view, cell(14, 2))]);
+  press("m");
+  assert.deepEqual([host.extractions, studio.extraction?.name], [1, "𐑯𐑿"]);
+  assert.equal(studio.editable(), null, "the parts have no text of their own");
+  studio.extract(studio.extraction.name);
+  assert.deepEqual(lastSent(host), { kind: "extract", picks: [cell(13, 8), cell(14, 2)], name: "𐑯𐑿" });
+  if (host.refusals.length) assert.ok(studio.extraction, "a refused name stays in its field to be corrected");
+  // Never main, which may have no inputs, and never a taken name.
+  assert.equal(definitionName(readView(sheet("")), PORT_NAMES, { main: false }), "𐑯𐑿");
+  const taken = { boxes: [{ kind: "definition", title: { content: "·𐑯𐑿" } }] };
+  assert.equal(definitionName(taken, PORT_NAMES, { main: false }), "𐑯𐑿𐑨");
+});
+
+pendingE3("Make definition takes main's node and constant out of 03-double as one undo step, and selects the call", EXTRACT, () => {
+  const { studio, host } = studioOn(double);
+  const view = readView(sheet(double));
+  studio.selectParts([partAt(view, cell(14, 10)), partAt(view, cell(14, 2))]);
+  studio.startExtract();
+  assert.equal(studio.extract(), true, host.refusals[0]?.reason);
+  assert.equal(host.steps.length, 1);
+  assert.deepEqual(outputsOf(host.current), outputsOf(double));
+  assert.ok(sheet(host.current).boxes().some((b) => b.kind === "definition" && b.title?.content === "·𐑯𐑿"));
+  assert.deepEqual([studio.selection.kind, studio.selection.box.word.content], ["box", "𐑯𐑿"]);
+  assert.equal(studio.extraction, null);
+  assert.equal(sheet(host.current).formatted(), host.current);
+});
+
+pendingE3("Make definition on 11-even-odd's 𐑚 and its 1 keeps the outputs, or says why it can't", EXTRACT, () => {
+  const src = corpus("11-even-odd.shaw");
+  const { studio, host } = studioOn(src);
+  const view = readView(sheet(src));
+  studio.selectParts([partAt(view, cell(13, 18)), partAt(view, cell(14, 13))]);
+  assert.deepEqual(chosen(studio), ["12:16", "14:13"]);
+  studio.startExtract();
+  if (studio.extract()) {
+    assert.equal(host.steps.length, 1);
+    assert.deepEqual(outputsOf(host.current), outputsOf(src));
+  } else {
+    const [refusal] = host.refusals;
+    assert.notEqual(refusal.kind, "unsupported");
+    assert.ok(refusal.reason);
+  }
+});
+
+test("a name_field follow-up opens the field on a title, and on a port with no name its commit writes at the arrowhead", () => {
+  const reserved = studioOn(corpus("static/02-reserved-nil.shaw"));
+  reserved.studio.followUp({ kind: "name_field", at: cell(2, 3) });
+  assert.equal(reserved.host.naming.at(-1)?.text.content, "·𐑯𐑦𐑤");
+  const unnamed = studioOn(corpus("static/05-unnamed-port.shaw"));
+  unnamed.studio.followUp({ kind: "name_field", at: cell(6, 20) });
+  assert.equal(unnamed.host.naming.length, 1);
+  assert.match(unnamed.studio.describe(), /of a port with no name at 7:21\. Enter names it\./);
+  const field = unnamed.studio.editable();
+  assert.deepEqual([field.text.content, field.at.row, field.at.col], ["", 6, 20]);
+  unnamed.studio.retext(field, "𐑑𐑵");
+  assert.deepEqual(lastSent(unnamed.host), { kind: "set_text", at: cell(6, 20), content: "𐑑𐑵" });
+});
+
+test("a draw_wire follow-up starts wiring from the arrowhead, as W does, and Enter connects", () => {
+  const src = corpus("static/01-unfed-port.shaw");
+  const { studio, host, press } = studioOn(src);
+  studio.followUp({ kind: "draw_wire", at: cell(6, 8) });
+  assert.ok(studio.wiring, host.statuses.at(-1)?.[0]);
+  assert.deepEqual([studio.wiring.from.kind, studio.wiring.from.sink.row, studio.wiring.from.sink.col], ["sink", 6, 8]);
+  press("Enter");
+  assert.equal(host.steps.length, 1, host.refusals[0]?.reason);
+  assert.ok(!codesOf(host.current).includes("Y019"));
+  // A stray literal with no free arrowhead in reach says so.
+  const stray = studioOn(corpus("static/06-stray-text.shaw"));
+  stray.studio.followUp({ kind: "draw_wire", at: cell(6, 2) });
+  assert.deepEqual([stray.studio.wiring, stray.studio.selection?.kind], [null, "source"]);
+  assert.match(stray.host.statuses.at(-1)[0], /Nothing in reach/);
+});
+
+test("a refused repair says why as other refusals do, with its edit and follow-up for Make room", () => {
+  const { studio, host } = studioOn(double);
+  const repair = { at: cell(4, 10), code: "Y000", label: "Fix…", edit: EDITS.move_box(4, 10, 0, 20), then: { kind: "draw_wire", at: cell(6, 10) } };
+  assert.equal(studio.repair(repair), false);
+  const [refusal] = host.refusals;
+  assert.deepEqual([refusal.kind, refusal.remedy, refusal.edit.kind, typeof refusal.then], ["blocked", "make-room", "move", "function"]);
+  assert.deepEqual([host.steps.length, studio.wiring], [0, null], "nothing is written, and no follow-up starts");
+});
+
+test("a Fix button's ghost is drawn after 150 ms of hover or focus, and goes when it is left", () => {
+  const { studio } = studioOn(double);
+  const timers = new Map();
+  let ids = 0;
+  const shown = [];
+  let hidden = 0;
+  const ghost = new RepairGhost({
+    trial: (edit) => studio.trial(edit),
+    show: (d) => shown.push(d.text),
+    hide: () => hidden++,
+    timers: { setTimeout: (fn, ms) => (timers.set(++ids, { fn, ms }), ids), clearTimeout: (id) => timers.delete(id) },
+  });
+  const wait = () => [...timers].forEach(([id, { fn }]) => (timers.delete(id), fn()));
+  const move = { at: cell(4, 10), code: "Y000", label: "Fix", edit: EDITS.move_box(4, 10, 1, 0), then: { kind: "none", at: null } };
+  assert.equal(GHOST_MS, 150);
+  ghost.enter(move);
+  assert.deepEqual([[...timers.values()].map((t) => t.ms), shown], [[GHOST_MS], []]);
+  ghost.leave();
+  wait();
+  assert.deepEqual(shown, [], "left before the beat, nothing is drawn");
+  ghost.enter(move);
+  wait();
+  assert.deepEqual(shown, [edits.move_box(double, 4, 10, 1, 0).text]);
+  const drawn = ghost.shown;
+  ghost.leave();
+  assert.equal(hidden, 1);
+  assert.throws(() => drawn.text, "the ghost's revision is freed");
+  // A refused edit, or a repair that is all follow-up, has no ghost.
+  ghost.enter({ ...move, edit: EDITS.move_box(4, 10, 0, 20) });
+  wait();
+  ghost.enter({ ...move, edit: null });
+  assert.equal(timers.size, 0);
+  assert.deepEqual([shown.length, hidden], [1, 1]);
+});
+
+test("F with no known fix at the cursor says so and edits nothing", () => {
+  const { studio, host, press } = studioOn(double);
+  studio.cursor = cell(5, 12);
+  assert.equal(press("f"), true);
+  assert.deepEqual(host.sent, []);
+  assert.match(host.statuses.at(-1)[0], /^F fixes/);
+});
+
+pendingE3("a Fix applies its repair as one undo step, and the diagnostic goes", REPAIRS, () => {
+  const src = corpus("static/03-no-namer-dot.shaw");
+  const { studio, host } = studioOn(src);
+  const [r] = sheet(src).repairs();
+  assert.deepEqual([r.code, r.then.kind], ["Y001", "none"]);
+  assert.equal(studio.repair(r), true, host.refusals[0]?.reason);
+  assert.equal(host.steps.length, 1);
+  assert.ok(!codesOf(host.current).includes("Y001"));
+});
+
+pendingE3("F fixes the diagnostic at the cursor, or one the selection covers", REPAIRS, () => {
+  const rounded = corpus("static/07-rounded-node.shaw");
+  const a = studioOn(rounded);
+  a.studio.cursor = cell(4, 6);
+  a.press("f");
+  assert.equal(a.host.steps.length, 1, a.host.refusals[0]?.reason);
+  assert.ok(!codesOf(a.host.current).includes("Y014"));
+  // 13-near-name's C001 is on the node's word; the node is selected by its box.
+  const near = corpus("static/13-near-name.shaw");
+  const b = studioOn(near);
+  b.studio.select({ kind: "box", box: readView(sheet(near)).boxes.find((x) => x.kind === "node") });
+  b.press("f");
+  assert.equal(b.host.steps.length, 1, b.host.refusals[0]?.reason);
+  assert.ok(!codesOf(b.host.current).includes("C001"));
+});
+
+pendingE3("Y009's Fix… opens the name field, and the name typed into it clears the diagnostic", REPAIRS, () => {
+  const src = corpus("static/05-unnamed-port.shaw");
+  const { studio, host } = studioOn(src);
+  const r = sheet(src).repairs().find((x) => x.code === "Y009");
+  assert.deepEqual([r.edit, r.then.kind, r.label.startsWith("Fix…")], [null, "name_field", true]);
+  assert.equal(studio.repair(r), true);
+  assert.deepEqual([host.steps.length, host.naming.length], [0, 1], "nothing is written until the name is");
+  assert.equal(studio.retext(studio.editable(), "𐑑𐑵"), true, host.refusals[0]?.reason);
+  assert.ok(!codesOf(host.current).includes("Y009"));
+});
+
+pendingE3("Y019's Fix… starts wiring at once, and W001's after adding a default arm as one undo step", REPAIRS, () => {
+  const unfed = corpus("static/01-unfed-port.shaw");
+  const a = studioOn(unfed);
+  const r = sheet(unfed).repairs().find((x) => x.code === "Y019");
+  assert.deepEqual([r.edit, r.then.kind, { ...r.then.at }], [null, "draw_wire", cell(6, 8)]);
+  a.studio.repair(r);
+  assert.ok(a.studio.wiring, a.host.statuses.at(-1)?.[0]);
+  const arm = corpus("static/11-no-default-arm.shaw");
+  const b = studioOn(arm);
+  const w = sheet(arm).repairs().find((x) => x.code === "W001");
+  assert.deepEqual([w.edit?.kind, w.then.kind], ["add_default_arm", "draw_wire"]);
+  assert.equal(b.studio.repair(w), true, b.host.refusals[0]?.reason);
+  assert.equal(b.host.steps.length, 1);
+  assert.ok(!codesOf(b.host.current).includes("W001"));
+  assert.ok(b.studio.wiring, `wiring starts from the new arm's port: ${b.host.statuses.at(-1)?.[0]}`);
+});
+
+test("the faded drawing kept while the text can't be drawn is labelled the last valid drawing", () => {
+  assert.equal(sheet("\t").render(false, true), undefined, "a tab can't be drawn");
+  assert.equal(undrawable(true), "Last valid drawing");
+  assert.match(undrawable(false), /Diagnostics/);
+});
+
+test("every wave 3 gesture has a key in the ? overlay", () => {
+  const keys = KEYS.map(([k]) => k);
+  for (const k of ["Shift+] Shift+[", "Shift + click", "Drag on blank sheet", "S", "M", "F"]) assert.ok(keys.includes(k), k);
+  assert.match(KEYS.find(([k]) => k === "F")[1], /Fix/);
+  assert.match(KEYS.find(([k]) => k === "M")[1], /definition/);
+});
+
+if (skipped) console.log(`${skipped} skipped until E1's, E2's or E3's work lands`);
 process.exit(failed ? 1 : 0);

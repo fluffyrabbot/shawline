@@ -17,7 +17,7 @@
 use js_sys::{Array, Object, Reflect};
 use shawline_doc::TRACE_STEPS;
 use shawline_doc::position::{self, Encoding};
-use shawline_edit::{Anchor, Axis, BoxKind, Edit, Insertion, NewSource, Refusal, RefusalKind};
+use shawline_edit::{Anchor, Axis, BoxKind, Edit, Followup, Insertion, NewSource, Refusal, RefusalKind};
 use shawline_grid::{Diagnostic, Dir, Pos, Rect};
 use shawline_render::{Options, SCALE, Theme};
 use shawline_shape::{Diagram, PortKind, Text, TextKind};
@@ -324,6 +324,36 @@ impl Doc {
         let grid = self.0.grid().ok()?;
         Some(Geometry(shawline_render::Geometry::new(grid, gloss, SCALE * zoom)))
     }
+
+    /// The known fixes for this revision's diagnostics
+    /// (`shawline_edit::repairs`), in diagnostic order and at most one per
+    /// diagnostic: an array of `{ at, code, label, edit, then }`. `at` is
+    /// the diagnostic's cell as `{ row, col }`, and `label` what its button
+    /// says. `edit` is the edit as [`apply`] takes it, or `null` when the
+    /// follow-up is all of the fix. `then` is `{ kind, at }`, where `kind`
+    /// is `"none"`, `"name_field"` or `"draw_wire"` and `at` the cell the
+    /// follow-up acts on (`null` for `"none"`). Nothing is applied.
+    pub fn repairs(&self) -> Array {
+        shawline_edit::repairs(&self.0)
+            .into_iter()
+            .map(|r| {
+                let o = Object::new();
+                set(&o, "at", &cell(r.at));
+                set(&o, "code", &r.code.into());
+                set(&o, "label", &r.label.into());
+                set(&o, "edit", &r.edit.as_ref().map_or(JsValue::NULL, |e| edit_object(e).into()));
+                let then = Object::new();
+                set(&then, "kind", &r.then.name().into());
+                let at = match r.then {
+                    Followup::None => JsValue::NULL,
+                    Followup::NameField(at) | Followup::DrawWire(at) => cell(at),
+                };
+                set(&then, "at", &at);
+                set(&o, "then", &then);
+                JsValue::from(o)
+            })
+            .collect()
+    }
 }
 
 impl Doc {
@@ -453,8 +483,13 @@ pub fn trace(src: &str) -> Object {
 // - `{ kind: "place_definition", rect, name }`, `{ kind: "place_switch",
 //   rect, guard }`, `{ kind: "add_port", at, name }`, `{ kind: "add_arm",
 //   at, guard }`, `{ kind: "place_inline", at, word }`
+// - `{ kind: "extract", picks, name }`, where `picks` is an array of cells
+// - `{ kind: "restyle", corner, rounded }`, `{ kind: "fix", at }`,
+//   `{ kind: "add_default_arm", corner }`
 //
 // Cells are `{ row, col }` and rectangles `{ top, left, bottom, right }`.
+// A guard or port name the edit leaves out is `null`. `edit_object` writes
+// an `Edit` back in this form, for the repairs `Doc.repairs` offers.
 
 /// Applies one edit to `doc` (`shawline_edit::apply`). Done, it returns `{
 /// ok: true, doc, tidied, map }`: the next revision, whether the edit was
@@ -565,9 +600,165 @@ fn edit_of(value: &JsValue) -> Result<Edit, String> {
             inputs: count(value, "inputs")?,
             outputs: count(value, "outputs")?,
         },
+        "extract" => {
+            let picks = field(value, "picks")?;
+            if !Array::is_array(&picks) {
+                return Err("picks isn't a list of cells".into());
+            }
+            let picks = Array::from(&picks).iter().map(|c| cell_of(&c)).collect::<Result<_, _>>()?;
+            Edit::Extract { picks, name: string(value, "name")? }
+        }
+        "restyle" => Edit::Restyle {
+            corner: pos(value, "corner")?,
+            rounded: field(value, "rounded")?.as_bool().ok_or("rounded isn't true or false")?,
+        },
+        "fix" => Edit::Fix(pos(value, "at")?),
+        "add_default_arm" => Edit::AddDefaultArm(pos(value, "corner")?),
         other => return Err(format!("no edit {other}")),
     };
     Ok(edit)
+}
+
+/// An edit as the object [`apply`] takes: `edit_of`'s inverse.
+fn edit_object(edit: &Edit) -> Object {
+    let o = Object::new();
+    let put = |key: &str, value: JsValue| set(&o, key, &value);
+    let text = |s: &str| JsValue::from(s);
+    let some = |s: &Option<String>| s.as_deref().map_or(JsValue::NULL, JsValue::from);
+    // Fields several edits share, each giving back the edit's name.
+    let at = |p: &Pos, name: &'static str| {
+        put("at", cell(*p));
+        name
+    };
+    let ends = |from: &Pos, to: &Pos, name: &'static str| {
+        put("from", cell(*from));
+        put("to", cell(*to));
+        name
+    };
+    let ports = |inputs: u16, outputs: u16| {
+        put("inputs", inputs.into());
+        put("outputs", outputs.into());
+    };
+    let cut = |i: &Insertion, name: &'static str| {
+        put("axis", i.axis.name().into());
+        put("count", (i.count as u32).into());
+        at(&i.at, name)
+    };
+    let name = match edit {
+        Edit::Move { corner, dr, dc } => {
+            put("corner", cell(*corner));
+            put("dr", (*dr as f64).into());
+            put("dc", (*dc as f64).into());
+            "move"
+        }
+        Edit::Connect { from, to } => ends(from, to, "connect"),
+        Edit::Rewire { from, to } => ends(from, to, "rewire"),
+        Edit::RemoveWire(p) => at(p, "remove_wire"),
+        Edit::Disconnect(p) => at(p, "disconnect"),
+        Edit::RemoveNode(p) => at(p, "remove_node"),
+        Edit::RemoveText(p) => at(p, "remove_text"),
+        Edit::RemovePort(p) => at(p, "remove_port"),
+        Edit::RemoveArm(p) => at(p, "remove_arm"),
+        Edit::RemoveBox(p) => at(p, "remove_box"),
+        Edit::Fix(p) => at(p, "fix"),
+        Edit::PlaceNode { corner, word, inputs, outputs } => {
+            put("corner", cell(*corner));
+            put("word", text(word));
+            ports(*inputs, *outputs);
+            "place_node"
+        }
+        Edit::PlaceConnected { at: p, word, inputs, outputs, from } => {
+            put("word", text(word));
+            ports(*inputs, *outputs);
+            put("from", cell(*from));
+            at(p, "place_connected")
+        }
+        Edit::Feed { to, source } => {
+            put("to", cell(*to));
+            let s = Object::new();
+            match source {
+                NewSource::Constant(content) => {
+                    set(&s, "kind", &"constant".into());
+                    set(&s, "content", &text(content));
+                }
+                NewSource::Node { word, inputs, outputs } => {
+                    set(&s, "kind", &"node".into());
+                    set(&s, "word", &text(word));
+                    set(&s, "inputs", &(*inputs).into());
+                    set(&s, "outputs", &(*outputs).into());
+                }
+            }
+            put("source", s.into());
+            "feed"
+        }
+        Edit::Insert(i) => cut(i, "insert"),
+        Edit::Delete(i) => cut(i, "delete"),
+        Edit::MakeRoom(inner) => {
+            put("edit", edit_object(inner).into());
+            "make_room"
+        }
+        Edit::SetText { at: p, content } => {
+            put("content", text(content));
+            at(p, "set_text")
+        }
+        Edit::PlaceText { at: p, content } => {
+            put("content", text(content));
+            at(p, "place_text")
+        }
+        Edit::PlaceDefinition { rect, name } => {
+            put("rect", rect_object(*rect).into());
+            put("name", text(name));
+            "place_definition"
+        }
+        Edit::PlaceSwitch { rect, guard } => {
+            put("rect", rect_object(*rect).into());
+            put("guard", some(guard));
+            "place_switch"
+        }
+        Edit::AddPort { at: p, name } => {
+            put("name", some(name));
+            at(p, "add_port")
+        }
+        Edit::AddArm { at: p, guard } => {
+            put("guard", some(guard));
+            at(p, "add_arm")
+        }
+        Edit::PlaceInline { at: p, word } => {
+            put("word", text(word));
+            at(p, "place_inline")
+        }
+        Edit::SetPorts { corner, inputs, outputs } => {
+            put("corner", cell(*corner));
+            ports(*inputs, *outputs);
+            "set_ports"
+        }
+        Edit::Extract { picks, name } => {
+            put("picks", picks.iter().map(|&p| cell(p)).collect::<Array>().into());
+            put("name", text(name));
+            "extract"
+        }
+        Edit::Restyle { corner, rounded } => {
+            put("corner", cell(*corner));
+            put("rounded", (*rounded).into());
+            "restyle"
+        }
+        Edit::AddDefaultArm(corner) => {
+            put("corner", cell(*corner));
+            "add_default_arm"
+        }
+    };
+    put("kind", name.into());
+    o
+}
+
+/// An inclusive cell rectangle as `{ top, left, bottom, right }`.
+fn rect_object(r: Rect) -> Object {
+    let o = Object::new();
+    set(&o, "top", &(r.top as u32).into());
+    set(&o, "left", &(r.left as u32).into());
+    set(&o, "bottom", &(r.bottom as u32).into());
+    set(&o, "right", &(r.right as u32).into());
+    o
 }
 
 fn field(value: &JsValue, key: &str) -> Result<JsValue, String> {
@@ -603,8 +794,12 @@ fn index(value: &JsValue, key: &str) -> Result<usize, String> {
 }
 
 fn pos(value: &JsValue, key: &str) -> Result<Pos, String> {
-    let cell = field(value, key)?;
-    Ok(Pos::new(index(&cell, "row")?, index(&cell, "col")?))
+    cell_of(&field(value, key)?)
+}
+
+/// A `{ row, col }` object's cell.
+fn cell_of(cell: &JsValue) -> Result<Pos, String> {
+    Ok(Pos::new(index(cell, "row")?, index(cell, "col")?))
 }
 
 fn rect(value: &JsValue, key: &str) -> Result<Rect, String> {
@@ -659,13 +854,7 @@ impl Mapping {
     pub fn map_box(&self, row: u32, col: u32) -> Option<Object> {
         let corner = at(row, col);
         let i = self.from.boxes.iter().position(|b| (b.rect.top, b.rect.left) == (corner.row, corner.col))?;
-        let r = self.to.boxes[(*self.map.boxes.get(i)?)?].rect;
-        let o = Object::new();
-        set(&o, "top", &(r.top as u32).into());
-        set(&o, "left", &(r.left as u32).into());
-        set(&o, "bottom", &(r.bottom as u32).into());
-        set(&o, "right", &(r.right as u32).into());
-        Some(o)
+        Some(rect_object(self.to.boxes[(*self.map.boxes.get(i)?)?].rect))
     }
 
     /// The text through the cell: its new `{ row, col, span }`, `span`
@@ -847,6 +1036,15 @@ pub fn table() -> Array {
             Array::of3(&keys.into(), &letter.to_string().into(), &name.into())
         })
         .collect()
+}
+
+/// The names a new port takes, in order (`shawline_edit::PORT_NAMES`: 𐑨,
+/// 𐑚, 𐑒, …), as an array of one-letter strings. The Box tool names a
+/// definition's new port with the first its ports don't have, as
+/// `extract` names the ports it makes.
+#[wasm_bindgen]
+pub fn port_names() -> Array {
+    shawline_edit::PORT_NAMES.iter().map(|c| JsValue::from(c.to_string())).collect()
 }
 
 /// An incremental transliterator for one editor (SPEC §13).

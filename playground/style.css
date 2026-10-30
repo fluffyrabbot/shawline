@@ -261,6 +261,22 @@ main {
 #drawing > svg { display: block; cursor: text; overflow: visible; }
 #drawing .sheet-end { position: absolute; left: 0; top: 0; height: 1px; visibility: hidden; pointer-events: none; }
 #drawing svg.stale { opacity: 0.35; transition: opacity 0.2s; }
+/* Over a stale drawing: it is the last one the text could draw. */
+#drawing .stale-note {
+  position: absolute;
+  z-index: 2;
+  left: 8px;
+  top: 8px;
+  margin: 0;
+  padding: 3px 10px;
+  font: 13px/1.4 var(--sans);
+  color: var(--text);
+  background: var(--background);
+  border-left: 3px solid var(--error);
+  border-radius: 6px;
+  pointer-events: none;
+}
+#drawing .stale-note[hidden] { display: none; }
 #drawing .cell { fill: var(--ink); opacity: 0.22; transition: opacity 0.15s; }
 #drawing .cell.hot { opacity: 0.45; }
 
@@ -331,8 +347,21 @@ button[aria-pressed="true"] { background: var(--wash); border-color: var(--wire)
   color: var(--text);
   cursor: pointer;
 }
-#drawing .room-ghost { position: absolute; z-index: 1; pointer-events: none; opacity: 0; transition: opacity 0.15s; }
-#drawing .room-ghost.shown { opacity: 0.45; }
+/* Another revision's drawing over this one: the sheet Make room or a
+   repair would leave. */
+#drawing .sheet-ghost { position: absolute; z-index: 1; pointer-events: none; opacity: 0; transition: opacity 0.15s; }
+#drawing .sheet-ghost.shown { opacity: 0.45; }
+/* A marquee, or `S`'s rectangle: what it sweeps, and the parts it would select. */
+#drawing.selecting svg { cursor: crosshair; user-select: none; }
+#drawing .sweep {
+  fill: color-mix(in srgb, var(--wire) 5%, transparent);
+  stroke: var(--wire);
+  stroke-width: 40;
+  stroke-dasharray: 90 70;
+}
+#drawing .swept { fill: color-mix(in srgb, var(--wire) 20%, transparent); stroke: none; }
+.inspector .extract { display: flex; align-items: baseline; gap: 8px; }
+.inspector .extract .field { flex: 1; }
 #drawing .inline-text {
   position: absolute;
   z-index: 3;
@@ -538,7 +567,7 @@ button[aria-pressed="true"] { background: var(--wash); border-color: var(--wire)
 
 #problems li {
   display: grid;
-  grid-template-columns: 4.5em 3.5em 1fr;
+  grid-template-columns: 4.5em 3.5em 1fr auto;
   align-items: baseline;
   gap: 12px;
   padding: 7px 10px;
@@ -549,6 +578,8 @@ button[aria-pressed="true"] { background: var(--wash); border-color: var(--wire)
 #problems li:hover, #problems li.hot { background: var(--wash); }
 #problems li.clear { cursor: default; color: var(--comment); grid-template-columns: 1fr; }
 #problems li.clear:hover { background: none; }
+/* A diagnostic's known fix: hovered or focused it draws a ghost, pressed it applies. */
+#problems .fix { grid-column: 4; padding: 1px 10px; font: 13px/1.4 var(--sans); white-space: nowrap; }
 
 .pos { color: var(--comment); font-variant-numeric: tabular-nums; font-size: 13px; }
 .code { color: var(--ink); font-weight: 600; font-size: 13px; letter-spacing: 0.02em; }

@@ -19,13 +19,6 @@ const LARGEST = 2n ** 63n - 1n;
 /** Pixels of sideways drag per scrub step. */
 export const SCRUB_PX = 8;
 
-/**
- * The names a definition's new port takes, the first not already one of
- * its ports' names: PLAN P10's naming for extracted ports, 𐑨, 𐑚, 𐑒, …,
- * the letters typed a, b, c, … in alphabet order.
- */
-export const PORT_NAMES = [..."𐑨𐑚𐑒𐑛𐑧𐑓𐑜𐑣𐑦𐑡𐑤𐑥𐑯𐑪𐑐𐑮𐑕𐑑𐑳𐑝𐑢𐑘𐑟"];
-
 /** The entry point's name (SPEC §5): a new definition takes it while the sheet has none. */
 export const MAIN = "𐑥𐑱𐑯";
 
@@ -34,6 +27,9 @@ export const MAIN = "𐑥𐑱𐑯";
  * 𐑯𐑿𐑨, 𐑯𐑿𐑚, … A single letter would be reserved (`Y013`).
  */
 const NEW = "𐑯𐑿";
+
+/** The empty list, a constant written as a word. */
+const NIL = "𐑯𐑦𐑤";
 
 /** The first arm's guard on a switch the Box tool draws, so `+ arm` can add the default arm after it. */
 export const FIRST_GUARD = "0";
@@ -95,17 +91,23 @@ function firstFree(names, taken) {
   return null;
 }
 
-/** The name the Box tool gives a new definition: 𐑥𐑱𐑯 while the sheet has none. */
-export function definitionName(view) {
+/**
+ * The name the Box tool gives a new definition: 𐑥𐑱𐑯 while the sheet has
+ * none, then the first free one of 𐑯𐑿 and 𐑯𐑿 followed by each of `names`
+ * (wasm's `port_names()`). Without `main` it skips 𐑥𐑱𐑯: Make definition's
+ * name, since parts taken out of a definition usually have inputs, and
+ * main may have none (`C006`).
+ */
+export function definitionName(view, names, { main = true } = {}) {
   const taken = new Set(
     view.boxes.filter((b) => b.kind === "definition" && b.title).map((b) => b.title.content.replace(/^·/, "")),
   );
-  return firstFree([MAIN, NEW, ...PORT_NAMES.map((n) => NEW + n)], taken);
+  return firstFree([...(main ? [MAIN] : []), NEW, ...names.map((n) => NEW + n)], taken);
 }
 
-/** The name a definition's new port takes: the first of `PORT_NAMES` none of its ports has. */
-export function portName(box) {
-  return firstFree(PORT_NAMES, new Set(box.ports.map((p) => p.name?.content).filter(Boolean)));
+/** The name a definition's new port takes: the first of `names` (wasm's `port_names()`) none of its ports has. */
+export function portName(box, names) {
+  return firstFree(names, new Set(box.ports.map((p) => p.name?.content).filter(Boolean)));
 }
 
 /**
@@ -199,8 +201,8 @@ export function anchorOf(target) {
     case "branch":
     case "sink":
       return { row: target.sink.row, col: target.sink.col };
-    case "wire":
-      return { row: target.at.row, col: target.at.col };
+    case "parts":
+      return anchorOf(target.parts[0]);
     default:
       return { row: target.at.row, col: target.at.col };
   }
@@ -210,7 +212,28 @@ export function anchorOf(target) {
 export function sameTarget(a, b) {
   if (!a || !b || a.kind !== b.kind) return false;
   if (a.kind === "wire") return a.wire.wire === b.wire.wire;
+  if (a.kind === "parts") return a.parts.length === b.parts.length && a.parts.every((p, i) => sameTarget(p, b.parts[i]));
   return same(anchorOf(a), anchorOf(b));
+}
+
+/** Whether a selection covers a cell: a box's area, a text's cells, a wire's or branch's cells. */
+function covers(target, at) {
+  switch (target.kind) {
+    case "box":
+      return within(at, target.box);
+    case "arm":
+      return at.row === target.divider && at.col >= target.box.left && at.col <= target.box.right;
+    case "parts":
+      return target.parts.some((p) => covers(p, at));
+    case "wire":
+      return target.wire.cells.some((c) => same(c, at));
+    case "branch":
+      return same(target.sink, at) || target.cells.some((c) => same(c, at));
+    case "sink":
+      return same(target.sink, at);
+    default:
+      return at.row === target.at.row && at.col >= target.at.col && at.col < target.at.col + (target.at.span ?? 1);
+  }
 }
 
 /** The source or text selection for a text: a source when a wire may start there. */
@@ -218,6 +241,68 @@ function textTarget(view, text) {
   const source = sourceAt(view, text);
   const at = { row: text.row, col: text.col, span: text.span };
   return source ? { kind: "source", at, source, text } : { kind: "text", at, text };
+}
+
+// Parts (PLAN P10, Gesture details: Extracting a definition): what Make
+// definition takes out, selected one at a time or several together.
+
+/**
+ * Whether a selection is a part: a node box or a switch, picked whole, or
+ * a constant or an inline node's word. An input's name is a source too,
+ * but no part.
+ */
+function isPart(view, target) {
+  if (target?.kind === "box") return target.box.kind !== "definition";
+  return target?.kind === "source" && Boolean(target.text) && !portNamed(view, target.text);
+}
+
+/** The cell `extract` names a part by: a box's corner, or a text's first cell. */
+export const partCell = (target) =>
+  target.kind === "box" ? { row: target.box.top, col: target.box.left } : { row: target.text.row, col: target.text.col };
+
+/** The part a Shift-click on a cell takes: a constant or an inline node's word there, or else the node or switch around it. */
+export function partAt(view, at) {
+  const text = textAt(view, at);
+  const target = text && text.kind !== "comment" ? textTarget(view, text) : null;
+  if (isPart(view, target)) return target;
+  const box = boxAt(view, at);
+  return box && box.kind !== "definition" ? { kind: "box", box } : null;
+}
+
+/**
+ * The parts lying wholly inside a rectangle, for a marquee. Only the
+ * outermost count: a switch is picked whole, with what it holds.
+ */
+export function partsIn(view, rect) {
+  const inside = (r) => r.top >= rect.top && r.bottom <= rect.bottom && r.left >= rect.left && r.right <= rect.right;
+  const found = view.boxes.filter((b) => b.kind !== "definition" && inside(b)).map((box) => ({ kind: "box", box }));
+  for (const text of view.texts) {
+    if (text.kind === "comment" || !inside({ top: text.row, bottom: text.row, left: text.col, right: text.col + text.span - 1 })) continue;
+    const target = textTarget(view, text);
+    if (isPart(view, target)) found.push(target);
+  }
+  const boxes = found.filter((p) => p.kind === "box").map((p) => p.box);
+  return found.filter((p) => !boxes.some((b) => b !== p.box && within(partCell(p), b)));
+}
+
+/** Parts as one selection: none is null, one is itself, and more are `{ kind: "parts", parts }` in row-major order. */
+function groupOf(parts) {
+  if (parts.length < 2) return parts[0] ?? null;
+  return { kind: "parts", parts: [...parts].sort((a, b) => before(partCell(a), partCell(b))) };
+}
+
+/** What a part is, as a description counts it. */
+function partNoun(part) {
+  if (part.kind === "box") return switchLike(part.box) ? "switch" : "node";
+  return part.text.kind === "word" && part.text.content !== NIL ? "inline node" : "constant";
+}
+
+/** Parts counted in words: "2 nodes and a constant". */
+function countParts(parts) {
+  const counts = new Map();
+  for (const p of parts) counts.set(partNoun(p), (counts.get(partNoun(p)) ?? 0) + 1);
+  const said = [...counts].map(([noun, n]) => (n === 1 ? `${/^[aeiou]/.test(noun) ? "an" : "a"} ${noun}` : `${n} ${noun === "switch" ? "switches" : `${noun}s`}`));
+  return said.length > 1 ? `${said.slice(0, -1).join(", ")} and ${said.at(-1)}` : said[0];
 }
 
 /**
@@ -264,6 +349,8 @@ const HINTS = {
   source: "W wires it to an arrowhead; Enter edits its text; Delete removes it.",
   sink: "W wires it from a source; Delete removes its port.",
   text: "Enter edits it.",
+  unnamed: "Enter names it.",
+  parts: "M makes a definition of them; Shift-click adds or takes one away.",
 };
 
 const NOUNS = { definition: "Definition", switch: "Switch", node: "Node", empty: "Empty box" };
@@ -273,6 +360,12 @@ const boxNoun = (box) => (switchLike(box) && box.kind === "node" ? "empty" : box
 
 /** Markdown as one line of plain words, for a live region. */
 const plain = (markdown) => markdown.replace(/\*\*|`/g, "").replace(/\s*\n+\s*/g, ". ");
+
+/** The definition port at a cell when it has no name (`Y009`), or null. */
+function unnamedPort(view, at) {
+  const held = portAt(view, at);
+  return held?.box.kind === "definition" && !held.port.name ? held.port : null;
+}
 
 /**
  * The drawing's editing state. `host` gives it the page:
@@ -287,14 +380,19 @@ const plain = (markdown) => markdown.replace(/\*\*|`/g, "").replace(/\s*\n+\s*/g
  * - `changed()`: the selection, cursor or held revision changed;
  * - `palette(at, mode)` (`"place"`, or `"inline"` on a wire),
  *   `editText(target)`, `name(target)` (the inspector's field, focused),
- *   `help()`, `zoom(how)`: open things;
- * - `gloss()`: whether descriptions include readings.
+ *   `extracting()` (Make definition's name field, focused), `help()`,
+ *   `zoom(how)`: open things;
+ * - `gloss()`: whether descriptions include readings;
+ * - `portNames`: wasm's `port_names()`, the names new ports take.
  */
 export class Studio {
   constructor(host) {
     this.host = host;
+    this.names = host.portNames;
     this.selection = null;
     this.cursor = null;
+    /** Make definition's name while its field is open: `{ name }`, the default. */
+    this.extraction = null;
     /** A preview revision a held gesture is editing: `{ base, text, map, tidied }`. */
     this.held = null;
     /** `W` mode: the end being wired, and the glowing ends it may reach. */
@@ -352,6 +450,7 @@ export class Studio {
     if (this.selection) this.cursor = anchorOf(this.selection);
     this.wiring = null;
     this.sketch = null;
+    this.extraction = null;
     if (!quiet && this.selection) this.host.status(this.describe(), "hint");
     this.host.changed();
   }
@@ -381,6 +480,10 @@ export class Studio {
     if (!target) return this.cursor ? `Cell ${this.cursor.row + 1}:${this.cursor.col + 1}` : "";
     const doc = this.doc();
     const view = this.view();
+    if (target.kind === "parts") {
+      const at = anchorOf(target);
+      return `${target.parts.length} parts selected from ${at.row + 1}:${at.col + 1}: ${countParts(target.parts)}. ${HINTS.parts}`;
+    }
     const said = (at) => {
       const d = at && doc.describe(at.row, at.col, this.host.gloss?.() ?? false);
       return d ? plain(d.text) : "";
@@ -417,6 +520,10 @@ export class Studio {
         what = `Text ${target.text.content}`;
         about = said(target.at);
     }
+    if (["sink", "branch", "source"].includes(target.kind) && !target.text && unnamedPort(view, anchorOf(target))) {
+      what = `${what} of a port with no name`;
+      hint = `${HINTS.unnamed} ${hint}`;
+    }
     return [`${what} at ${anchorOf(target).row + 1}:${anchorOf(target).col + 1}.`, about && `${about}.`, hint]
       .filter(Boolean)
       .join(" ");
@@ -425,10 +532,16 @@ export class Studio {
   /**
    * The text Enter edits and the inspector's field holds for a selection:
    * a text itself, a node's word, a definition's name, or an arm's guard.
+   * A definition's port with no name (`Y009`) has an empty one at its
+   * arrowhead, where `set_text` writes the name.
    */
   editable(target = this.selection, view = this.view()) {
     if (!target) return null;
     if ((target.kind === "source" || target.kind === "text") && target.text) return target.text.kind === "comment" ? null : target;
+    if (["sink", "branch", "source"].includes(target.kind) && unnamedPort(view, anchorOf(target))) {
+      const { row, col } = anchorOf(target);
+      return { kind: "text", at: { row, col, span: 1 }, text: { row, col, span: 1, kind: "word", content: "" } };
+    }
     const text =
       target.kind === "box" ? (target.box.kind === "node" ? target.box.word : target.box.kind === "definition" ? target.box.title : null)
       : target.kind === "arm" ? target.guard
@@ -493,6 +606,8 @@ export class Studio {
 
   carry(target, map, view) {
     switch (target.kind) {
+      case "parts":
+        return groupOf(target.parts.map((p) => this.carry(p, map, view)).filter(Boolean));
       case "box": {
         const r = map.map_box(target.box.top, target.box.left);
         const box = r && view.boxes.find((b) => b.top === r.top && b.left === r.left);
@@ -651,17 +766,37 @@ export class Studio {
     if (e.repeat && this.held) return true;
     if (this.held) this.release();
     if (this.sketch && (e.key === "Enter" || e.key === "Escape")) {
-      const { from } = this.sketch;
+      const { from, mode } = this.sketch;
       this.sketch = null;
-      if (e.key === "Enter") this.placeBox(rectOf(from, this.cursor));
-      else this.host.status("");
+      const rect = rectOf(from, this.cursor);
+      if (e.key === "Escape") this.host.status("");
+      else if (mode === "select") this.selectParts(partsIn(this.view(), rect), { add: e.shiftKey });
+      else this.placeBox(rect);
       this.host.changed();
       return true;
     }
     switch (e.key) {
       case "]":
       case "[":
-        this.step(e.key === "[");
+        if (e.shiftKey) this.extend(e.key === "[");
+        else this.step(e.key === "[");
+        return true;
+      // Shift+] and Shift+[ on most layouts.
+      case "}":
+      case "{":
+        this.extend(e.key === "{");
+        return true;
+      case "s":
+      case "S":
+        this.startSketch("select");
+        return true;
+      case "m":
+      case "M":
+        this.startExtract();
+        return true;
+      case "f":
+      case "F":
+        this.repairHere();
         return true;
       case "Enter": {
         const target = this.editable();
@@ -753,7 +888,11 @@ export class Studio {
     this.selection = null;
     if (this.sketch) {
       const r = rectOf(this.sketch.from, this.cursor);
-      this.host.status(`A box ${r.bottom - r.top + 1} rows by ${r.right - r.left + 1} columns. Enter draws it.`, "hint");
+      const size = `${r.bottom - r.top + 1} rows by ${r.right - r.left + 1} columns`;
+      if (this.sketch.mode === "select") {
+        const n = partsIn(this.view(), r).length;
+        this.host.status(`A rectangle ${size}, round ${n} part${n === 1 ? "" : "s"}. Enter selects them.`, "hint");
+      } else this.host.status(`A box ${size}. Enter draws it.`, "hint");
     } else this.host.status(this.describe(), "hint");
     this.host.changed();
   }
@@ -811,7 +950,7 @@ export class Studio {
    */
   boxEdit(rect, view = this.view()) {
     const r = { top: rect.top, left: rect.left, bottom: rect.bottom, right: rect.right };
-    if (!boxAt(view, { row: r.top, col: r.left })) return { kind: "place_definition", rect: r, name: definitionName(view) };
+    if (!boxAt(view, { row: r.top, col: r.left })) return { kind: "place_definition", rect: r, name: definitionName(view, this.names) };
     return { kind: "place_switch", rect: r, guard: FIRST_GUARD };
   }
 
@@ -844,7 +983,7 @@ export class Studio {
     if (!box) return void this.host.status("A port goes on a box's border: put the cursor on one.", "hint");
     const cell = cellOf(at);
     if (box.kind !== "definition") return this.edit({ kind: "add_port", at: cell, name: null });
-    return this.edit({ kind: "add_port", at: cell, name: portName(box) }, (map) => {
+    return this.edit({ kind: "add_port", at: cell, name: portName(box, this.names) }, (map) => {
       const view = this.view();
       const port = portAt(view, map ? map.map_cell(at.row, at.col) : cell)?.port;
       if (port?.name) this.name(port.name, view);
@@ -895,6 +1034,17 @@ export class Studio {
     const arm = open ? arms.at(-1) : (arms.at(-2) ?? arms.at(-1));
     const guard = open ? null : nextGuard(arms);
     return this.edit({ kind: "add_arm", at: { row: this.dividerRow(box, arm), col: box.left }, guard });
+  }
+
+  /**
+   * The revision an edit would make of the shown one, for a ghost, or null
+   * when it would be refused. Nothing is written; the caller frees it.
+   */
+  trial(edit) {
+    const result = this.host.apply(this.doc(), edit);
+    if (!result.ok) return null;
+    result.map?.free();
+    return result.doc;
   }
 
   /** The refusal an edit would meet on the shown revision, or null: a trial, for a live verdict. Nothing is written. */
@@ -955,18 +1105,145 @@ export class Studio {
     return this.edit({ kind: "set_text", at: cellOf(target.at), content });
   }
 
-  /** B: a box from the cursor, stretched by the arrow keys and drawn by Enter. */
-  startSketch() {
+  /**
+   * B: a box from the cursor, stretched by the arrow keys and drawn by
+   * Enter. S (`mode` `"select"`): a rectangle the same way, and Enter
+   * selects the parts inside it, as a marquee does.
+   */
+  startSketch(mode = "box") {
     this.cursor ??= { row: 0, col: 0 };
     this.selection = null;
-    this.sketch = { from: { ...this.cursor } };
-    this.host.status("Drawing a box: arrow keys stretch it, Enter draws it, Escape stops.", "hint");
+    this.sketch = { from: { ...this.cursor }, mode };
+    const said = mode === "select"
+      ? "Selecting: arrow keys stretch the rectangle, Enter selects the nodes, switches and constants inside, Escape stops."
+      : "Drawing a box: arrow keys stretch it, Enter draws it, Escape stops.";
+    this.host.status(said, "hint");
     this.host.changed();
   }
 
-  /** The rectangle `B` is drawing, or null. */
+  /** The rectangle `B` or `S` is drawing, or null. */
   get sketched() {
     return this.sketch && this.cursor ? rectOf(this.sketch.from, this.cursor) : null;
+  }
+
+  // Multiple selection and Make definition (PLAN P10, Gesture details:
+  // Extracting a definition).
+
+  /** The parts the selection names: its parts, the selection itself when it is one, or none. */
+  get parts() {
+    const s = this.selection;
+    if (s?.kind === "parts") return s.parts;
+    return s && isPart(this.view(), s) ? [s] : [];
+  }
+
+  /** Selects `found`, or with `add` the parts already selected and `found`. */
+  selectParts(found, { add = false } = {}) {
+    const list = add ? [...this.parts] : [];
+    for (const p of found) if (!list.some((q) => sameTarget(q, p))) list.push(p);
+    this.select(groupOf(list));
+  }
+
+  /** Shift-click: adds a part to the selection, or takes it away. */
+  toggle(part) {
+    if (!isPart(this.view(), part)) {
+      return void this.host.status("Shift-click adds a node, a switch or a constant to the selection.", "hint");
+    }
+    const list = this.parts.filter((p) => !sameTarget(p, part));
+    if (list.length === this.parts.length) list.push(part);
+    this.select(groupOf(list));
+  }
+
+  /** Shift+] and Shift+[: adds the next or previous part after the cursor to the selection. */
+  extend(back = false) {
+    const view = this.view();
+    const chosen = this.parts;
+    const list = objects(view).filter((o) => isPart(view, o) && !chosen.some((p) => sameTarget(p, o)));
+    if (!list.length) return void this.host.status("Every node, switch and constant is selected.", "hint");
+    const here = this.cursor ?? { row: 0, col: 0 };
+    const after = list.findIndex((o) => before(anchorOf(o), here) > 0);
+    const at = list.findIndex((o) => before(anchorOf(o), here) >= 0);
+    const next = back ? list[at <= 0 ? list.length - 1 : at - 1] : list[after < 0 ? 0 : after];
+    this.selectParts([next], { add: true });
+    // The next step goes on from the part just added.
+    this.cursor = anchorOf(next);
+    this.host.changed();
+  }
+
+  /** M, or Make definition: opens the name field for a definition of the selected parts, with a free name in it. */
+  startExtract() {
+    if (!this.parts.length) {
+      const why = "M makes a definition of the selected nodes, switches and constants: Shift-click them, or drag round them on blank sheet.";
+      return void this.host.status(why, "hint");
+    }
+    this.extraction = { name: definitionName(this.view(), this.names, { main: false }) };
+    this.host.changed();
+    this.host.extracting?.();
+  }
+
+  /**
+   * Takes the selected parts out into a new definition titled `·name`,
+   * placed below the sheet and called where they were, as one edit. The
+   * call is selected. Refused, the name field stays open to correct it.
+   */
+  extract(name = this.extraction?.name) {
+    const parts = this.parts;
+    if (!parts.length || !name) return false;
+    const word = name.replace(/^·/, "");
+    return this.edit({ kind: "extract", picks: parts.map(partCell), name: word }, () => {
+      this.extraction = null;
+      const view = this.view();
+      const call = view.boxes.find((b) => b.kind === "node" && b.word?.content === word);
+      if (call) this.select({ kind: "box", box: call }, { quiet: true });
+      this.host.status(`Made ·${word} below the sheet, and called it here.`, "hint");
+    });
+  }
+
+  // Repairs (PLAN P10, Decisions: Repairs), as `Doc.repairs` offers them.
+
+  /**
+   * Applies a repair: its edit as one undo step, then its follow-up. A
+   * repair that is all follow-up edits nothing. False when its edit was
+   * refused, which the host has been told, with the follow-up for Make
+   * room to run.
+   */
+  repair(r) {
+    if (!r.edit) {
+      this.followUp(r.then);
+      return true;
+    }
+    return this.edit(r.edit, () => this.followUp(r.then));
+  }
+
+  /**
+   * A repair's follow-up, at a cell of the sheet its edit left: the name
+   * field opens on what is there, or wiring starts from it, as `W` does.
+   */
+  followUp(then) {
+    if (then?.kind === "name_field") this.nameAt(then.at);
+    else if (then?.kind === "draw_wire") this.wireFrom(then.at);
+  }
+
+  /** Selects what is at a cell and opens the inspector's name field on it. */
+  nameAt(at) {
+    const view = this.view();
+    const target = this.targetAt(at, view);
+    if (!this.editable(target, view)) return void this.host.status(`Nothing at ${at.row + 1}:${at.col + 1} takes a name.`, "hint");
+    this.select(target, { quiet: true });
+    this.host.name?.(this.selection);
+  }
+
+  /** Selects the source or arrowhead at a cell and starts wiring it, as `W` does. */
+  wireFrom(at) {
+    this.select(this.targetAt(at), { quiet: true });
+    this.startWiring();
+  }
+
+  /** F: the repair for the diagnostic at the cursor, or else for one the selection covers. */
+  repairHere() {
+    const list = this.doc().repairs();
+    const found = list.find((r) => same(r.at, this.cursor)) ?? list.find((r) => this.selection && covers(this.selection, r.at));
+    if (!found) return void this.host.status("F fixes a diagnostic at the cursor that has a known fix, and there is none here.", "hint");
+    return this.repair(found);
   }
 
   /** Inserts or deletes a row or column at the cursor. */
@@ -1106,9 +1383,132 @@ export class BoxTool {
   }
 }
 
+/**
+ * The marquee, without the page: with the Box tool off, a drag that
+ * starts on blank sheet outside any node box selects the nodes, switches
+ * and constants wholly inside the rectangle it sweeps, and with Shift adds
+ * them to the selection. So definitions and switches move by their
+ * borders and titles, and node boxes by any of their cells. `locate(e)`
+ * gives the cell under a pointer event, or null off the sheet; `tool` is
+ * the Box tool, which takes blank sheet while it is on.
+ */
+export class Marquee {
+  constructor(studio, locate, tool) {
+    Object.assign(this, { studio, locate, tool });
+    /** The drag under way: `{ start, at, pointerId, add, parts }`, `parts` those it would select. */
+    this.drag = null;
+  }
+
+  /** Whether a press at a cell would start a marquee: blank sheet outside any node box, with the Box tool off. */
+  takes(at) {
+    if (this.tool?.on) return false;
+    const view = this.studio.view();
+    const box = boxAt(view, at);
+    return charOf(view, at) === " " && !(box?.kind === "node" && !switchLike(box));
+  }
+
+  /** A press: true when the marquee takes it, so nothing else does. */
+  down(e) {
+    if (this.drag || e.button !== 0) return false;
+    const at = this.locate(e);
+    if (!at || !this.takes(at)) return false;
+    this.drag = { start: at, at, pointerId: e.pointerId, add: e.shiftKey, parts: [] };
+    return true;
+  }
+
+  /** The pointer moved: true when the rectangle, and the parts it would select, changed. */
+  move(e) {
+    const d = this.drag;
+    if (!d || e.pointerId !== d.pointerId) return false;
+    const at = this.locate(e);
+    if (!at || same(at, d.at)) return false;
+    d.at = at;
+    d.parts = partsIn(this.studio.view(), this.rect);
+    return true;
+  }
+
+  /**
+   * The press ends. Returns `"select"` when the drag selected what it
+   * swept, `"click"` for a press let go where it began (for the page to
+   * handle as a click), and null otherwise.
+   */
+  up(e) {
+    const d = this.drag;
+    if (!d || e.pointerId !== d.pointerId) return null;
+    const at = this.locate(e) ?? d.at;
+    if (same(at, d.start)) {
+      this.drag = null;
+      return "click";
+    }
+    d.at = at;
+    const parts = partsIn(this.studio.view(), this.rect);
+    this.drag = null;
+    this.studio.selectParts(parts, { add: d.add });
+    return "select";
+  }
+
+  /** Drops the drag under way without selecting. */
+  cancel() {
+    this.drag = null;
+  }
+
+  /** The rectangle swept, or null. */
+  get rect() {
+    return this.drag ? rectOf(this.drag.start, this.drag.at) : null;
+  }
+}
+
+/** How long a Fix button is hovered or focused before its repair is drawn as a ghost, in milliseconds. */
+export const GHOST_MS = 150;
+
+/**
+ * A repair's ghost (PLAN P10, Decisions: Repairs), without the page: once
+ * its Fix button has been hovered or focused for `GHOST_MS`, the sheet its
+ * edit would leave is drawn over the drawing until the pointer or the focus
+ * leaves. `trial(edit)` gives that revision, or null when the edit would
+ * be refused, which the press says; `show(doc)` and `hide()` draw and
+ * remove it; `timers` stands in for the page's in tests. A repair that is
+ * all follow-up has no ghost.
+ */
+export class RepairGhost {
+  constructor({ trial, show, hide, timers = globalThis }) {
+    Object.assign(this, { trial, show, hide, timers });
+    this.timer = null;
+    /** The revision drawn as the ghost, freed when it goes. */
+    this.shown = null;
+  }
+
+  /** A Fix button was hovered or focused. */
+  enter(repair) {
+    this.leave();
+    if (!repair.edit) return;
+    this.timer = this.timers.setTimeout(() => {
+      this.timer = null;
+      this.shown = this.trial(repair.edit);
+      if (this.shown) this.show(this.shown);
+    }, GHOST_MS);
+  }
+
+  /** The pointer or the focus left it, or it was pressed. */
+  leave() {
+    if (this.timer !== null) this.timers.clearTimeout(this.timer);
+    this.timer = null;
+    if (!this.shown) return;
+    this.hide();
+    this.shown.free();
+    this.shown = null;
+  }
+}
+
 /** Every key the drawing takes, for the `?` overlay. */
 export const KEYS = [
   ["] [", "Select the next or previous object"],
+  ["Shift+] Shift+[", "Add the next or previous node, switch or constant to the selection"],
+  ["Shift + click", "Add a node, switch or constant to the selection, or take it away"],
+  ["Drag on blank sheet", "Select the nodes, switches and constants inside; with Shift, add them"],
+  ["S", "Select from the cursor: arrow keys stretch a rectangle, Enter selects the nodes, switches and constants inside, Shift+Enter adds them"],
+  ["M", "Make a definition of the selection: type its name, Enter makes it below the sheet and calls it here"],
+  ["F", "Fix the diagnostic at the cursor, as its Fix button in Diagnostics does"],
   ["Arrow keys", "Nudge a selected box, or move the cursor"],
   ["Enter", "Edit a selected text, or rename a selected node or definition"],
   ["W", "Wire a selected source or arrowhead: ] and [ pick an end, Enter connects"],
@@ -1126,7 +1526,7 @@ export const KEYS = [
   ["Ctrl or ⌘ + wheel", "Zoom about the pointer; a pinch does too"],
   ["Space + drag", "Pan"],
   ["Ctrl or ⌘ + Z", "Undo; with Shift, redo"],
-  ["Escape", "Stop drawing a box or wiring, leave the Box tool, clear the selection, then the cursor"],
+  ["Escape", "Stop drawing a box, selecting or wiring, leave the Box tool, clear the selection, then the cursor"],
   ["Tab", "Leave the drawing"],
   ["?", "Show or hide this list"],
 ];
