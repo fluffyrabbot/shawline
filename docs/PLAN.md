@@ -1086,6 +1086,20 @@ Five read-only audits (interaction mechanics, product legibility, conceptual int
   - renaming a node.
 - **Gate:** `studio_build` passes on all 17 valid programs, and its `.studio` lines are blessed after reading. **By hand:** build `04-abs` from an empty sheet with the mouse.
 
+**Wave 2 contracts landed** ✅. E2 and W2 can start.
+- **Decisions made while landing them:**
+  - `Edit` gains `RemovePort(at)`, `RemoveArm(at)`, `RemoveBox(corner)` and `SetPorts { corner, inputs, outputs }`, written `remove_port`, `remove_arm`, `remove_box` and `set_ports` in `.studio`. All nine wave 2 edits are stubs refusing as `unsupported`, so no dump line changed.
+  - The drawing edits are checked by structure, not by codes: the result is canonical, and its structure is the input's with exactly the named parts added or removed. A drawing in progress has unwired arrowheads and stray constants, so its codes must be free to change.
+  - `place_definition` keeps `rect`'s size and columns, and goes one blank line below the top-level items that end above `rect.top`. Items below it move down by whole rows. `rect` is kept exactly when it is already canonical, as it is in the build. It is refused as `Blocked(Spacing)` only when `rect.top` lies on another item's rows. Its `name` is given without the namer dot, as `build` passes it.
+  - A definition's port needs a name, so `add_port` never makes `Y009`. `add_port` on a node's border is `set_ports` with one more port on that side, as PLAN lists a node's port among `add_port`'s cells.
+  - `remove_arm` and `remove_box` take everything inside, so one Delete removes any selected box or arm, as `remove_node` does for a node. A removed definition's calls stay, diagnosed `C001`.
+  - A merged output is drawn as a stub east from each arm's port at that ordinal, joined on one vertical run with tees, and one wire on to the sink, as the corpus draws it.
+  - An edit that would leave an inline node without its input wire, or without its last output branch, is refused as `Target`, naming the node; `remove_node` on its word splices it out first. PLAN fixes that the input always has its wire, and the output side follows, since an inline node is recognized only between an arrowhead and a continuing wire. Refusing removes nothing the author didn't name. No dump line depends on this, so the by-hand gates may revisit it.
+  - `set_text` on a node's word redraws the box at `place_node`'s width for the new word and keeps its ports. A different arity shows as `C002`, whose repair is `set_ports`.
+  - `RefusalKind::Unsupported` now covers only a word that isn't Shavian, or an edit whose wave hasn't landed.
+- **`WHILE_BUILDING`:** `C005`, `W002`, `Y002`, `Y011`, `Y012`, `Y016` and `Y019`. The edits don't exist yet, so this was measured by painting each program's own cells in build order, step by step, and reading the codes. One `Y003` came from painting a crossing with only one of its wires, and was left out. It is measured again on the real run at the gate.
+- **Gate:** the workspace tests pass with no `.studio` change, and clippy is clean on host and wasm. `studio_build` stays ignored until the wave 2 gate.
+
 **Wave 3: extract and repair.**
 - **Contracts (lead):**
   - `extract`, returning `Extracted { edited, definition, call }`;

@@ -234,5 +234,9 @@ pub(crate) fn readdress(edit: &Edit, f: &impl Fn(Pos) -> Pos) -> Edit {
         Edit::AddPort { at, name } => Edit::AddPort { at: f(at), name },
         Edit::AddArm { at, guard } => Edit::AddArm { at: f(at), guard },
         Edit::PlaceInline { at, word } => Edit::PlaceInline { at: f(at), word },
+        Edit::RemovePort(at) => Edit::RemovePort(f(at)),
+        Edit::RemoveArm(at) => Edit::RemoveArm(f(at)),
+        Edit::RemoveBox(corner) => Edit::RemoveBox(f(corner)),
+        Edit::SetPorts { corner, inputs, outputs } => Edit::SetPorts { corner: f(corner), inputs, outputs },
     }
 }

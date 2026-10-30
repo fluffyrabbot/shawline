@@ -102,8 +102,8 @@ pub enum RefusalKind {
     /// The cell named isn't what the edit needs: no box corner, no source,
     /// no sink, no editable wire, or a sink that already has a wire.
     Target,
-    /// Studio can't make this edit yet: a switch's merged outputs, a wire
-    /// touching an inline node, a word that isn't Shavian.
+    /// Studio can't make this edit: a word that isn't Shavian, or an edit
+    /// whose wave hasn't landed.
     Unsupported,
     /// There is no room: the result would overlap a box, leave its parent,
     /// or find no free path. The blockage says whether inserting rows or
@@ -198,11 +198,30 @@ pub fn route(doc: &Doc, from: Pos, to: Pos) -> Option<Vec<Pos>> {
 // P7 contract: Studio Phase 1. Lead-owned and frozen; agent W implements.
 //
 // Endpoints are named by cell. A *source* is a node's output tee, a
-// definition input's arrowhead, a constant's first cell, or an arm's left
-// through-port. A *sink* is an arrowhead: a node input, a definition output,
-// a switch selector or through-port, an arm's right through-port. Wires that
-// a switch's merged outputs feed, and wires touching an inline node, aren't
-// editable in Phase 1: edits to them are refused with that reason.
+// definition input's arrowhead, a constant's first cell, an arm's left
+// through-port, an inline node's word (its first cell), or a switch's
+// merged output, named by its first arm's right through-port at that
+// ordinal. A *sink* is an arrowhead: a node input, a definition output, a
+// switch selector or through-port, an arm's right through-port, or an
+// inline node's input.
+//
+// Phase 1 refused wires at merged outputs and at inline nodes as
+// unsupported. P10 wave 2 lifts both (PLAN P10, "Switch outputs" and
+// "Inline nodes"):
+//
+// - **Merged outputs.** Connecting from an unwired merged output draws a
+//   stub east from each arm's right through-port at that ordinal, joins the
+//   stubs on one vertical run with tees, and routes one wire from the run
+//   to the sink. Connecting from a wired one tees off its wire, as for any
+//   source. The stubs and the run go with the wire's last sink, and
+//   removing the wire through any of its cells removes them too.
+// - **Inline nodes.** An inline node's output is a source like a node's
+//   tee, and its input a sink that is always wired. An edit that would
+//   leave an inline node that stays without its input wire, or without any
+//   branch of its output wire, is refused as `Target`, naming the node:
+//   [`remove_node`] on its word splices it out first. Re-routing never
+//   touches the straight stretch through an inline node, from the line cell
+//   before its arrowhead to the first cell of its output wire.
 // ---------------------------------------------------------------------------
 
 /// A callee the context palette offers.
@@ -281,6 +300,10 @@ pub struct Placed {
 /// Removes the node box whose top-left corner is `corner`. Every wire it
 /// sources goes too, and only the branches that reach its inputs
 /// ([`disconnect`]).
+///
+/// At an inline node's word (its first cell), it splices the node out: the
+/// wire into it runs straight on through the cells it held, so the node's
+/// branches are fed by what fed the node.
 pub fn remove_node(doc: &Doc, corner: Pos) -> Result<Edited, Refusal> {
     wiring::remove_node(doc, corner).map(|d| mapped::kept(doc, d))
 }
@@ -345,6 +368,14 @@ pub enum Edit {
     AddArm { at: Pos, guard: Option<String> },
     /// [`place_inline`].
     PlaceInline { at: Pos, word: String },
+    /// [`remove_port`].
+    RemovePort(Pos),
+    /// [`remove_arm`].
+    RemoveArm(Pos),
+    /// [`remove_box`].
+    RemoveBox(Pos),
+    /// [`set_ports`].
+    SetPorts { corner: Pos, inputs: u16, outputs: u16 },
 }
 
 impl fmt::Display for Edit {
@@ -387,6 +418,10 @@ impl fmt::Display for Edit {
                 some(f, guard)
             }
             Edit::PlaceInline { at, word } => write!(f, "place_inline {at} {word}"),
+            Edit::RemovePort(at) => write!(f, "remove_port {at}"),
+            Edit::RemoveArm(at) => write!(f, "remove_arm {at}"),
+            Edit::RemoveBox(corner) => write!(f, "remove_box {corner}"),
+            Edit::SetPorts { corner, inputs, outputs } => write!(f, "set_ports {corner} {inputs} {outputs}"),
         }
     }
 }
@@ -432,6 +467,10 @@ pub fn apply(doc: &Doc, edit: &Edit) -> Result<Edited, Refusal> {
         Edit::AddPort { at, name } => add_port(doc, *at, name.as_deref()),
         Edit::AddArm { at, guard } => add_arm(doc, *at, guard.as_deref()),
         Edit::PlaceInline { at, word } => place_inline(doc, *at, word),
+        Edit::RemovePort(at) => remove_port(doc, *at),
+        Edit::RemoveArm(at) => remove_arm(doc, *at),
+        Edit::RemoveBox(corner) => remove_box(doc, *corner),
+        Edit::SetPorts { corner, inputs, outputs } => set_ports(doc, *corner, *inputs, *outputs),
     }
 }
 
@@ -510,6 +549,18 @@ pub fn make_room(doc: &Doc, edit: &Edit) -> Result<Roomed, Refusal> {
 /// constant grows or shrinks at its left end, so its wire stays put; a
 /// name, title, guard or comment at its right end. The text keeps its role:
 /// a constant stays a literal, a name a word, a title a `·`-word.
+///
+/// A node's word is renamed to any one Shavian word (P10 wave 2):
+///
+/// - **A node box** is redrawn at the width [`place_node`] gives the new
+///   word, with its corner and every port's row kept. Wires at its right
+///   border follow it as a move re-routes them.
+/// - **An inline node's** word grows or shrinks at its right end, and the
+///   wire after it gives way or stretches, as an input's wire does.
+/// - **Ports stay** as they are, whatever the new callee takes: a different
+///   arity is `C002` until [`set_ports`] matches it.
+/// - **Refusals:** `Target` when `content` isn't one Shavian word;
+///   `Blocked(NoRoom)` when the wider box or word would overlap anything.
 pub fn set_text(doc: &Doc, at: Pos, content: &str) -> Result<Edited, Refusal> {
     retext::set_text(doc, at, content)
 }
@@ -527,36 +578,164 @@ pub fn remove_text(doc: &Doc, at: Pos) -> Result<Edited, Refusal> {
     retext::remove_text(doc, at)
 }
 
-/// Draws an empty definition box at `rect`, titled `·name`. Refused when it
-/// shares a row with another top-level item.
+// ---------------------------------------------------------------------------
+// P10 wave 2 contract: drawing boxes, ports and arms, and inline nodes
+// (PLAN P10, "Gesture details"). Lead-owned.
+//
+// These edits change what the program means, so unlike the P7 edits they
+// may change its diagnostics: a drawing in progress has unwired arrowheads
+// and stray constants. Each is still checked. The result is canonical, and
+// its structure is the input's with exactly the parts the edit names added
+// or removed; every other box, text and wire maps through `Edited::map`.
+// A refusal points at the cell the edit names. It is `Target` when that
+// cell or a word isn't what the edit needs, and `Blocked` when there is no
+// room: `NoRoom` where inserting rows or columns would help, so that
+// `make_room` can retry the edit.
+// ---------------------------------------------------------------------------
+
+/// Draws an empty definition box at `rect`, rounded, titled `·name` in its
+/// top border (`╭─ ·name ───╮`). `name` is one Shavian word, given without
+/// its namer dot. A reserved name is drawn, and diagnosed (`Y013`).
+///
+/// - **Rows.** Top-level items are stacked with exactly one blank line
+///   between them (SPEC §11 rule 7), never side by side. The box keeps
+///   `rect`'s size and columns and goes after the items that end above
+///   `rect.top`: one blank line below the last of them, or at row 0 when
+///   there is none. Items below move down by whole rows to keep one blank
+///   line under it. So `rect`'s rows are kept exactly when they are already
+///   canonical, as they are when the build gate replays a sheet.
+/// - **Refusals:** `Target` when `name` isn't one Shavian word, or `rect` is
+///   too small for its title and one row inside; `Blocked(Spacing)` when
+///   `rect.top` is a row of another top-level item.
 pub fn place_definition(doc: &Doc, rect: Rect, name: &str) -> Result<Edited, Refusal> {
     let _ = (doc, name);
     Err(pending(Pos::new(rect.top, rect.left)))
 }
 
-/// Draws an empty switch box at `rect` inside a definition or an arm, with
-/// its first arm's guard in the top border (`None` for a default arm).
+/// Draws an empty switch box at `rect`, square, wholly inside one
+/// definition or one arm, with its first arm's guard in the top border
+/// (`┌─ 0 ───┐`). `None` draws a plain top border, for a first arm that is
+/// the default. Until it has a selector or a divider, recognition reads it
+/// as a node with no word (`Y002`, and `Y016` with a guard).
+///
+/// Refused as `Target` when `guard` isn't a constant (a number, a «text»
+/// or `𐑯𐑦𐑤`) or `rect` is too small for it and one row inside, and as
+/// `Blocked(NoRoom)` when the box would overlap anything or leave its
+/// definition or arm.
 pub fn place_switch(doc: &Doc, rect: Rect, guard: Option<&str>) -> Result<Edited, Refusal> {
     let _ = (doc, guard);
     Err(pending(Pos::new(rect.top, rect.left)))
 }
 
-/// Adds a port at border cell `at`: a definition's named input or output,
-/// or a switch's selector or through-port, which take no name.
+/// Adds a port at border cell `at`, which must be plain border: not a
+/// corner, a port, a title or guard, or a divider's end. The port has no
+/// wire, so an arrowhead is unwired (`Y019`) until a [`connect`].
+///
+/// - **A definition's** left border takes an input, `▶ name` with the name
+///   inside; its right border takes an output, `▶ name` with the name
+///   outside. `name` is one Shavian word, and a definition's port needs
+///   one.
+/// - **A switch's** top border takes its one selector, `▼`. Its left border
+///   takes a through-port into the arm whose rows hold `at`, and its right
+///   border one out of it, both `▶`. The square box [`place_switch`] draws
+///   takes them before it reads as a switch. They take no name.
+/// - **A node's** left or right border: [`set_ports`] with one more input
+///   or output. `at` only picks the side, and the port takes no name.
+/// - **Refusals:** `Target` for a cell that can't take a port, or a `name`
+///   that doesn't fit the port; `Blocked(NoRoom)` when the cells the
+///   arrowhead or the name need aren't clear.
 pub fn add_port(doc: &Doc, at: Pos, name: Option<&str>) -> Result<Edited, Refusal> {
     let _ = (doc, name);
     Err(pending(at))
 }
 
-/// Draws a switch divider from left-border cell `at`, with its guard
-/// (`None` for the default arm).
+/// Removes the port at border cell `at`, [`add_port`]'s inverse, with its
+/// wires:
+///
+/// - a definition's input with its name and every wire it sources, or an
+///   output with its name and the branch reaching it ([`disconnect`]);
+/// - a selector with the branch reaching it;
+/// - a through-port with its wires on both sides: the branch reaching it,
+///   and the wire it starts. A right through-port's outer wire is its stub
+///   of a merged output: the merge loses that stub, and goes with its last;
+/// - a node's port: [`set_ports`] with one fewer on that side, except that
+///   it is `at`'s port that goes, with its wire, and the others keep theirs.
+///
+/// Refused as `Target` when no port is at `at`.
+pub fn remove_port(doc: &Doc, at: Pos) -> Result<Edited, Refusal> {
+    let _ = doc;
+    Err(pending(at))
+}
+
+/// Draws a switch divider across the row of left-border cell `at`
+/// (`├┄┄┄┤`, or `├┄ guard ┄┄┤`), splitting the arm that holds that row: the
+/// rows below the divider become a new arm, guarded by `guard` (`None` for
+/// the default arm). Through-ports keep their rows, so each goes with the
+/// arm that now holds it. The box is a switch, or the square box
+/// [`place_switch`] draws.
+///
+/// Refused as `Target` when `at` isn't such a left-border cell or `guard`
+/// isn't a constant, and as `Blocked(NoRoom)` when the row isn't blank
+/// inside the box or either arm would be left with no row.
 pub fn add_arm(doc: &Doc, at: Pos, guard: Option<&str>) -> Result<Edited, Refusal> {
     let _ = (doc, guard);
     Err(pending(at))
 }
 
-/// Splices a 1→1 call of `word` into the straight stretch of wire through
-/// `at`, its word starting there.
+/// Removes the divider through `at` (any of its cells) and the arm below
+/// it, [`add_arm`]'s inverse: the divider's guard, everything inside the
+/// arm, and the arm's through-ports with their wires, as [`remove_port`]
+/// removes them. The arm's rows stay, blank, in the arm above. Refused as
+/// `Target` when no divider runs through `at`.
+pub fn remove_arm(doc: &Doc, at: Pos) -> Result<Edited, Refusal> {
+    let _ = doc;
+    Err(pending(at))
+}
+
+/// Removes the box whose top-left corner is `corner` with everything inside
+/// it, the inverse of [`place_definition`] and [`place_switch`]:
+///
+/// - **a node:** [`remove_node`];
+/// - **a switch:** everything in its arms, its ports with their wires as
+///   [`remove_port`] removes them, and the box;
+/// - **a definition:** everything inside it, its title, its outputs' names
+///   and the box. The top-level items below it move up by whole rows, so
+///   one blank line still separates them. Calls of it stay, and are
+///   diagnosed (`C001`).
+///
+/// Refused as `Target` when no box has its corner at `corner`.
+pub fn remove_box(doc: &Doc, corner: Pos) -> Result<Edited, Refusal> {
+    let _ = doc;
+    Err(pending(corner))
+}
+
+/// Gives the node box whose top-left corner is `corner` `inputs` inputs and
+/// `outputs` outputs, redrawn as [`place_node`] draws it with the corner
+/// kept. Port `i` on each side keeps its wire for every `i` below the new
+/// count, re-routed as a move re-routes it; a port past the new count goes,
+/// with its wire, as [`remove_port`] removes it. This is `C002`'s repair.
+///
+/// Refused as `Target` when no node box has its corner at `corner` (a
+/// switch, a definition or an inline node) or the counts are more than a
+/// node box can hold, and as `Blocked(NoRoom)` when the taller box would
+/// overlap anything or leave its parent.
+pub fn set_ports(doc: &Doc, corner: Pos, inputs: u16, outputs: u16) -> Result<Edited, Refusal> {
+    let _ = (doc, inputs, outputs);
+    Err(pending(corner))
+}
+
+/// Splices a 1→1 call of `word` into the straight horizontal stretch of
+/// wire through `at`, as `─▶ word ─`, its word starting at `at` and its
+/// arrowhead two cells before. Every cell from the line cell before the
+/// arrowhead to the cell after the word's trailing space must be a plain
+/// `─` of one wire: no tee, bend, crossing or port. The wire's stretch up
+/// to the arrowhead stays the node's input wire, and the rest becomes its
+/// output wire, so every sink keeps its source. Whatever `word` names, the
+/// node is 1→1: a callee of another arity is diagnosed (`C002`).
+///
+/// Refused as `Target` when no horizontal wire runs through `at` or `word`
+/// isn't one Shavian word, and as `Blocked(NoRoom)` when the straight
+/// stretch is too short.
 pub fn place_inline(doc: &Doc, at: Pos, word: &str) -> Result<Edited, Refusal> {
     let _ = (doc, word);
     Err(pending(at))
@@ -580,7 +759,11 @@ impl Edit {
             | Edit::RemoveText(at)
             | Edit::AddPort { at, .. }
             | Edit::AddArm { at, .. }
-            | Edit::PlaceInline { at, .. } => *at,
+            | Edit::PlaceInline { at, .. }
+            | Edit::RemovePort(at)
+            | Edit::RemoveArm(at)
+            | Edit::RemoveBox(at)
+            | Edit::SetPorts { corner: at, .. } => *at,
             Edit::Insert(i) | Edit::Delete(i) => i.at,
             Edit::MakeRoom(edit) => edit.at(),
             Edit::PlaceDefinition { rect, .. } | Edit::PlaceSwitch { rect, .. } => {

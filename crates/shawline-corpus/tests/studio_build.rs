@@ -17,9 +17,22 @@ use shawline_doc::Doc;
 use shawline_edit::apply;
 use shawline_grid::Pos;
 
-/// Codes a sheet may have on the way. Measured on the first run, as
-/// `studio_sequences`' `WHILE_UNWIRED` was; set in wave 2's contract.
-const WHILE_BUILDING: &[&str] = &[];
+/// Codes a sheet may have on the way, each a consequence of the build
+/// order rather than of how an edit draws:
+///
+/// - `C005`: no `·𐑥𐑱𐑯` until main's box is placed;
+/// - `W002`: a definition input whose wire isn't drawn yet, on a sheet
+///   with no errors (the checker runs only then);
+/// - `Y002` and `Y016`: a switch's box before its selector, which reads as
+///   a node with no word, and its guard on that box;
+/// - `Y011`: a switch of three or more arms after its first divider, since
+///   through-ports are added before dividers;
+/// - `Y012` and `Y019`: constants and arrowheads before their connections,
+///   as in `studio_sequences`' `WHILE_UNWIRED`.
+///
+/// Measured at `b2a59e1`, before the edits existed, over states painted
+/// from each program's own cells step by step; re-measured at the gate.
+const WHILE_BUILDING: &[&str] = &["C005", "W002", "Y002", "Y011", "Y012", "Y016", "Y019"];
 
 fn codes(doc: &Doc) -> BTreeSet<String> {
     doc.diagnostics().iter().filter(|d| !d.code.starts_with('L')).map(|d| d.code.to_owned()).collect()
