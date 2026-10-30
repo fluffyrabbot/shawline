@@ -20,6 +20,16 @@ fn codes(sheet: &Sheet) -> Vec<String> {
     lower(sheet).1.iter().map(|d| format!("{} {}", d.at, d.code)).collect()
 }
 
+/// Each diagnostic as `ROW:COL CODE message`.
+fn messages(sheet: &Sheet) -> Vec<String> {
+    lower(sheet).1.iter().map(|d| format!("{} {} {}", d.at, d.code, d.message)).collect()
+}
+
+/// The `C003` diagnostics alone, as `ROW:COL CODE message`.
+fn cycles(sheet: &Sheet) -> Vec<String> {
+    messages(sheet).into_iter().filter(|m| m.contains(" C003 ")).collect()
+}
+
 fn run(src: &str) -> Result<Vec<Value>, String> {
     let (program, diags) = lower(&sheet(src));
     let program = program.unwrap_or_else(|| panic!("{diags:?}"));
@@ -35,7 +45,34 @@ fn boxed_nil_is_the_empty_list() {
 #[test]
 fn inline_nil_is_an_arity_error() {
     let src = "╭─ ·𐑥𐑱𐑯 ─────────╮\n│ 1 ─▶ 𐑯𐑦𐑤 ──────▶ 𐑬\n╰────────────────╯\n";
-    assert_eq!(codes(&sheet(src)), ["1:7 C002"]);
+    assert_eq!(
+        messages(&sheet(src)),
+        ["1:7 C002 𐑯𐑦𐑤 takes no inputs and gives 1 output; this inline node has 1 input and 1 output"]
+    );
+}
+
+/// `C002` counts what the callee takes and what the node has.
+#[test]
+fn arity_error_counts_both_sides() {
+    let src = include_str!("../../../corpus/93-arity.shaw");
+    assert_eq!(
+        messages(&sheet(src)),
+        ["5:8 C002 𐑐 takes 2 inputs and gives 1 output; this node has 1 input and 1 output"]
+    );
+}
+
+/// `C001`'s wording is pinned by the language server's tests.
+#[test]
+fn unknown_name_names_the_word() {
+    let src = include_str!("../../../corpus/95-unknown.shaw");
+    assert_eq!(messages(&sheet(src)), ["5:8 C001 unknown name 𐑓𐑵"]);
+}
+
+/// `W002` says which input of which definition, then its name.
+#[test]
+fn unused_input_is_named_by_order() {
+    let src = include_str!("../../../corpus/static/12-unused-input.shaw");
+    assert_eq!(messages(&sheet(src)), ["6:0 W002 the second input of ·𐑒𐑰𐑐, 𐑚, is unused"]);
 }
 
 /// Independent nodes run in the row-major order of their words, not of their
@@ -81,13 +118,23 @@ fn main_returns_from_its_namer_dot() {
 }
 
 fn node(corner: Pos, word: Pos) -> Node {
+    call("𐑖", corner, word)
+}
+
+/// A one-input, one-output node box calling `text`, with its word at `word`.
+fn call(text: &str, corner: Pos, word: Pos) -> Node {
     let rect = Rect { top: corner.row, left: corner.col, bottom: word.row + 1, right: word.col + 2 };
     Node {
-        kind: NodeKind::Call(Name { text: "𐑖".into(), at: word }),
+        kind: NodeKind::Call(Name { text: text.into(), at: word }),
         rect,
         inputs: vec![Pos::new(word.row, corner.col)],
         outputs: vec![Pos::new(word.row, word.col + 2)],
     }
+}
+
+/// An edge from the output of node `a` to the input of node `b`.
+fn link(wire: usize, a: usize, b: usize) -> Edge {
+    Edge { wire, from: Endpoint::Output(a, 0), to: vec![Endpoint::Input(b, 0)] }
 }
 
 fn main_with(nodes: Vec<Node>, edges: Vec<Edge>) -> Sheet {
@@ -112,16 +159,64 @@ fn cycle_points_at_its_first_word() {
         Edge { wire: 1, from: Endpoint::Output(1, 0), to: vec![Endpoint::Input(0, 0)] },
     ];
     assert_eq!(codes(&main_with(vec![a, b], edges)), ["3:12 C003"]);
+    let src = include_str!("../../../corpus/94-cycle.shaw");
+    assert_eq!(messages(&sheet(src)), ["5:9 C003 cycle in the wires: 𐑐 → 𐑐 → 𐑐"]);
+}
+
+/// `C003` follows the wires from the node it points at, whichever node comes
+/// first in the list, and back to it.
+#[test]
+fn cycle_path_starts_at_its_first_word() {
+    let nodes = vec![
+        call("𐑐𐑵", Pos::new(4, 2), Pos::new(5, 4)),
+        call("𐑚𐑵", Pos::new(2, 2), Pos::new(3, 4)),
+        call("𐑒𐑵", Pos::new(6, 2), Pos::new(7, 4)),
+    ];
+    let edges = vec![link(0, 0, 1), link(1, 1, 2), link(2, 2, 0)];
+    assert_eq!(cycles(&main_with(nodes, edges)), ["3:4 C003 cycle in the wires: 𐑚𐑵 → 𐑒𐑵 → 𐑐𐑵 → 𐑚𐑵"]);
+}
+
+/// Of the cycles through the node `C003` points at, the path is a shortest.
+#[test]
+fn cycle_path_is_a_shortest() {
+    let nodes = vec![
+        call("𐑐𐑵", Pos::new(4, 2), Pos::new(5, 4)),
+        call("𐑚𐑵", Pos::new(2, 2), Pos::new(3, 4)),
+        call("𐑒𐑵", Pos::new(6, 2), Pos::new(7, 4)),
+    ];
+    let edges = vec![link(0, 1, 2), link(1, 2, 0), link(2, 0, 1), link(3, 1, 0)];
+    assert_eq!(cycles(&main_with(nodes, edges)), ["3:4 C003 cycle in the wires: 𐑚𐑵 → 𐑐𐑵 → 𐑚𐑵"]);
+}
+
+/// A cycle through more than eight nodes shows the first six, the last, and
+/// how many there are.
+#[test]
+fn long_cycle_path_is_shortened() {
+    let words = ["𐑐𐑵", "𐑚𐑵", "𐑑𐑵", "𐑛𐑵", "𐑒𐑵", "𐑜𐑵", "𐑓𐑵", "𐑝𐑵", "𐑔𐑵"];
+    let at = |n: usize| (Pos::new(2 * n + 1, 2), Pos::new(2 * n + 2, 4));
+    let nodes: Vec<Node> = words.iter().enumerate().map(|(n, w)| call(w, at(n).0, at(n).1)).collect();
+    let ring = |len: usize| (0..len).map(|n| link(n, n, (n + 1) % len)).collect::<Vec<_>>();
+    assert_eq!(
+        cycles(&main_with(nodes[..8].to_vec(), ring(8))),
+        ["2:4 C003 cycle in the wires: 𐑐𐑵 → 𐑚𐑵 → 𐑑𐑵 → 𐑛𐑵 → 𐑒𐑵 → 𐑜𐑵 → 𐑓𐑵 → 𐑝𐑵 → 𐑐𐑵"]
+    );
+    assert_eq!(
+        cycles(&main_with(nodes, ring(9))),
+        ["2:4 C003 cycle in the wires through 9 nodes: 𐑐𐑵 → 𐑚𐑵 → 𐑑𐑵 → 𐑛𐑵 → 𐑒𐑵 → 𐑜𐑵 → … → 𐑔𐑵 → 𐑐𐑵"]
+    );
 }
 
 /// A slot syntax should have flagged still gets a diagnostic, never a silent
-/// `None`.
+/// `None`, worded as syntax words it.
 #[test]
 fn unfed_slot_is_reported_by_lowering_too() {
     let (program, diags) = lower(&main_with(vec![node(Pos::new(1, 2), Pos::new(2, 4))], vec![]));
     assert!(program.is_none());
-    let got: Vec<_> = diags.iter().map(|d| (d.at, d.code)).collect();
-    assert_eq!(got, [(Pos::new(2, 2), "Y019")]);
+    let got: Vec<_> = diags.iter().map(|d| (d.at, d.code, d.message.as_str())).collect();
+    assert_eq!(got, [(Pos::new(2, 2), "Y019", "no wire reaches the first input of 𐑖")]);
+    let mut unfed_output = main_with(Vec::new(), Vec::new());
+    unfed_output.definitions[0].outputs = ports(1);
+    assert_eq!(messages(&unfed_output), ["0:0 Y019 no wire reaches the first output of ·𐑥𐑱𐑯"]);
 }
 
 /// A self-loop is a cycle of one node.
@@ -129,7 +224,7 @@ fn unfed_slot_is_reported_by_lowering_too() {
 fn self_loop_is_a_cycle() {
     let a = node(Pos::new(1, 2), Pos::new(2, 4));
     let edges = vec![Edge { wire: 0, from: Endpoint::Output(0, 0), to: vec![Endpoint::Input(0, 0)] }];
-    assert_eq!(codes(&main_with(vec![a], edges)), ["2:4 C003"]);
+    assert_eq!(messages(&main_with(vec![a], edges)), ["2:4 C003 cycle in the wires: 𐑖 → 𐑖"]);
 }
 
 /// A small deterministic generator (SplitMix64).
@@ -206,7 +301,9 @@ fn long_cycle_is_one_cycle() {
     let edges = (0..n)
         .map(|i| Edge { wire: i, from: Endpoint::Output(i, 0), to: vec![Endpoint::Input((i + 1) % n, 0)] })
         .collect();
-    assert_eq!(codes(&main_with(nodes, edges)), ["1:4 C003"]);
+    let messages = messages(&main_with(nodes, edges));
+    let shortened = "1:4 C003 cycle in the wires through 200000 nodes: 𐑖 → 𐑖 → 𐑖 → 𐑖 → 𐑖 → 𐑖 → … → 𐑖 → 𐑖";
+    assert_eq!(messages, [shortened]);
 }
 
 fn ports(n: usize) -> Vec<PortDecl> {
