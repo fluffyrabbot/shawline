@@ -1255,14 +1255,32 @@ export class Studio {
 
   // `W`: wiring from the keyboard.
 
-  /** The ends the selection may be wired to, row-major. */
+  /**
+   * The ends the selection may be wired to, row-major: those in its scope
+   * whose edit would succeed, or would after Make room, without making a
+   * cycle (`C003`). A node's own output isn't offered for its input.
+   */
   endsFor(target, view = this.view()) {
+    const cell = (c) => ({ row: c.row, col: c.col });
+    const cycles = (doc) => doc.diagnostics().filter((d) => d.code === "C003").length;
+    const before = cycles(this.doc());
+    const fits = (edit) => {
+      const trial = this.host.apply(this.doc(), edit);
+      if (!trial.ok) return trial.remedy === "make-room";
+      const more = cycles(trial.doc) > before;
+      trial.map?.free();
+      trial.doc.free();
+      return !more;
+    };
     if (target?.kind === "source") {
       const scope = target.source.scope;
-      return view.sinks.filter((s) => !s.wired && s.scope === scope);
+      return view.sinks.filter((s) => !s.wired && s.scope === scope
+        && fits({ kind: "connect", from: cell(target.source), to: cell(s) }));
     }
     if (target?.kind === "sink" || target?.kind === "branch") {
-      return view.sources.filter((s) => s.scope === target.sink.scope);
+      const kind = target.kind === "sink" ? "connect" : "rewire";
+      return view.sources.filter((s) => s.scope === target.sink.scope
+        && fits({ kind, from: cell(s), to: cell(target.sink) }));
     }
     return [];
   }
@@ -1536,6 +1554,7 @@ export const KEYS = [
   ["Ctrl or ⌘ + wheel", "Zoom about the pointer; a pinch does too"],
   ["Space + drag", "Pan"],
   ["Ctrl or ⌘ + Z", "Undo; with Shift, redo"],
+  ["Ctrl or ⌘ + Enter", "Run the program"],
   ["Escape", "Stop drawing a box, selecting or wiring, leave the Box tool, clear the selection, then the cursor"],
   ["Tab", "Leave the drawing"],
   ["?", "Show or hide this list"],

@@ -220,7 +220,8 @@ fn repairs_follow_the_table() {
         offered("static/04-dangling-arrowhead"),
         [(p(6, 5), "Y003", edit("remove_wire 6:5"), Followup::None), (p(6, 11), "Y004", edit("remove_wire 6:11"), Followup::None)]
     );
-    assert_eq!(offered("static/06-stray-text"), [(p(6, 2), "Y012", None, Followup::DrawWire(p(6, 2)))]);
+    // Nothing in reach takes the stray 7, so it goes.
+    assert_eq!(offered("static/06-stray-text"), [(p(6, 2), "Y012", edit("remove_text 6:2"), Followup::None)]);
     assert_eq!(offered("static/05-unnamed-port"), [(p(6, 20), "Y009", None, Followup::NameField(p(6, 20)))]);
     assert_eq!(offered("static/03-no-namer-dot"), [(p(2, 3), "Y001", edit("set_text 2:3 ·𐑥𐑱𐑯"), Followup::None)]);
     assert_eq!(offered("static/08-mixed-corners"), [(p(4, 6), "Y015", edit("restyle 4:6 square"), Followup::None)]);
@@ -282,4 +283,25 @@ fn on_a_badly_broken_sheet_only_clean_repairs_are_offered() {
     }
     // Removing the lone arrowhead at 5:0 would leave its neighbours dangling.
     assert!(!all.iter().any(|r| r.at == p(5, 0) && r.code == "Y004"));
+}
+
+#[test]
+fn a_stray_literal_is_wired_where_an_arrowhead_can_take_it() {
+    let sheet = "\
+╭─ ·𐑥𐑱𐑯 ────────────╮
+│                   │
+│ 1 ────────────────▶ 𐑬
+│                   │
+│ 7                 ▶ 𐑑𐑵
+│                   │
+╰───────────────────╯
+";
+    let offered: Vec<_> = repairs(&Doc::new(sheet)).into_iter().map(|r| (r.at, r.code, r.edit, r.then)).collect();
+    assert_eq!(
+        offered,
+        [
+            (p(4, 2), "Y012", None, Followup::DrawWire(p(4, 2))),
+            (p(4, 20), "Y019", None, Followup::DrawWire(p(4, 20))),
+        ]
+    );
 }

@@ -1355,6 +1355,12 @@ drawing.addEventListener("lostpointercapture", (e) => drag?.pointerId === e.poin
 
 drawing.addEventListener("keydown", (e) => {
   const mod = e.metaKey || e.ctrlKey;
+  // Ctrl or ⌘ + Enter runs from the drawing too, as Run's title says.
+  if (mod && e.key === "Enter") {
+    e.preventDefault();
+    runProgram();
+    return;
+  }
   if (mod && e.key.toLowerCase() === "z") {
     // The drawing has no history of its own: undo is the editor's.
     e.preventDefault();
@@ -1464,7 +1470,17 @@ function showInspector() {
   }
   // Nodes, switches and constants can be taken out into a definition.
   if (studio.parts.length) parts.push(studio.extraction ? extractField() : extractButton());
+  // A rebuild mustn't drop focus from the field: after a keyboard gesture
+  // the edit's redraw comes after its name field was opened and focused.
+  const typing = inspector.contains(document.activeElement) && document.activeElement.matches(".field input")
+    ? document.activeElement
+    : null;
   inspector.replaceChildren(...parts);
+  const field = typing && inspector.querySelector(".field input");
+  if (field) {
+    field.focus({ preventScroll: true });
+    field.setSelectionRange(typing.selectionStart, typing.selectionEnd);
+  }
 }
 
 /** Make definition, before its name is asked for: `M` does the same. */
@@ -1540,8 +1556,14 @@ function textField(target) {
   };
   input.addEventListener("keydown", (e) => {
     e.stopPropagation();
+    // Escape, or Enter on the text as it stands, leaves the field for the
+    // drawing, as a commit does, so the keyboard never stays stranded here.
+    if (e.key === "Enter" && input.value === text.content) return void focusDrawing(true);
     if (e.key === "Enter") commit();
-    if (e.key === "Escape") input.value = text.content;
+    if (e.key === "Escape") {
+      input.value = text.content;
+      focusDrawing(true);
+    }
   });
   input.addEventListener("change", commit);
   label.append(name, input);

@@ -917,7 +917,7 @@ impl Followup {
 /// | `Y003` | Connect the end to the nearest free arrowhead in its scope; when there is none, remove the wire, with the constant that feeds it if one does. The label says which | `Connect`, `RemoveWire` or `RemoveText` |
 /// | `Y004` | Remove the dangling wire, with the constant that feeds it if one does | `RemoveWire` or `RemoveText` |
 /// | `Y009`, `Y013`, `C004` | Name it: the field's commit is a [`set_text`] | `NameField` |
-/// | `Y012` | Wire a literal, remove any other stray text | `DrawWire`, or `RemoveText` |
+/// | `Y012` | Wire a literal when an unwired arrowhead in its scope can take it, and otherwise remove the stray text | `DrawWire`, or `RemoveText` |
 /// | `Y019` | Wire it, starting from the arrowhead | `DrawWire` |
 /// | `Y001` | Add the namer dot | `SetText` |
 /// | `Y014`, `Y018` | Square or round its corners, as its place asks | `Restyle` |

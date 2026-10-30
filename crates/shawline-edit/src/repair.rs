@@ -141,7 +141,12 @@ fn candidates(doc: &Doc, model: &Model, d: &Diagnostic) -> Vec<Candidate> {
         }
         "Y012" => {
             let Some(t) = model.text_at(at) else { return Vec::new() };
-            if model.constant(t).is_some() {
+            // A literal is wired only where an unwired arrowhead can take
+            // it; otherwise the follow-up would find nothing in reach.
+            let reach = model.constant(t).filter(|&scope| {
+                model.endpoints().1.iter().any(|(sink, wired)| !wired && sink.scope == scope)
+            });
+            if reach.is_some() {
                 one("Fix…: wire the constant".to_owned(), None, Then::DrawWire(at))
             } else {
                 one("Remove the stray text".to_owned(), Some(Edit::RemoveText(at)), Then::None)
