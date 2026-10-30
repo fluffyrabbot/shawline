@@ -10,6 +10,7 @@ use crate::ast::{
     Arm, Definition, Edge, Endpoint, Graph, Guard, Literal, Name, Node, NodeId, NodeKind, PortDecl,
     Sheet, Switch,
 };
+use crate::message;
 
 /// The empty list, which works as a literal.
 const NIL: &str = "𐑯𐑦𐑤";
@@ -100,6 +101,11 @@ struct Parser<'a> {
     roles: Vec<Role>,
     switches: HashMap<usize, SwitchInfo>,
     ports: HashMap<Pos, PortRole>,
+    /// The box each port is on, for messages.
+    port_box: HashMap<Pos, usize>,
+    /// Each definition's name without its namer dot, for definitions whose
+    /// title is a `·`-word. Messages name a definition by it.
+    definition_names: HashMap<usize, String>,
     /// Every cell covered by a text run, to its index.
     text_at: HashMap<Pos, usize>,
     /// Open wire ends facing W, by cell.
@@ -128,6 +134,8 @@ pub fn parse(grid: &Grid, diagram: &Diagram) -> (Sheet, Vec<Diagnostic>) {
         roles: Vec::new(),
         switches: HashMap::new(),
         ports: HashMap::new(),
+        port_box: HashMap::new(),
+        definition_names: HashMap::new(),
         text_at: HashMap::new(),
         open_w: HashMap::new(),
         arrow_e: HashMap::new(),
@@ -188,6 +196,14 @@ fn is_literal(t: &Text) -> bool {
     }
 }
 
+/// A literal text as it is written: a text literal keeps its guillemets.
+fn literal_phrase(t: &Text) -> String {
+    match t.kind {
+        TextKind::Literal => format!("«{}»", t.content),
+        _ => t.content.clone(),
+    }
+}
+
 fn is_selector_port(p: &Port) -> bool {
     p.side == Dir::N && p.kind == PortKind::Arrow && p.dir == Dir::S
 }
@@ -210,7 +226,7 @@ fn merged_switch_output(sources: &[Source]) -> Option<Source> {
     Some(sources[0])
 }
 
-impl Parser<'_> {
+impl<'a> Parser<'a> {
     fn error(&mut self, at: Pos, code: Code, message: &str) {
         self.diags.push(Diagnostic::new(at, code, message));
     }
@@ -361,6 +377,7 @@ impl Parser<'_> {
                     _ => PortRole::Unknown,
                 };
                 self.ports.insert(p.pos, pr);
+                self.port_box.insert(p.pos, i);
             }
         }
     }
@@ -426,7 +443,9 @@ impl Parser<'_> {
                         name_of(&d.texts[t])
                     }
                     None => {
-                        self.error(p.pos, "Y009", "port without a name");
+                        let port = self.port_of(self.ports[&p.pos]).expect("a definition port");
+                        let message = format!("{port} has no name");
+                        self.error(p.pos, "Y009", &message);
                         Name { text: String::new(), at: p.pos }
                     }
                 };
@@ -465,6 +484,7 @@ impl Parser<'_> {
                 if rest.chars().count() == 1 || rest == NIL {
                     self.error(text.pos, "Y013", "reserved for primitives");
                 }
+                self.definition_names.insert(boxi, rest.to_owned());
                 Name { text: rest.to_owned(), at: text.pos }
             }
             _ => {
@@ -589,26 +609,46 @@ impl Parser<'_> {
                             diagnosed = true;
                         }
                         None => {
-                            self.error(e.pos, "Y003", "wire end meets a port it can't use");
+                            let message = self.unusable_port(q, e.facing);
+                            self.error(e.pos, "Y003", &message);
                             diagnosed = true;
                         }
                     },
                 }
             }
             let first = w.cells[0];
-            if !diagnosed && sinks.is_empty() {
-                self.error(first, "Y005", "wire with no sink");
-            } else if !diagnosed && sources.is_empty() {
-                self.error(first, "Y005", "wire with no source");
-            }
-            let from = match sources[..] {
+            let merged = match sources[..] {
                 [] => None,
                 [s] => Some(s),
-                _ => merged_switch_output(&sources).or_else(|| {
-                    self.error(first, "Y006", "two sources on one wire");
-                    Some(sources[0])
-                }),
+                _ => merged_switch_output(&sources),
             };
+            // Sources and sinks are only ever found in a scope.
+            if !diagnosed && sinks.is_empty() {
+                let message = match (scope, merged) {
+                    (Some(s), Some(from)) => {
+                        format!("the wire from {} reaches no arrowhead", self.source_phrase(s, from, true))
+                    }
+                    _ => "wire reaches no arrowhead".to_owned(),
+                };
+                self.error(first, "Y005", &message);
+            } else if !diagnosed
+                && sources.is_empty()
+                && let Some(s) = scope
+            {
+                let each: Vec<String> = sinks.iter().map(|&to| self.endpoint_phrase(s, to)).collect();
+                let message = format!("wire with no source reaches {}", message::series(&each));
+                self.error(first, "Y005", &message);
+            }
+            if merged.is_none()
+                && sources.len() > 1
+                && let Some(s) = scope
+            {
+                let each: Vec<String> = sources.iter().map(|&from| self.source_phrase(s, from, false)).collect();
+                let count = message::quantity(sources.len(), "source");
+                let message = format!("{count} on one wire: {}", message::series(&each));
+                self.error(first, "Y006", &message);
+            }
+            let from = merged.or(sources.first().copied());
             let (Some(scope), Some(from)) = (scope, from) else { continue };
             let from = match from {
                 Source::Plain(ep) => ep,
@@ -646,7 +686,9 @@ impl Parser<'_> {
                     )
                 );
                 if sink && p.kind == PortKind::Arrow && !fed.contains(&(p.pos, p.dir)) {
-                    self.error(p.pos, "Y019", "port arrowhead with no wire reaching it");
+                    let port = self.port_of(self.ports[&p.pos]).expect("a sink port");
+                    let message = message::unfed(port);
+                    self.error(p.pos, "Y019", &message);
                 }
             }
         }
@@ -741,15 +783,13 @@ impl Parser<'_> {
     fn call(&mut self, b: usize) -> Node {
         let d = self.d;
         let shape = &d.boxes[b];
-        let owned: Vec<&Text> =
-            d.texts.iter().filter(|t| t.owner == Some(b) && t.kind != TextKind::Comment).collect();
-        let nested = d.boxes.iter().any(|c| c.parent == Some(b));
-        let name = match owned[..] {
-            [t] if !nested && t.kind == TextKind::Word => name_of(t),
-            _ => {
-                let at = owned.first().map_or(top_left(shape.rect), |t| t.pos);
+        let name = match self.node_word(b) {
+            Some(t) => name_of(t),
+            None => {
+                let first = d.texts.iter().find(|t| t.owner == Some(b) && t.kind != TextKind::Comment);
+                let at = first.map_or(top_left(shape.rect), |t| t.pos);
                 self.error(at, "Y002", "a node box must hold exactly one word");
-                Name { text: owned.first().map(|t| t.content.clone()).unwrap_or_default(), at }
+                Name { text: first.map(|t| t.content.clone()).unwrap_or_default(), at }
             }
         };
         for (i, t) in d.texts.iter().enumerate() {
@@ -779,7 +819,8 @@ impl Parser<'_> {
             self.error(selector, "Y010", "switch without a selector");
         }
         if info.arms.windows(2).any(|w| w[0].results.len() != w[1].results.len()) {
-            self.error(selector, "Y011", "arms with different numbers of results");
+            let results: Vec<usize> = info.arms.iter().map(|a| a.results.len()).collect();
+            self.error(selector, "Y011", &message::unequal_arms(&results));
         }
         let mut inputs = vec![selector];
         let mut outputs: Vec<Pos> = Vec::new();
@@ -821,6 +862,136 @@ impl Parser<'_> {
         }
         self.used[first] = true;
         Some(Guard { value: self.literal(first), at: d.texts[first].pos })
+    }
+
+    /// The word of node box `b`, if it holds exactly one word and no box.
+    /// Otherwise the node is `Y002`.
+    fn node_word(&self, b: usize) -> Option<&'a Text> {
+        let d = self.d;
+        let mut owned = d.texts.iter().filter(|t| t.owner == Some(b) && t.kind != TextKind::Comment);
+        let (Some(t), None) = (owned.next(), owned.next()) else { return None };
+        let nested = d.boxes.iter().any(|c| c.parent == Some(b));
+        (!nested && t.kind == TextKind::Word).then_some(t)
+    }
+
+    /// The name of definition box `boxi`, if its title is a `·`-word.
+    fn name_of_definition(&self, boxi: usize) -> Option<&str> {
+        self.definition_names.get(&boxi).map(String::as_str)
+    }
+
+    /// A port that has a role, as messages name it.
+    fn port_of(&self, role: PortRole) -> Option<message::Port<'_>> {
+        let word = |b: usize| self.node_word(b).map(|t| t.content.as_str());
+        let index = |n: u32| n as usize;
+        Some(match role {
+            PortRole::DefIn(d, n) => {
+                message::Port::DefinitionInput { definition: self.name_of_definition(d), index: index(n) }
+            }
+            PortRole::DefOut(d, n) => {
+                message::Port::DefinitionOutput { definition: self.name_of_definition(d), index: index(n) }
+            }
+            PortRole::NodeIn(b, n) => message::Port::NodeInput { word: word(b), index: index(n) },
+            PortRole::NodeOut(b, n) => message::Port::NodeOutput { word: word(b), index: index(n) },
+            PortRole::Selector(_) => message::Port::Selector,
+            PortRole::ThroughIn(_, arm, j) => message::Port::LeftThroughPort { arm, index: index(j) },
+            PortRole::ThroughOut(_, arm, j) => message::Port::RightThroughPort { arm, index: index(j) },
+            PortRole::Ignored | PortRole::Unknown => return None,
+        })
+    }
+
+    /// Box `b` as messages name it.
+    fn box_phrase(&self, b: usize) -> String {
+        match self.roles[b] {
+            Role::Def => message::definition(self.name_of_definition(b)),
+            Role::Node => message::node(self.node_word(b).map(|t| t.content.as_str())),
+            Role::Switch => "the switch".to_owned(),
+            Role::Skip | Role::Inner => "the box".to_owned(),
+        }
+    }
+
+    /// The `Y003` message for a wire end that meets the port at `q`, facing
+    /// `facing`, where no rule of SPEC §7 gives it a role: a port with a
+    /// role met from the wrong side, or a stroke on a border that no rule
+    /// makes a port.
+    fn unusable_port(&self, q: Pos, facing: Dir) -> String {
+        let Some(&b) = self.port_box.get(&q) else { return "a wire can't meet this port".to_owned() };
+        let port = self.d.boxes[b].ports.iter().find(|p| p.pos == q).expect("a port of its box");
+        let Some(named) = self.port_of(self.ports[&q]) else {
+            let stroke = match port.kind {
+                PortKind::Arrow => "arrowhead",
+                PortKind::Tee => "tee",
+            };
+            return format!("a wire can't meet this {stroke} on the border of {}", self.box_phrase(b));
+        };
+        // The end faces the port, so it is outside when it faces inward.
+        let side = if facing == port.side.opposite() { "outside" } else { "inside" };
+        let kind = match self.roles[b] {
+            Role::Def => "definition",
+            Role::Switch => "switch",
+            _ => "node",
+        };
+        format!("a wire can't meet {named} from {side} the {kind}")
+    }
+
+    /// The left through-port behind input slot `slot` of switch box `b`:
+    /// slot 0 is the selector, then every arm's through-ports, arm by arm.
+    fn left_through_port(&self, b: usize, slot: usize) -> message::Port<'static> {
+        let mut rest = slot - 1;
+        for (arm, a) in self.switches[&b].arms.iter().enumerate() {
+            if rest < a.params.len() {
+                return message::Port::LeftThroughPort { arm, index: rest };
+            }
+            rest -= a.params.len();
+        }
+        unreachable!("a switch's input slots are its selector and its arms' through-ports")
+    }
+
+    /// A wire's source or arrowhead in `scope`, as messages name it.
+    fn endpoint_phrase(&self, scope: Scope, ep: Endpoint) -> String {
+        let definition = self.name_of_definition(scope.boxi);
+        let port = match (ep, scope.arm) {
+            (Endpoint::Param(n), None) => message::Port::DefinitionInput { definition, index: n as usize },
+            (Endpoint::Param(n), Some(arm)) => message::Port::LeftThroughPort { arm, index: n as usize },
+            (Endpoint::Result(n), None) => message::Port::DefinitionOutput { definition, index: n as usize },
+            (Endpoint::Result(n), Some(arm)) => message::Port::RightThroughPort { arm, index: n as usize },
+            (Endpoint::Input(id, slot) | Endpoint::Output(id, slot), _) => {
+                let output = matches!(ep, Endpoint::Output(..));
+                let index = slot as usize;
+                let at_node = |word: Option<&'a str>| match output {
+                    true => message::Port::NodeOutput { word, index },
+                    false => message::Port::NodeInput { word, index },
+                };
+                match self.pending.get(&scope).and_then(|list| list.get(id)) {
+                    Some(&Pending::Const { text, .. }) => {
+                        return format!("the constant {}", literal_phrase(&self.d.texts[text]));
+                    }
+                    Some(&Pending::Inline { text, .. }) => at_node(Some(&self.d.texts[text].content)),
+                    Some(&Pending::Box(b)) if self.roles[b] == Role::Switch => match (output, index) {
+                        (true, _) => message::Port::MergedOutput { index },
+                        (false, 0) => message::Port::Selector,
+                        (false, _) => self.left_through_port(b, index),
+                    },
+                    Some(&Pending::Box(b)) => at_node(self.node_word(b).map(|t| t.content.as_str())),
+                    None => return "a node".to_owned(),
+                }
+            }
+        };
+        port.to_string()
+    }
+
+    /// A wire's source in `scope`, as messages name it. Switch outputs that
+    /// merge are named as the merged output when `merged`, and otherwise as
+    /// the right through-ports they leave from.
+    fn source_phrase(&self, scope: Scope, source: Source, merged: bool) -> String {
+        match source {
+            Source::Plain(ep) => self.endpoint_phrase(scope, ep),
+            Source::SwitchOut { ordinal, .. } if merged => {
+                message::Port::MergedOutput { index: ordinal as usize }.to_string()
+            }
+            Source::SwitchOut { arm, ordinal, .. } => {
+                message::Port::RightThroughPort { arm, index: ordinal as usize }.to_string()
+            }
+        }
     }
 
     /// `Y012` for every text no construct accounted for.

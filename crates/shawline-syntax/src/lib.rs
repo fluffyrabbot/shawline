@@ -6,6 +6,7 @@
 
 pub mod ast;
 mod dump;
+pub mod message;
 mod parse;
 
 pub use parse::parse;

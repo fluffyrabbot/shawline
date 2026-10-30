@@ -18,6 +18,15 @@ fn codes(src: &str) -> Vec<String> {
     run(src).1
 }
 
+/// Each diagnostic as `ROW:COL CODE message`.
+fn messages(src: &str) -> Vec<String> {
+    let grid = Grid::parse(src).unwrap();
+    let diagram = recognize(&grid);
+    assert!(diagram.diagnostics.is_empty(), "shape: {:?}", diagram.diagnostics);
+    let (_, diags) = parse(&grid, &diagram);
+    diags.iter().map(|d| format!("{} {} {}", d.at, d.code, d.message)).collect()
+}
+
 #[test]
 fn titles_must_be_namer_words_of_two_letters() {
     assert_eq!(codes("╭─ 𐑛𐑳𐑚 ─╮\n│       │\n╰───────╯\n"), ["0:3 Y001"]);
@@ -53,8 +62,12 @@ fn literal_after_free_arrowhead_is_not_a_constant() {
 
 #[test]
 fn nameless_ports_still_carry_their_wire() {
-    let (sheet, diags) = run("╭─ ·𐑛𐑳 ──╮\n▶ ───────▶\n╰────────╯\n");
-    assert_eq!(diags, ["1:0 Y009", "1:9 Y009"]);
+    let src = "╭─ ·𐑛𐑳 ──╮\n▶ ───────▶\n╰────────╯\n";
+    assert_eq!(
+        messages(src),
+        ["1:0 Y009 the first input of ·𐑛𐑳 has no name", "1:9 Y009 the first output of ·𐑛𐑳 has no name"]
+    );
+    let (sheet, _) = run(src);
     let edges = &sheet.definitions[0].body.edges;
     assert_eq!(edges.len(), 1);
     assert_eq!(
@@ -75,7 +88,7 @@ fn merged_switch_output_without_a_sink() {
 │ └────────┘     │
 ╰────────────────╯
 ";
-    assert_eq!(codes(src), ["3:12 Y005"]);
+    assert_eq!(messages(src), ["3:12 Y005 the wire from the switch's first merged output reaches no arrowhead"]);
 }
 
 #[test]
@@ -88,7 +101,10 @@ fn wire_between_two_inputs_has_no_source() {
 │   └───┘     │
 ╰─────────────╯
 ";
-    assert_eq!(codes(src), ["2:2 Y005"]);
+    assert_eq!(
+        messages(src),
+        ["2:2 Y005 wire with no source reaches the first input of 𐑐 and the second input of 𐑐"]
+    );
 }
 
 #[test]
@@ -105,7 +121,15 @@ fn merge_of_different_result_ordinals() {
 │ └────────┘     │
 ╰────────────────╯
 ";
-    assert_eq!(codes(src), ["3:12 Y006"]);
+    assert_eq!(
+        messages(src),
+        ["3:12 Y006 2 sources on one wire: the first right through-port of the first arm \
+          and the second right through-port of the first arm"]
+    );
+    assert_eq!(
+        messages(include_str!("../../../corpus/92-merge.shaw")),
+        ["4:4 Y006 2 sources on one wire: the constant 1 and the constant 2"]
+    );
 }
 
 #[test]
@@ -153,7 +177,10 @@ fn arms_must_agree_on_results() {
 │ └────────┘     │
 ╰────────────────╯
 ";
-    assert_eq!(codes(src), ["2:7 Y011"]);
+    assert_eq!(
+        messages(src),
+        ["2:7 Y011 arms with different numbers of results: the first arm has 1 and the second has none"]
+    );
 }
 
 #[test]
@@ -194,7 +221,7 @@ fn constants_nil_and_oversized() {
 #[test]
 fn unfed_arrowheads_are_y019() {
     let output = "╭─ ·𐑛𐑳 ───╮\n│ 5 ──────▶ 𐑬\n│         ▶ 𐑚\n╰─────────╯\n";
-    assert_eq!(codes(output), ["2:10 Y019"]);
+    assert_eq!(messages(output), ["2:10 Y019 no wire reaches the second output of ·𐑛𐑳"]);
     let input = "\
 ╭─ ·𐑛𐑳 ─────────╮
 │     ┌───┐     │
@@ -203,7 +230,7 @@ fn unfed_arrowheads_are_y019() {
 │     └───┘     │
 ╰───────────────╯
 ";
-    assert_eq!(codes(input), ["3:6 Y019"]);
+    assert_eq!(messages(input), ["3:6 Y019 no wire reaches the second input of 𐑐"]);
     // An unfed selector, and an arm whose through-ports are unfed: the left
     // one from outside, the right one from inside.
     let switch = "\
@@ -215,7 +242,57 @@ fn unfed_arrowheads_are_y019() {
 │ └────────────────┘   │
 ╰──────────────────────╯
 ";
-    assert_eq!(codes(switch), ["1:10 Y019", "2:2 Y019", "4:19 Y019"]);
+    assert_eq!(
+        messages(switch),
+        [
+            "1:10 Y019 no wire reaches the switch's selector",
+            "2:2 Y019 no wire reaches the first left through-port of the first arm from outside the switch",
+            "4:19 Y019 no wire reaches the first right through-port of the second arm from inside the arm",
+        ]
+    );
+    assert_eq!(
+        messages(include_str!("../../../corpus/static/01-unfed-port.shaw")),
+        ["6:8 Y019 no wire reaches the second input of 𐑐"]
+    );
+}
+
+#[test]
+fn unnamed_ports_say_which_port_of_which_definition() {
+    assert_eq!(
+        messages(include_str!("../../../corpus/static/05-unnamed-port.shaw")),
+        ["6:20 Y009 the second output of ·𐑥𐑱𐑯 has no name"]
+    );
+    let untitled = "╭───────╮\n▶ ──────▶\n╰───────╯\n";
+    assert_eq!(
+        messages(untitled),
+        [
+            "0:0 Y001 a definition's title must be one ·-word",
+            "1:0 Y009 the first input of the definition has no name",
+            "1:8 Y009 the first output of the definition has no name",
+        ]
+    );
+}
+
+/// A wire end at a port that no rule lets it use names the port, and the
+/// side it came from.
+#[test]
+fn unusable_ports_are_named() {
+    let outside = "   ╭─ ·𐑛𐑳 ───╮\n ──▶ 𐑯 ──────▶ 𐑬\n   ╰─────────╯\n";
+    assert_eq!(
+        messages(outside),
+        [
+            "1:1 Y003 dangling wire end",
+            "1:2 Y003 a wire can't meet the first input of ·𐑛𐑳 from outside the definition",
+        ]
+    );
+    let arrowhead_output = "\
+╭─ ·𐑛𐑳 ────────╮
+│     ┌───┐    │
+│ 5 ──▶ 𐑖 ▶────▶ 𐑬
+│     └───┘    │
+╰──────────────╯
+";
+    assert_eq!(messages(arrowhead_output), ["2:11 Y003 a wire can't meet this arrowhead on the border of 𐑖"]);
 }
 
 #[test]
