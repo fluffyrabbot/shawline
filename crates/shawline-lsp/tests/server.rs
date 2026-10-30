@@ -3,9 +3,13 @@
 
 use std::thread::JoinHandle;
 
+use std::path::{Path, PathBuf};
+
 use lsp_server::{Connection, Message, Notification, Request, RequestId};
 use lsp_types::{Position, PositionEncodingKind, Range, TextEdit};
 use serde_json::{Value, json};
+use shawline_doc::Doc;
+use shawline_edit::{apply, repairs};
 use shawline_lsp::position::{self, Encoding};
 
 const URI: &str = "file:///sheet.shaw";
@@ -15,6 +19,31 @@ fn corpus(name: &str) -> String {
     std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{path}: {e}"))
 }
 
+/// Every corpus program, as a name for [`corpus`], leaving out the
+/// formatter's and fixer's expected outputs.
+fn programs() -> Vec<String> {
+    let root = PathBuf::from(format!("{}/../../corpus", env!("CARGO_MANIFEST_DIR")));
+    let mut found = Vec::new();
+    let mut pending = vec![root.clone()];
+    while let Some(dir) = pending.pop() {
+        for entry in std::fs::read_dir(&dir).unwrap() {
+            let path = entry.unwrap().path();
+            let name = path.to_string_lossy().into_owned();
+            if path.is_dir() {
+                pending.push(path);
+            } else if name.ends_with(".shaw")
+                && !name.ends_with(".fmt.shaw")
+                && !name.ends_with(".fix.shaw")
+            {
+                let relative = path.strip_prefix(&root).map(Path::to_owned).unwrap_or(path);
+                found.push(relative.to_string_lossy().into_owned());
+            }
+        }
+    }
+    found.sort();
+    found
+}
+
 struct Client {
     conn: Connection,
     server: Option<JoinHandle<()>>,
@@ -22,6 +51,8 @@ struct Client {
     enc: Encoding,
     /// The negotiated encoding, as the server announced it.
     announced: Value,
+    /// Everything the server announced it can do.
+    capabilities: Value,
     version: i32,
     text: String,
 }
@@ -41,6 +72,7 @@ impl Client {
             next_id: 0,
             enc: Encoding::Utf16,
             announced: Value::Null,
+            capabilities: Value::Null,
             version: 0,
             text: String::new(),
         };
@@ -49,6 +81,7 @@ impl Client {
             "initialize",
             json!({ "capabilities": caps, "initializationOptions": options }),
         );
+        client.capabilities = init["capabilities"].clone();
         client.announced = init["capabilities"]["positionEncoding"].clone();
         client.enc = match client.announced.as_str() {
             Some("utf-32") => Encoding::Utf32,
@@ -139,6 +172,35 @@ impl Client {
     fn hover_text(&mut self, pos: Position) -> Option<String> {
         let hover = self.hover(pos);
         hover["contents"]["value"].as_str().map(str::to_owned)
+    }
+
+    /// The code actions for `range`, of the kinds in `only` (every kind
+    /// when it is empty), with `diagnostics` as the client's context.
+    fn code_actions(&mut self, range: Range, only: &[&str], diagnostics: &[Value]) -> Vec<Value> {
+        let mut context = json!({ "diagnostics": diagnostics });
+        if !only.is_empty() {
+            context["only"] = json!(only);
+        }
+        let params = json!({ "textDocument": { "uri": URI }, "range": range, "context": context });
+        let result = self.request("textDocument/codeAction", params);
+        result.as_array().cloned().unwrap_or_default()
+    }
+
+    /// A code action's edits to the open document.
+    fn action_edits(action: &Value) -> Vec<TextEdit> {
+        serde_json::from_value(action["edit"]["changes"][URI].clone()).unwrap()
+    }
+
+    /// Applies a code action's edit, sends the text, and returns the
+    /// diagnostics it gets.
+    fn apply_action(&mut self, action: &Value) -> Vec<Value> {
+        self.apply(&Client::action_edits(action));
+        self.change(self.text.clone())
+    }
+
+    /// The whole of the local text, as a range.
+    fn whole(&self) -> Range {
+        Range::new(Position::new(0, 0), position::end_of(&self.text, self.enc))
     }
 
     /// Applies edits (non-overlapping, as LSP requires) to the local text.
@@ -437,10 +499,16 @@ fn hover_reads_every_word() {
     // A title reads with its namer dot, a call of it without.
     let title = client.hover_text(Position::new(2, 5)).unwrap();
     assert!(title.starts_with("**·𐑛𐑳𐑚𐑩𐑤** · 1→1\n\n"), "{title}");
-    assert!(title.ends_with("\n\nReading: `dubəl` · Type: `=dub@l`"), "{title}");
+    assert!(
+        title.ends_with("\n\nReading: `dubəl` · Type: `=dub@l`"),
+        "{title}"
+    );
     let call = client.hover_text(Position::new(14, 12)).unwrap();
     assert!(call.starts_with("**·𐑛𐑳𐑚𐑩𐑤** · 1→1\n\n"), "{call}");
-    assert!(call.ends_with("\n\nReading: `dubəl` · Type: `dub@l`"), "{call}");
+    assert!(
+        call.ends_with("\n\nReading: `dubəl` · Type: `dub@l`"),
+        "{call}"
+    );
     // Numbers have nothing to read.
     assert_eq!(client.hover(Position::new(14, 2)), Value::Null);
 
@@ -496,4 +564,238 @@ fn changing_the_setting_rewords_diagnostics() {
         client.hover_text(Position::new(5, 8)).as_deref(),
         Some("Reading: `foo` · Type: `foo`")
     );
+}
+
+#[test]
+fn capitals_type_their_lowercase_keys() {
+    for offer in [vec![], vec![PositionEncodingKind::UTF32]] {
+        let mut client = Client::start(&offer);
+        let triggers =
+            &client.capabilities["documentOnTypeFormattingProvider"]["moreTriggerCharacter"];
+        for c in ["T", "H", "V"] {
+            assert!(
+                triggers.as_array().unwrap().contains(&json!(c)),
+                "{c} in {triggers}"
+            );
+        }
+
+        client.open("※ 𐑐 \n");
+        client.type_keys(0, "Th");
+        assert_eq!(client.text, "※ 𐑐 𐑔\n");
+
+        client.open("※ 𐑐 \n");
+        client.type_keys(0, "=DUB@L");
+        assert_eq!(client.text, "※ 𐑐 ·𐑛𐑳𐑚𐑩𐑤\n");
+
+        // A capital `V` keeps the `v` rule: a letter only inside a word run.
+        client.open("※ 𐑐\n──\n");
+        client.type_keys(1, "V");
+        assert_eq!(client.text, "※ 𐑐\n──V\n");
+        client.open("※ 𐑐\n");
+        client.type_keys(0, "LV");
+        assert_eq!(client.text, "※ 𐑐𐑤𐑝\n");
+    }
+}
+
+#[test]
+fn code_actions_are_announced() {
+    let client = Client::start(&[]);
+    assert_eq!(
+        client.capabilities["codeActionProvider"]["codeActionKinds"],
+        json!(["quickfix", "refactor.rewrite"])
+    );
+}
+
+/// The one action titled "Convert keys to Shavian" among `actions`, checked
+/// for its kind and that it claims no diagnostic.
+fn conversion(actions: &[Value]) -> &Value {
+    let [action] = actions else {
+        panic!("{actions:?}")
+    };
+    assert_eq!(action["title"], "Convert keys to Shavian");
+    assert_eq!(action["kind"], "refactor.rewrite");
+    assert_eq!(action["isPreferred"], Value::Null);
+    assert_eq!(action["diagnostics"], Value::Null);
+    action
+}
+
+#[test]
+fn convert_keys_in_a_selection() {
+    for offer in [vec![], vec![PositionEncodingKind::UTF32]] {
+        let mut client = Client::start(&offer);
+        let enc = client.enc;
+        let at = |text: &str, row: usize, col: usize| position::to_lsp(text, enc, row, col);
+
+        client.open("※ dub@l 𐑐\n");
+        let selection = Range::new(Position::new(0, 2), Position::new(0, 7));
+        let actions = client.code_actions(selection, &["refactor"], &[]);
+        let edits = Client::action_edits(conversion(&actions));
+        assert_eq!(edits, [TextEdit::new(selection, "𐑛𐑳𐑚𐑩𐑤".into())]);
+        client.apply_action(conversion(&actions));
+        assert_eq!(client.text, "※ 𐑛𐑳𐑚𐑩𐑤 𐑐\n");
+
+        // Nothing left to convert, no selection, or a kind that isn't asked for.
+        let whole = client.whole();
+        assert_eq!(
+            client.code_actions(whole, &["refactor"], &[]),
+            Vec::<Value>::new()
+        );
+        client.open("※ dub@l\n");
+        let cursor = Range::new(Position::new(0, 4), Position::new(0, 4));
+        assert_eq!(
+            client.code_actions(cursor, &["refactor"], &[]),
+            Vec::<Value>::new()
+        );
+        let selection = Range::new(Position::new(0, 2), Position::new(0, 7));
+        assert_eq!(
+            client.code_actions(selection, &["quickfix"], &[]),
+            Vec::<Value>::new()
+        );
+        assert_eq!(
+            client.code_actions(selection, &["refactor.extract"], &[]),
+            Vec::<Value>::new()
+        );
+        conversion(&client.code_actions(selection, &["refactor.rewrite"], &[]));
+
+        // A pasted block: every line, `v` by the word-run rule, capitals as keys.
+        client.open("=dub@l\nlvl vow /vow\nDubul 2 ──v\n");
+        let actions = client.code_actions(client.whole(), &["refactor"], &[]);
+        client.apply_action(conversion(&actions));
+        assert_eq!(client.text, "·𐑛𐑳𐑚𐑩𐑤\n𐑤𐑝𐑤 v𐑬 𐑝𐑬\n𐑛𐑳𐑚𐑳𐑤 2 ──v\n");
+
+        // Keys right after a letter continue its word, so `v` is 𐑝 there.
+        let text = "※ 𐑐vow\n";
+        client.open(text);
+        let selection = Range::new(at(text, 0, 3), at(text, 0, 6));
+        let actions = client.code_actions(selection, &["refactor"], &[]);
+        client.apply_action(conversion(&actions));
+        assert_eq!(client.text, "※ 𐑐𐑝𐑬\n");
+    }
+}
+
+/// The repairs `shawline_edit` offers for `doc`'s diagnostic `index` that a
+/// quick fix can carry: each one's label, and the text its edit gives.
+fn expected_fixes(doc: &Doc, index: usize) -> Vec<(String, String)> {
+    let d = &doc.diagnostics()[index];
+    repairs(doc)
+        .into_iter()
+        .filter(|r| r.at == d.at && r.code == d.code)
+        .filter_map(|r| {
+            let edited = apply(doc, r.edit.as_ref()?).ok()?;
+            Some((r.label, edited.doc.text().to_owned()))
+        })
+        .collect()
+}
+
+#[test]
+fn repairs_become_quick_fixes() {
+    for offer in [vec![], vec![PositionEncodingKind::UTF32]] {
+        let mut client = Client::start(&offer);
+        for name in programs() {
+            let text = corpus(&name);
+            let published = client.open(&text);
+            let doc = Doc::new(text.as_str());
+            assert_eq!(published.len(), doc.diagnostics().len(), "{name}");
+            for (index, diagnostic) in published.iter().enumerate() {
+                let range: Range = serde_json::from_value(diagnostic["range"].clone()).unwrap();
+                let actions =
+                    client.code_actions(range, &["quickfix"], std::slice::from_ref(diagnostic));
+                // A neighbouring diagnostic's range may touch this one's.
+                let own: Vec<&Value> = actions
+                    .iter()
+                    .filter(|a| a["diagnostics"] == json!([diagnostic]))
+                    .collect();
+                let want = expected_fixes(&doc, index);
+                assert_eq!(own.len(), want.len(), "{name}: {diagnostic}");
+                for (action, (label, edited)) in own.into_iter().zip(&want) {
+                    assert_eq!(action["kind"], "quickfix", "{name}");
+                    assert_eq!(action["title"], label.as_str(), "{name}");
+                    let preferred = if want.len() == 1 {
+                        json!(true)
+                    } else {
+                        Value::Null
+                    };
+                    assert_eq!(action["isPreferred"], preferred, "{name}: {label}");
+                    client.apply(&Client::action_edits(action));
+                    assert_eq!(&client.text, edited, "{name}: {label}");
+                    client.text.clone_from(&text);
+                }
+                for action in &actions {
+                    let claimed = &action["diagnostics"].as_array().unwrap()[0];
+                    assert!(published.contains(claimed), "{name}: {claimed}");
+                }
+            }
+        }
+    }
+}
+
+#[test]
+#[ignore = "pending E3"]
+fn quick_fix_adds_the_namer_dot() {
+    let mut client = Client::start(&[]);
+    let published = client.open(&corpus("static/03-no-namer-dot.shaw"));
+    let [diagnostic] = published.as_slice() else {
+        panic!("{published:?}")
+    };
+    assert_eq!(diagnostic["code"], "Y001");
+    let range: Range = serde_json::from_value(diagnostic["range"].clone()).unwrap();
+    let actions = client.code_actions(range, &["quickfix"], std::slice::from_ref(diagnostic));
+    let [action] = actions.as_slice() else {
+        panic!("{actions:?}")
+    };
+    assert_eq!(action["isPreferred"], true);
+    assert_eq!(action["diagnostics"], json!([diagnostic]));
+    let after = client.apply_action(action);
+    assert!(
+        after.iter().all(|d| d["severity"] != 1),
+        "{after:?}\n{}",
+        client.text
+    );
+    assert!(client.text.contains("╭─ ·𐑥𐑱𐑯 "), "{}", client.text);
+}
+
+#[test]
+#[ignore = "pending E3"]
+fn every_repair_with_an_edit_is_a_quick_fix() {
+    // PLAN P10's repairs table: the codes whose repair has an edit, and those
+    // whose repair is all follow-up, which a language server can't offer.
+    let with_edit = [
+        "S012", "Y001", "Y003", "Y004", "Y014", "Y015", "Y018", "C001", "C002", "C005", "C006",
+        "W001", "W002",
+    ];
+    let follow_up_only = ["Y009", "Y013", "C004", "Y019"];
+    let mut offered = std::collections::BTreeSet::new();
+    let mut client = Client::start(&[]);
+    for name in programs() {
+        let text = corpus(&name);
+        let before = client.open(&text);
+        for action in client.code_actions(client.whole(), &["quickfix"], &[]) {
+            let code = action["diagnostics"][0]["code"]
+                .as_str()
+                .unwrap()
+                .to_owned();
+            let count = |diagnostics: &[Value]| {
+                diagnostics
+                    .iter()
+                    .filter(|d| d["code"] == code.as_str())
+                    .count()
+            };
+            let after = client.apply_action(&action);
+            assert!(
+                count(&after) < count(&before),
+                "{name}: {} leaves {code}\n{}",
+                action["title"],
+                client.text
+            );
+            offered.insert(code);
+            client.text.clone_from(&text);
+            client.change(text.clone());
+        }
+    }
+    for code in with_edit {
+        assert!(offered.contains(code), "no quick fix for {code}");
+    }
+    for code in follow_up_only {
+        assert!(!offered.contains(code), "a quick fix for {code}");
+    }
 }

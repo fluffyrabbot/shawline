@@ -40,7 +40,10 @@ pub fn cell_to_lsp(text: &str, enc: Encoding, p: Pos) -> Position {
 /// The range covering `width` cells from grid cell `p`.
 pub fn cells_range(text: &str, enc: Encoding, p: Pos, width: usize) -> Range {
     let col = cells::raw_col(text, p);
-    Range::new(to_lsp(text, enc, p.row, col), to_lsp(text, enc, p.row, col + width))
+    Range::new(
+        to_lsp(text, enc, p.row, col),
+        to_lsp(text, enc, p.row, col + width),
+    )
 }
 
 /// The character index on its raw line of an LSP position. A UTF-16 offset
@@ -58,6 +61,47 @@ pub fn lsp_to_cell(text: &str, enc: Encoding, pos: Position) -> Pos {
 pub fn end_of(text: &str, enc: Encoding) -> Position {
     let (row, units) = cells::end(text, enc);
     Position::new(row as u32, units)
+}
+
+/// The part of the text an LSP range covers.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Selected<'a> {
+    /// The range, clamped to the text: a position past the end of its line
+    /// is that line's end, and one past the last line is the text's end.
+    pub range: Range,
+    /// The characters in `range`, line endings included.
+    pub text: &'a str,
+    /// The character just before `range`, if there is one.
+    pub before: Option<char>,
+}
+
+/// What `range` covers in `text`.
+pub fn selected(text: &str, enc: Encoding, range: Range) -> Selected<'_> {
+    let (start, start_pos) = locate(text, enc, range.start);
+    // A backwards range covers nothing.
+    let (end, end_pos) = locate(text, enc, range.end).max((start, start_pos));
+    Selected {
+        range: Range::new(start_pos, end_pos),
+        text: &text[start..end],
+        before: text[..start].chars().next_back(),
+    }
+}
+
+/// The byte offset in `text` of `pos`, and `pos` itself, both clamped as
+/// [`Selected::range`] says.
+fn locate(text: &str, enc: Encoding, pos: Position) -> (usize, Position) {
+    let row = pos.line as usize;
+    let mut offset = 0;
+    for (i, raw) in text.split('\n').enumerate() {
+        if i == row {
+            let l = raw.strip_suffix('\r').unwrap_or(raw);
+            let col = from_lsp(text, enc, pos).min(l.chars().count());
+            let byte = l.char_indices().nth(col).map_or(l.len(), |(b, _)| b);
+            return (offset + byte, to_lsp(text, enc, row, col));
+        }
+        offset += raw.len() + 1;
+    }
+    (text.len(), end_of(text, enc))
 }
 
 #[cfg(test)]
@@ -108,14 +152,8 @@ mod tests {
     fn negotiation_prefers_utf32() {
         use PositionEncodingKind as K;
         assert_eq!(negotiate(None), Encoding::Utf16);
-        assert_eq!(
-            negotiate(Some(&[K::UTF8, K::UTF16])),
-            Encoding::Utf16
-        );
-        assert_eq!(
-            negotiate(Some(&[K::UTF16, K::UTF32])),
-            Encoding::Utf32
-        );
+        assert_eq!(negotiate(Some(&[K::UTF8, K::UTF16])), Encoding::Utf16);
+        assert_eq!(negotiate(Some(&[K::UTF16, K::UTF32])), Encoding::Utf32);
     }
 
     #[test]
@@ -145,6 +183,33 @@ mod tests {
         // Just past the end, both ways agree.
         assert_eq!(to_lsp(TEXT, Encoding::Utf16, 1, 20), Position::new(1, 22));
         assert_eq!(from_lsp(TEXT, Encoding::Utf16, Position::new(1, 22)), 20);
+    }
+
+    #[test]
+    fn selected_clamps_to_the_text() {
+        let enc = Encoding::Utf16;
+        let pos = Position::new;
+        // `𐑯` is units 2 and 3 of line 1, then a space and `──`.
+        let s = selected(TEXT, enc, Range::new(pos(1, 2), pos(1, 7)));
+        assert_eq!((s.text, s.before), ("𐑯 ──", Some(' ')));
+        assert_eq!(s.range, Range::new(pos(1, 2), pos(1, 7)));
+        // Halfway into `𐑯` rounds down; past the `\r` stops at the line's end.
+        let s = selected(TEXT, enc, Range::new(pos(1, 3), pos(1, 99)));
+        assert_eq!(s.text, "𐑯 ──┬─▶ 𐑐 ├");
+        assert_eq!(s.range, Range::new(pos(1, 2), pos(1, 15)));
+        // Across lines, line endings included, and past the last line.
+        let s = selected(TEXT, enc, Range::new(pos(0, 0), pos(9, 0)));
+        assert_eq!((s.text, s.before), (TEXT, None));
+        assert_eq!(s.range, Range::new(pos(0, 0), pos(2, 1)));
+        let s = selected(TEXT, enc, Range::new(pos(1, 14), pos(2, 0)));
+        assert_eq!((s.text, s.before), ("├\r\n", Some(' ')));
+        // Empty, and backwards.
+        let s = selected(TEXT, enc, Range::new(pos(2, 1), pos(2, 1)));
+        assert_eq!((s.text, s.before), ("", Some('x')));
+        assert_eq!(
+            selected(TEXT, enc, Range::new(pos(1, 4), pos(0, 0))).text,
+            ""
+        );
     }
 
     #[test]

@@ -1,6 +1,6 @@
 # Shawline for VS Code
 
-Editor support for Shawline, the dataflow language you draw. You get diagnostics, formatting, semantic highlighting and hover from the `shawline-lsp` language server, plus typing Shavian from plain ASCII keys and the Shawline Mono font.
+Editor support for Shawline, the dataflow language you draw. You get diagnostics and their quick fixes, formatting, semantic highlighting and hover from the `shawline-lsp` language server, plus typing Shavian from plain ASCII keys and the Shawline Mono font.
 
 ## Install
 
@@ -50,8 +50,15 @@ The full table is in `docs/SPEC.md` §13 of the Shawline repository.
 - **Longest match wins:** `th` is 𐑔. Type `/` between keys for the shorter reading: `t/h` is 𐑑𐑣. The `/` itself leaves nothing behind.
 - **The namer dot `·` is `=`,** because `.` is a stroke. `=dub@l` gives `·𐑛𐑳𐑚𐑩𐑤`.
 - Only word runs are transliterated. Outside a word, `v` stays the `▼` arrowhead fallback, and digits, spaces and strokes pass through.
+- **A capital types its lowercase key,** as in Studio: `Th` is 𐑔, whether Shift or Caps Lock is down.
 
 Transliteration is `editor.formatOnType` for the `shawline` language. The status bar shows **Shavian** (on) or **ASCII** (off); click it, or run **Shawline: Toggle Shavian Transliteration**, to switch.
+
+Keys already in the text, such as pasted ones, are converted on request: select them and choose **Convert keys to Shavian** from the light bulb or **Refactor…**. It follows the rules above, as if the selection were typed where it stands, so `=dub@l` becomes `·𐑛𐑳𐑚𐑩𐑤`. It is offered only when the selection holds keys to convert.
+
+## Quick fixes
+
+A diagnostic with a known fix offers it as a quick fix, under the light bulb or **Quick Fix…** (`Ctrl+.`, `Cmd+.` on macOS), with the same label as Studio's Fix button: `Y001` adds the missing namer dot, for example. A fix that Studio finishes with a gesture, such as naming a port or drawing a wire, is offered only for the edit it starts with, or not at all when the gesture is the whole fix. Use Studio for those.
 
 ## Readings
 

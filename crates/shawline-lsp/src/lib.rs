@@ -1,5 +1,5 @@
 //! The Shawline language server: diagnostics, formatting, semantic tokens,
-//! hovers, and transliteration as you type.
+//! hovers, quick fixes, and transliteration as you type or of a selection.
 //!
 //! The gloss layer (PLAN P9) is on unless the client turns it off, with
 //! `{"gloss": false}` in `initializationOptions` or `{"shawline": {"gloss":
@@ -10,6 +10,7 @@
 //! which transliteration relies on: the `didChange` carrying a typed key must
 //! land before the `onTypeFormatting` request that rewrites it.
 
+pub mod actions;
 pub mod analysis;
 pub mod position;
 pub mod typing;
@@ -23,7 +24,12 @@ use lsp_types::notification::{
     Notification as _, PublishDiagnostics,
 };
 use lsp_types::request::{
-    Formatting, HoverRequest, OnTypeFormatting, Request as _, SemanticTokensFullRequest,
+    CodeActionRequest, Formatting, HoverRequest, OnTypeFormatting, Request as _,
+    SemanticTokensFullRequest,
+};
+use lsp_types::{
+    CodeAction, CodeActionKind, CodeActionOptions, CodeActionOrCommand, CodeActionParams,
+    CodeActionProviderCapability, CodeActionResponse, WorkspaceEdit,
 };
 use lsp_types::{
     DiagnosticSeverity, DocumentFormattingParams, DocumentOnTypeFormattingOptions,
@@ -35,6 +41,7 @@ use lsp_types::{
     TextDocumentSyncKind, TextEdit, Uri,
 };
 use shawline_doc::Doc;
+use shawline_edit::Repair;
 use shawline_grid::Severity;
 
 use position::Encoding;
@@ -94,6 +101,13 @@ pub fn capabilities(enc: Encoding) -> ServerCapabilities {
         position_encoding: Some(position::kind(enc)),
         text_document_sync: Some(TextDocumentSyncCapability::Kind(TextDocumentSyncKind::FULL)),
         hover_provider: Some(HoverProviderCapability::Simple(true)),
+        code_action_provider: Some(CodeActionProviderCapability::Options(CodeActionOptions {
+            code_action_kinds: Some(vec![
+                CodeActionKind::QUICKFIX,
+                CodeActionKind::REFACTOR_REWRITE,
+            ]),
+            ..Default::default()
+        })),
         document_formatting_provider: Some(OneOf::Left(true)),
         document_on_type_formatting_provider: Some(DocumentOnTypeFormattingOptions {
             first_trigger_character: first,
@@ -136,6 +150,7 @@ impl Server {
             }
             HoverRequest::METHOD => respond::<HoverRequest>(req, |p| self.hover(p)),
             OnTypeFormatting::METHOD => respond::<OnTypeFormatting>(req, |p| self.on_type(p)),
+            CodeActionRequest::METHOD => respond::<CodeActionRequest>(req, |p| self.code_action(p)),
             _ => Response::new_err(
                 req.id,
                 ErrorCode::MethodNotFound as i32,
@@ -211,31 +226,39 @@ impl Server {
     /// The diagnostics notification for the open document `uri`.
     fn publish(&self, uri: &Uri) -> Notification {
         let open = &self.docs[uri];
-        let params =
-            PublishDiagnosticsParams::new(uri.clone(), self.diagnostics(&open.doc), Some(open.version));
+        let params = PublishDiagnosticsParams::new(
+            uri.clone(),
+            self.diagnostics(&open.doc),
+            Some(open.version),
+        );
         Notification::new(PublishDiagnostics::METHOD.into(), params)
     }
 
     fn diagnostics(&self, doc: &Doc) -> Vec<lsp_types::Diagnostic> {
         doc.diagnostics()
             .iter()
-            .map(|d| lsp_types::Diagnostic {
-                range: position::cells_range(doc.text(), self.enc, d.at, 1),
-                severity: Some(match d.severity() {
-                    Severity::Error => DiagnosticSeverity::ERROR,
-                    Severity::Warning => DiagnosticSeverity::WARNING,
-                    Severity::Lint => DiagnosticSeverity::HINT,
-                }),
-                code: Some(NumberOrString::String(d.code.to_string())),
-                source: Some("shawline".into()),
-                message: if self.gloss {
-                    shawline_word::annotate(&d.message)
-                } else {
-                    d.message.clone()
-                },
-                ..Default::default()
-            })
+            .map(|d| self.diagnostic(doc, d))
             .collect()
+    }
+
+    /// `d` as published, so a code action can attach the very same one.
+    fn diagnostic(&self, doc: &Doc, d: &shawline_grid::Diagnostic) -> lsp_types::Diagnostic {
+        lsp_types::Diagnostic {
+            range: position::cells_range(doc.text(), self.enc, d.at, 1),
+            severity: Some(match d.severity() {
+                Severity::Error => DiagnosticSeverity::ERROR,
+                Severity::Warning => DiagnosticSeverity::WARNING,
+                Severity::Lint => DiagnosticSeverity::HINT,
+            }),
+            code: Some(NumberOrString::String(d.code.to_string())),
+            source: Some("shawline".into()),
+            message: if self.gloss {
+                shawline_word::annotate(&d.message)
+            } else {
+                d.message.clone()
+            },
+            ..Default::default()
+        }
     }
 
     fn formatting(&self, p: DocumentFormattingParams) -> Option<Vec<TextEdit>> {
@@ -310,6 +333,91 @@ impl Server {
         );
         Some(vec![TextEdit::new(range, r.text)])
     }
+
+    /// The quick fixes for the diagnostics the range touches, then the
+    /// conversion of the keys in it, each when the client's `only` asks for
+    /// its kind.
+    fn code_action(&self, p: CodeActionParams) -> Option<CodeActionResponse> {
+        let uri = p.text_document.uri;
+        let doc = &self.docs.get(&uri)?.doc;
+        let wanted = |kind: &CodeActionKind| {
+            p.context
+                .only
+                .as_ref()
+                .is_none_or(|only| only.iter().any(|o| covers(o, kind)))
+        };
+        let mut offered: CodeActionResponse = Vec::new();
+        if wanted(&CodeActionKind::QUICKFIX) {
+            offered.extend(self.quick_fixes(&uri, doc, p.range, shawline_edit::repairs));
+        }
+        if wanted(&CodeActionKind::REFACTOR_REWRITE) {
+            let selected = position::selected(doc.text(), self.enc, p.range);
+            let converted = typing::convert(selected.before, selected.text);
+            if converted != selected.text {
+                offered.push(CodeActionOrCommand::CodeAction(CodeAction {
+                    title: "Convert keys to Shavian".into(),
+                    kind: Some(CodeActionKind::REFACTOR_REWRITE),
+                    edit: Some(workspace_edit(
+                        &uri,
+                        TextEdit::new(selected.range, converted),
+                    )),
+                    ..Default::default()
+                }));
+            }
+        }
+        Some(offered)
+    }
+
+    /// The repairs `repairs` finds, made into quick fixes for the
+    /// diagnostics of `doc` (open at `uri`) that `range` touches. Code
+    /// actions are asked for at every move of the cursor, so `repairs` runs
+    /// only when some diagnostic is touched.
+    fn quick_fixes(
+        &self,
+        uri: &Uri,
+        doc: &Doc,
+        range: Range,
+        repairs: impl FnOnce(&Doc) -> Vec<Repair>,
+    ) -> Vec<CodeActionOrCommand> {
+        let touched = |d: &shawline_grid::Diagnostic| {
+            actions::touches(position::cells_range(doc.text(), self.enc, d.at, 1), range)
+        };
+        if !doc.diagnostics().iter().any(touched) {
+            return Vec::new();
+        }
+        actions::fixes(doc, &repairs(doc), touched)
+            .into_iter()
+            .map(|fix| {
+                let edit = actions::replacement(doc.text(), &fix.text, self.enc);
+                CodeActionOrCommand::CodeAction(CodeAction {
+                    title: fix.title,
+                    kind: Some(CodeActionKind::QUICKFIX),
+                    diagnostics: Some(vec![self.diagnostic(doc, fix.diagnostic)]),
+                    edit: Some(workspace_edit(uri, edit)),
+                    is_preferred: fix.preferred.then_some(true),
+                    ..Default::default()
+                })
+            })
+            .collect()
+    }
+}
+
+/// True if `only`, a kind a client asks for, asks for `kind`. Kinds are
+/// dotted paths, and asking for one asks for every kind beneath it.
+fn covers(only: &CodeActionKind, kind: &CodeActionKind) -> bool {
+    let (only, kind) = (only.as_str(), kind.as_str());
+    only.is_empty()
+        || kind
+            .strip_prefix(only)
+            .is_some_and(|rest| rest.is_empty() || rest.starts_with('.'))
+}
+
+/// One edit to the document at `uri`.
+fn workspace_edit(uri: &Uri, edit: TextEdit) -> WorkspaceEdit {
+    WorkspaceEdit {
+        changes: Some(HashMap::from([(uri.clone(), vec![edit])])),
+        ..Default::default()
+    }
 }
 
 /// Decodes a request's params, runs `f`, and encodes its result.
@@ -320,5 +428,119 @@ fn respond<R: lsp_types::request::Request>(
     match serde_json::from_value::<R::Params>(req.params) {
         Ok(params) => Response::new_ok(req.id, f(params)),
         Err(e) => Response::new_err(req.id, ErrorCode::InvalidParams as i32, e.to_string()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use lsp_types::Position;
+    use shawline_edit::{Edit, Followup, apply};
+    use shawline_grid::Pos;
+
+    // Until `shawline_edit::repairs` offers anything, these hand the server
+    // repairs of their own.
+
+    fn corpus(name: &str) -> String {
+        let path = format!("{}/../../corpus/{name}", env!("CARGO_MANIFEST_DIR"));
+        std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{path}: {e}"))
+    }
+
+    /// `text` with one edit applied.
+    fn applied(text: &str, enc: Encoding, edit: &TextEdit) -> String {
+        let offset = |pos: Position| {
+            position::selected(text, enc, Range::new(Position::new(0, 0), pos))
+                .text
+                .len()
+        };
+        let (start, end) = (offset(edit.range.start), offset(edit.range.end));
+        format!("{}{}{}", &text[..start], edit.new_text, &text[end..])
+    }
+
+    #[test]
+    fn a_repair_is_a_quick_fix_on_its_diagnostic() {
+        let uri: Uri = "file:///sheet.shaw".parse().unwrap();
+        let text = corpus("static/12-unused-input.shaw");
+        let doc = Doc::new(text.as_str());
+        let at = Pos::new(6, 0);
+        let edit = Edit::RemovePort(at);
+        let repairs = [Repair {
+            at,
+            code: "W002",
+            label: "Remove the unused input".into(),
+            edit: Some(edit.clone()),
+            then: Followup::None,
+        }];
+        let fixed = apply(&doc, &edit).unwrap().doc.text().to_owned();
+        for enc in [Encoding::Utf16, Encoding::Utf32] {
+            let server = Server {
+                enc,
+                docs: HashMap::new(),
+                gloss: true,
+            };
+            let published = server.diagnostics(&doc);
+            let [diagnostic] = published.as_slice() else {
+                panic!("{published:?}")
+            };
+            let r = diagnostic.range;
+            // A selection over it or the cursor at either edge finds it.
+            let whole = Range::new(Position::new(0, 0), position::end_of(&text, enc));
+            for range in [
+                r,
+                Range::new(r.start, r.start),
+                Range::new(r.end, r.end),
+                whole,
+            ] {
+                let offered = server.quick_fixes(&uri, &doc, range, |_| repairs.to_vec());
+                let [CodeActionOrCommand::CodeAction(action)] = offered.as_slice() else {
+                    panic!("{offered:?}")
+                };
+                assert_eq!(action.title, "Remove the unused input");
+                assert_eq!(action.kind, Some(CodeActionKind::QUICKFIX));
+                assert_eq!(
+                    action.diagnostics.as_deref(),
+                    Some(std::slice::from_ref(diagnostic))
+                );
+                assert_eq!(action.is_preferred, Some(true));
+                let edits = action
+                    .edit
+                    .as_ref()
+                    .and_then(|e| e.changes.as_ref()?.get(&uri))
+                    .unwrap();
+                let [edit] = edits.as_slice() else {
+                    panic!("{edits:?}")
+                };
+                assert_eq!(applied(&text, enc, edit), fixed);
+            }
+            let elsewhere = Range::new(Position::new(1, 0), Position::new(1, 0));
+            assert!(
+                server
+                    .quick_fixes(&uri, &doc, elsewhere, |_| repairs.to_vec())
+                    .is_empty()
+            );
+        }
+    }
+
+    #[test]
+    fn only_asks_by_dotted_prefix() {
+        let kind = |s: &'static str| CodeActionKind::new(s);
+        assert!(covers(&kind("refactor"), &CodeActionKind::REFACTOR_REWRITE));
+        assert!(covers(
+            &kind("refactor.rewrite"),
+            &CodeActionKind::REFACTOR_REWRITE
+        ));
+        assert!(covers(&kind(""), &CodeActionKind::QUICKFIX));
+        assert!(!covers(
+            &kind("refactor.re"),
+            &CodeActionKind::REFACTOR_REWRITE
+        ));
+        assert!(!covers(
+            &kind("refactor.rewrite.more"),
+            &CodeActionKind::REFACTOR_REWRITE
+        ));
+        assert!(!covers(
+            &kind("quickfix"),
+            &CodeActionKind::REFACTOR_REWRITE
+        ));
     }
 }
