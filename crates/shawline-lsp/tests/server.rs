@@ -1,15 +1,15 @@
 //! Drives the server in-process over an in-memory connection, the way an
 //! editor would.
 
-use std::thread::JoinHandle;
-
 use std::path::{Path, PathBuf};
+use std::thread::JoinHandle;
 
 use lsp_server::{Connection, Message, Notification, Request, RequestId};
 use lsp_types::{Position, PositionEncodingKind, Range, TextEdit};
 use serde_json::{Value, json};
 use shawline_doc::Doc;
 use shawline_edit::{apply, repairs};
+use shawline_grid::Pos;
 use shawline_lsp::position::{self, Encoding};
 
 const URI: &str = "file:///sheet.shaw";
@@ -673,64 +673,84 @@ fn convert_keys_in_a_selection() {
     }
 }
 
-/// The repairs `shawline_edit` offers for `doc`'s diagnostic `index` that a
-/// quick fix can carry: each one's label, and the text its edit gives.
-fn expected_fixes(doc: &Doc, index: usize) -> Vec<(String, String)> {
-    let d = &doc.diagnostics()[index];
-    repairs(doc)
-        .into_iter()
-        .filter(|r| r.at == d.at && r.code == d.code)
-        .filter_map(|r| {
-            let edited = apply(doc, r.edit.as_ref()?).ok()?;
-            Some((r.label, edited.doc.text().to_owned()))
+/// The quick fixes a corpus case's `.repair` dump says it offers, in order:
+/// the cell and code of each repair whose edit applies (`… ok DIGEST`).
+/// `None` when the case keeps no dump, as `.repair` is selective.
+fn dumped_fixes(name: &str) -> Option<Vec<(Pos, String)>> {
+    let dump = name.replace(".shaw", ".repair");
+    let path = format!("{}/../../corpus/{dump}", env!("CARGO_MANIFEST_DIR"));
+    let dump = std::fs::read_to_string(path).ok()?;
+    let fixes = dump
+        .lines()
+        .filter(|line| line.split(' ').any(|word| word == "ok"))
+        .map(|line| {
+            let mut words = line.split(' ');
+            let (row, col) = words.next().unwrap().split_once(':').unwrap();
+            let at = Pos::new(row.parse().unwrap(), col.parse().unwrap());
+            (at, words.next().unwrap().to_owned())
         })
-        .collect()
+        .collect();
+    Some(fixes)
 }
 
 #[test]
 fn repairs_become_quick_fixes() {
+    let (mut dumps, mut fixes) = (0, 0);
     for offer in [vec![], vec![PositionEncodingKind::UTF32]] {
         let mut client = Client::start(&offer);
         for name in programs() {
             let text = corpus(&name);
             let published = client.open(&text);
-            let doc = Doc::new(text.as_str());
-            assert_eq!(published.len(), doc.diagnostics().len(), "{name}");
-            for (index, diagnostic) in published.iter().enumerate() {
-                let range: Range = serde_json::from_value(diagnostic["range"].clone()).unwrap();
-                let actions =
-                    client.code_actions(range, &["quickfix"], std::slice::from_ref(diagnostic));
-                // A neighbouring diagnostic's range may touch this one's.
-                let own: Vec<&Value> = actions
-                    .iter()
-                    .filter(|a| a["diagnostics"] == json!([diagnostic]))
-                    .collect();
-                let want = expected_fixes(&doc, index);
-                assert_eq!(own.len(), want.len(), "{name}: {diagnostic}");
-                for (action, (label, edited)) in own.into_iter().zip(&want) {
-                    assert_eq!(action["kind"], "quickfix", "{name}");
-                    assert_eq!(action["title"], label.as_str(), "{name}");
-                    let preferred = if want.len() == 1 {
-                        json!(true)
-                    } else {
-                        Value::Null
-                    };
-                    assert_eq!(action["isPreferred"], preferred, "{name}: {label}");
-                    client.apply(&Client::action_edits(action));
-                    assert_eq!(&client.text, edited, "{name}: {label}");
-                    client.text.clone_from(&text);
-                }
-                for action in &actions {
-                    let claimed = &action["diagnostics"].as_array().unwrap()[0];
-                    assert!(published.contains(claimed), "{name}: {claimed}");
-                }
+            // The sheet's quick fixes, in the order offered, are the dump's,
+            // each on a diagnostic as it was published.
+            let actions = client.code_actions(client.whole(), &["quickfix"], &[]);
+            let offered: Vec<(Pos, String)> = actions
+                .iter()
+                .map(|action| {
+                    let d = &action["diagnostics"][0];
+                    assert!(published.contains(d), "{name}: {d}");
+                    let range: Range = serde_json::from_value(d["range"].clone()).unwrap();
+                    let at = position::lsp_to_cell(&text, client.enc, range.start);
+                    (at, d["code"].as_str().unwrap().to_owned())
+                })
+                .collect();
+            if let Some(dumped) = dumped_fixes(&name) {
+                assert_eq!(offered, dumped, "{name}");
+                dumps += 1;
             }
+
+            // Each is its repair: labelled as it is, the only fix for its
+            // diagnostic, and giving the text its edit gives. The cursor on
+            // its diagnostic finds it too.
+            let doc = Doc::new(text.as_str());
+            let expected: Vec<(String, String)> = repairs(&doc)
+                .into_iter()
+                .filter_map(|r| {
+                    let edited = apply(&doc, r.edit.as_ref()?).ok()?;
+                    Some((r.label, edited.doc.text().to_owned()))
+                })
+                .collect();
+            assert_eq!(actions.len(), expected.len(), "{name}");
+            for (action, (label, edited)) in actions.iter().zip(&expected) {
+                assert_eq!(action["kind"], "quickfix", "{name}");
+                assert_eq!(action["title"], label.as_str(), "{name}");
+                assert_eq!(action["isPreferred"], true, "{name}: {label}");
+                client.apply(&Client::action_edits(action));
+                assert_eq!(&client.text, edited, "{name}: {label}");
+                client.text.clone_from(&text);
+                let d = &action["diagnostics"][0];
+                let range: Range = serde_json::from_value(d["range"].clone()).unwrap();
+                let here = client.code_actions(range, &["quickfix"], std::slice::from_ref(d));
+                assert!(here.contains(action), "{name}: {label} not at {d}");
+            }
+            fixes += actions.len();
         }
     }
+    // Both encodings saw the same cases, so nothing here is vacuous.
+    assert!(dumps >= 2 * 26 && fixes > 0, "{dumps} dumps, {fixes} fixes");
 }
 
 #[test]
-#[ignore = "pending E3"]
 fn quick_fix_adds_the_namer_dot() {
     let mut client = Client::start(&[]);
     let published = client.open(&corpus("static/03-no-namer-dot.shaw"));
@@ -755,7 +775,6 @@ fn quick_fix_adds_the_namer_dot() {
 }
 
 #[test]
-#[ignore = "pending E3"]
 fn every_repair_with_an_edit_is_a_quick_fix() {
     // PLAN P10's repairs table: the codes whose repair has an edit, and those
     // whose repair is all follow-up, which a language server can't offer.

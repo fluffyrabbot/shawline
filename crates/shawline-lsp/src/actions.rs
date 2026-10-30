@@ -26,23 +26,30 @@ pub struct Fix<'a> {
 
 /// The fixes `repairs` offer for those of `doc`'s diagnostics that `wanted`
 /// picks, in the order of `repairs`. A repair is left out when it has no
-/// edit, when its edit is refused, or when it names no diagnostic of
-/// `doc`'s by cell and code.
+/// edit, when its edit is refused (`repairs` offers none such, so this is
+/// a guard), or when it names no diagnostic of `doc`'s by cell and code.
+///
+/// Repairs come in diagnostic order, at most one each, so a repair is for
+/// the first diagnostic of its cell and code that no earlier repair took.
+/// Both ends of a one-cell wire are then two `Y003`s with a fix each.
 pub fn fixes<'a>(
     doc: &'a Doc,
     repairs: &[Repair],
     wanted: impl Fn(&Diagnostic) -> bool,
 ) -> Vec<Fix<'a>> {
     let diagnostics = doc.diagnostics();
+    let mut taken = vec![false; diagnostics.len()];
     let mut found: Vec<(usize, Fix<'a>)> = Vec::new();
     for repair in repairs {
-        let Some(edit) = &repair.edit else { continue };
-        let Some(index) = diagnostics
-            .iter()
-            .position(|d| d.at == repair.at && d.code == repair.code)
-        else {
+        let fixes =
+            |i: &usize| diagnostics[*i].at == repair.at && diagnostics[*i].code == repair.code;
+        let mut matching = (0..diagnostics.len()).filter(fixes);
+        let Some(first) = matching.clone().next() else {
             continue;
         };
+        let index = matching.find(|&i| !taken[i]).unwrap_or(first);
+        taken[index] = true;
+        let Some(edit) = &repair.edit else { continue };
         if !wanted(&diagnostics[index]) {
             continue;
         }
@@ -274,6 +281,20 @@ mod tests {
             .map(|f| (f.title.as_str(), f.preferred))
             .collect();
         assert_eq!(titles, [("One", false), ("Two", false)]);
+    }
+
+    #[test]
+    fn twin_diagnostics_get_a_fix_each() {
+        // A one-cell wire at 7:24 has two dangling ends: two `Y003`s there.
+        let doc = Doc::new(corpus("fix/03-too-far.shaw"));
+        let at = Pos::new(7, 24);
+        let fixes = fixes(&doc, &shawline_edit::repairs(&doc), |d| d.at == at);
+        let [one, two] = fixes.as_slice() else {
+            panic!("{fixes:?}")
+        };
+        assert_eq!((one.diagnostic.code, two.diagnostic.code), ("Y003", "Y003"));
+        assert!(!std::ptr::eq(one.diagnostic, two.diagnostic));
+        assert!(one.preferred && two.preferred);
     }
 
     #[test]
