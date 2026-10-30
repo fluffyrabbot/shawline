@@ -332,7 +332,9 @@ impl Doc {
     /// says. `edit` is the edit as [`apply`] takes it, or `null` when the
     /// follow-up is all of the fix. `then` is `{ kind, at }`, where `kind`
     /// is `"none"`, `"name_field"` or `"draw_wire"` and `at` the cell the
-    /// follow-up acts on (`null` for `"none"`). Nothing is applied.
+    /// follow-up acts on (`null` for `"none"`): a cell of the sheet `edit`
+    /// leaves, or of this one when `edit` is `null`. A repair is offered
+    /// only when its edit works. Nothing is applied.
     pub fn repairs(&self) -> Array {
         shawline_edit::repairs(&self.0)
             .into_iter()

@@ -1011,7 +1011,7 @@ function studioOn(text) {
     refused: (r, edit, then) => host.refusals.push({ ...r, edit, then }),
     status: (said, kind) => host.statuses.push([said, kind]),
     changed: () => {},
-    palette: (at, mode) => host.palettes.push({ at, mode }),
+    palette: (at, mode, to = null) => host.palettes.push({ at, mode, to }),
     editText: (target) => host.editing.push(target),
     name: (target) => host.naming.push(target),
     extracting: () => host.extractions++,
@@ -1800,7 +1800,7 @@ test("apply reads extract, restyle, fix and add_default_arm, and refuses them wr
   }
 });
 
-pendingE3("repairs gives each fix's at, code, label, edit and follow-up, apply reads every edit, and every table code has one", REPAIRS, () => {
+pendingE3("repairs gives each fix's at, code, label, edit and follow-up, every edit applies, and every table code has one", REPAIRS, () => {
   const offered = new Set();
   for (const name of repairCases) {
     const d = sheet(corpus(name));
@@ -1816,8 +1816,10 @@ pendingE3("repairs gives each fix's at, code, label, edit and follow-up, apply r
       assert.equal(r.label.startsWith("Fix…"), r.then.kind !== "none", `${where}: ${r.label}`);
       assert.ok(r.edit || r.then.kind !== "none", `${where} does something`);
       if (!r.edit) continue;
+      // A repair is offered only when its edit works, so a Fix button
+      // never leads to a refusal; written back for apply, it still does.
       const result = shawline.apply(d, r.edit);
-      assert.ok(result.ok || !unreadable.test(result.reason), `${where}: ${JSON.stringify(r.edit)}: ${result.reason}`);
+      assert.equal(result.ok, true, `${where}: ${JSON.stringify(r.edit)}: ${result.reason}`);
     }
   }
   const table = ["S012", "Y003", "Y004", "Y009", "Y013", "C004", "Y012", "Y019", "Y001", "Y014", "Y015", "Y018", "C001", "C002", "C005", "C006", "W001", "W002"];
@@ -2063,7 +2065,7 @@ pendingE3("F fixes the diagnostic at the cursor, or one the selection covers", R
   // 13-near-name's C001 is on the node's word; the node is selected by its box.
   const near = corpus("static/13-near-name.shaw");
   const b = studioOn(near);
-  b.studio.select({ kind: "box", box: readView(sheet(near)).boxes.find((x) => x.kind === "node") });
+  b.studio.select({ kind: "box", box: readView(sheet(near)).boxes.find((x) => x.kind === "node" && x.top === 13) });
   b.press("f");
   assert.equal(b.host.steps.length, 1, b.host.refusals[0]?.reason);
   assert.ok(!codesOf(b.host.current).includes("C001"));
@@ -2080,21 +2082,51 @@ pendingE3("Y009's Fix… opens the name field, and the name typed into it clears
   assert.ok(!codesOf(host.current).includes("Y009"));
 });
 
-pendingE3("Y019's Fix… starts wiring at once, and W001's after adding a default arm as one undo step", REPAIRS, () => {
+pendingE3("Y019's Fix… starts wiring at once, and C002's after matching the callee's ports as one undo step", REPAIRS, () => {
   const unfed = corpus("static/01-unfed-port.shaw");
   const a = studioOn(unfed);
   const r = sheet(unfed).repairs().find((x) => x.code === "Y019");
   assert.deepEqual([r.edit, r.then.kind, { ...r.then.at }], [null, "draw_wire", cell(6, 8)]);
   a.studio.repair(r);
   assert.ok(a.studio.wiring, a.host.statuses.at(-1)?.[0]);
-  const arm = corpus("static/11-no-default-arm.shaw");
-  const b = studioOn(arm);
-  const w = sheet(arm).repairs().find((x) => x.code === "W001");
-  assert.deepEqual([w.edit?.kind, w.then.kind], ["add_default_arm", "draw_wire"]);
-  assert.equal(b.studio.repair(w), true, b.host.refusals[0]?.reason);
+  // 93-arity's 𐑐 has one input: set_ports gives it two, and the follow-up,
+  // on the sheet the edit left, wires the new one.
+  const arity = corpus("93-arity.shaw");
+  const b = studioOn(arity);
+  const c = sheet(arity).repairs().find((x) => x.code === "C002");
+  assert.deepEqual([c.edit.kind, c.then.kind, c.label.startsWith("Fix…")], ["set_ports", "draw_wire", true]);
+  assert.equal(b.studio.repair(c), true, b.host.refusals[0]?.reason);
   assert.equal(b.host.steps.length, 1);
-  assert.ok(!codesOf(b.host.current).includes("W001"));
-  assert.ok(b.studio.wiring, `wiring starts from the new arm's port: ${b.host.statuses.at(-1)?.[0]}`);
+  const from = b.studio.wiring?.from;
+  assert.deepEqual([from?.kind, from?.sink.row, from?.sink.col], ["sink", c.then.at.row, c.then.at.col]);
+  b.press("Enter");
+  if (b.host.steps.length === 1) {
+    // The constant's wire is one cell, so a branch from it needs room: the
+    // refusal offers Make room, which the page applies as one step.
+    const blocked = b.host.refusals.at(-1);
+    assert.deepEqual([blocked?.edit.kind, blocked?.remedy], ["connect", "make-room"]);
+    const roomed = shawline.apply(sheet(b.host.current), { kind: "make_room", edit: blocked.edit });
+    assert.equal(roomed.ok, true, roomed.reason);
+    b.studio.commit(b.studio.settle(roomed), b.host.current, blocked.then);
+  }
+  assert.equal(b.host.steps.length, 2);
+  assert.deepEqual(codesOf(b.host.current).filter((code) => !code.startsWith("L")), []);
+});
+
+pendingE3("W001's Fix… adds a default arm as one undo step, then feeds its unwired port from the palette, with no source in reach", REPAIRS, () => {
+  const arm = corpus("static/11-no-default-arm.shaw");
+  const { studio, host } = studioOn(arm);
+  const w = sheet(arm).repairs().find((x) => x.code === "W001");
+  assert.deepEqual([w.edit?.kind, w.then.kind, { ...w.then.at }], ["add_default_arm", "draw_wire", cell(11, 18)]);
+  assert.equal(studio.repair(w), true, host.refusals[0]?.reason);
+  assert.equal(host.steps.length, 1);
+  assert.ok(!codesOf(host.current).includes("W001"));
+  // The new arm holds nothing, so W's follow-up opens the palette of sources.
+  assert.equal(studio.wiring, null);
+  assert.deepEqual(JSON.parse(JSON.stringify(host.palettes.at(-1))), { at: cell(11, 18), mode: "source", to: cell(11, 18) });
+  const [number] = offer([], "source");
+  assert.equal(studio.pick(placing(number, cell(11, 18), { mode: "source", to: cell(11, 18) })), true, host.refusals[0]?.reason);
+  assert.deepEqual([host.steps.length, codesOf(host.current).filter((code) => !code.startsWith("L"))], [2, []]);
 });
 
 test("the faded drawing kept while the text can't be drawn is labelled the last valid drawing", () => {

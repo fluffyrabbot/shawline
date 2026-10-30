@@ -2196,8 +2196,9 @@ async function main() {
     changed: selectionChanged,
     mapped: carryValues,
     previewed: (text) => requestTrace(text),
-    palette: (at, mode) => {
+    palette: (at, mode, to) => {
       if (mode === "inline") return void openMenu(at, { mode });
+      if (mode === "source") return void openMenu(at, { mode, to });
       const box = boxAt(current(), at);
       if (!box || box.kind === "node") return void showStatus("/ opens the palette on blank sheet inside a definition, or on a wire: move the cursor there.", "hint");
       openMenu(at, { mode: "place" });

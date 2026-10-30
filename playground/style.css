@@ -567,7 +567,7 @@ button[aria-pressed="true"] { background: var(--wash); border-color: var(--wire)
 
 #problems li {
   display: grid;
-  grid-template-columns: 4.5em 3.5em 1fr auto;
+  grid-template-columns: 4.5em 3.5em 1fr;
   align-items: baseline;
   gap: 12px;
   padding: 7px 10px;
@@ -578,8 +578,9 @@ button[aria-pressed="true"] { background: var(--wash); border-color: var(--wire)
 #problems li:hover, #problems li.hot { background: var(--wash); }
 #problems li.clear { cursor: default; color: var(--comment); grid-template-columns: 1fr; }
 #problems li.clear:hover { background: none; }
-/* A diagnostic's known fix: hovered or focused it draws a ghost, pressed it applies. */
-#problems .fix { grid-column: 4; padding: 1px 10px; font: 13px/1.4 var(--sans); white-space: nowrap; }
+/* A diagnostic's known fix, under its message: hovered or focused it draws
+   a ghost, pressed it applies. */
+#problems .fix { grid-column: 3; justify-self: start; padding: 1px 10px; font: 13px/1.4 var(--sans); text-align: left; }
 
 .pos { color: var(--comment); font-variant-numeric: tabular-nums; font-size: 13px; }
 .code { color: var(--ink); font-weight: 600; font-size: 13px; letter-spacing: 0.02em; }

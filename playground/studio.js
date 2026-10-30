@@ -347,7 +347,7 @@ const HINTS = {
   wire: "Delete removes the whole wire, every branch.",
   branch: "Delete disconnects just this branch; W rewires it to another source.",
   source: "W wires it to an arrowhead; Enter edits its text; Delete removes it.",
-  sink: "W wires it from a source; Delete removes its port.",
+  sink: "W wires it from a source, or with none in reach feeds it a new one; Delete removes its port.",
   text: "Enter edits it.",
   unnamed: "Enter names it.",
   parts: "M makes a definition of them; Shift-click adds or takes one away.",
@@ -378,7 +378,8 @@ function unnamedPort(view, at) {
  * - `refused(refusal, edit, then)`, `status(text, kind)`: say what
  *   happened; a refusal carries the edit and its follow-up, for Make room;
  * - `changed()`: the selection, cursor or held revision changed;
- * - `palette(at, mode)` (`"place"`, or `"inline"` on a wire),
+ * - `palette(at, mode, to)` (`"place"`, `"inline"` on a wire, or
+ *   `"source"` to feed the unwired arrowhead `to`),
  *   `editText(target)`, `name(target)` (the inspector's field, focused),
  *   `extracting()` (Make definition's name field, focused), `help()`,
  *   `zoom(how)`: open things;
@@ -1266,9 +1267,18 @@ export class Studio {
     return [];
   }
 
+  /**
+   * W: wiring from the selected source or arrowhead. An unwired arrowhead
+   * with no source in reach, as in a new arm, opens the palette of sources
+   * instead, to feed it one (Decisions: Constants by mouse).
+   */
   startWiring() {
     const target = this.selection;
     const ends = this.endsFor(target);
+    if (!ends.length && target?.kind === "sink") {
+      this.host.status("No source is in reach, so pick a new one to feed the arrowhead.", "hint");
+      return void this.host.palette(cellOf(target.sink), "source", cellOf(target.sink));
+    }
     if (!ends.length) {
       const why = target ? "Nothing in reach to wire it to." : "W wires a selected source or arrowhead: select one with ] or [.";
       return void this.host.status(why, "hint");
@@ -1511,7 +1521,7 @@ export const KEYS = [
   ["F", "Fix the diagnostic at the cursor, as its Fix button in Diagnostics does"],
   ["Arrow keys", "Nudge a selected box, or move the cursor"],
   ["Enter", "Edit a selected text, or rename a selected node or definition"],
-  ["W", "Wire a selected source or arrowhead: ] and [ pick an end, Enter connects"],
+  ["W", "Wire a selected source or arrowhead: ] and [ pick an end, Enter connects. An arrowhead with no source in reach gets the palette of sources"],
   ["Delete", "Remove the selected box, arm, port, wire, branch or constant"],
   ["/", "Open the palette at the cursor; on a wire, the 1→1 callees to splice into it"],
   ["B", "Draw a box from the cursor: arrow keys stretch it, Enter draws it, a definition at top level or a switch inside one"],
