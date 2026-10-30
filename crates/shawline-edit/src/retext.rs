@@ -163,8 +163,14 @@ pub(crate) fn set_text(doc: &Doc, at: Pos, content: &str) -> Result<Edited, Refu
     let old = &diagram.texts[t];
     let role = Role::of(&model, t);
     if role == Role::Call {
-        let why = "a node's word can't be retyped here yet; delete the node and place the one you want";
-        return Err(refuse(RefusalKind::Unsupported, why));
+        if !crate::drawing::is_word(content) {
+            return Err(refuse(RefusalKind::Target, "a node's word is one Shavian word"));
+        }
+        // A node box is redrawn for its new word; an inline node's word
+        // grows or shrinks at its right end, as a name does.
+        if let Some(b) = old.owner.filter(|&b| model.kind(b) == BoxKind::Node && !model.inline_word(t)) {
+            return crate::clearing::rename(&sheets, &model, b, content, at);
+        }
     }
     let Some(new) = token(content).filter(|new| role.takes(new.kind, &new.content, old.kind)) else {
         let why = match role {
@@ -331,10 +337,12 @@ pub(crate) fn place_text(doc: &Doc, at: Pos, content: &str) -> Result<Edited, Re
     for (from, dir) in [(p, Dir::W), (Pos::new(p.row, last), Dir::E)] {
         let Some(q) = reach(from, dir) else { continue };
         let touching = q.col.abs_diff(from.col) == 1;
-        let meets = diagram
-            .strokes
-            .get(q)
-            .is_some_and(|s| s.connects(dir.opposite()) || s.kind == Kind::Arrow(dir.opposite()));
+        // A box's border meets a text only with an arrowhead pointing at
+        // it, as a port meets its name. Any other border stroke, a node's
+        // input arrowhead or output tee say, reads nothing across the gap.
+        let meets = diagram.strokes.get(q).is_some_and(|s| {
+            s.kind == Kind::Arrow(dir.opposite()) || (!model.borders.contains(&q) && s.connects(dir.opposite()))
+        });
         let comment_swallows = new.kind == TextKind::Comment && dir == Dir::E && model.text_at(q).is_some();
         if meets || comment_swallows || (touching && model.text_at(q).is_some()) {
             let why = if meets {

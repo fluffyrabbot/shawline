@@ -20,7 +20,7 @@ use crate::{Blockage, Edited, NewSource, Refusal, RefusalKind, connect, disconne
 pub(crate) fn rewire(doc: &Doc, from: Pos, to: Pos) -> Result<Edited, Refusal> {
     let sheets = Sheets::read(doc, to)?;
     let source = sheets.entity(from).ok_or_else(|| no_source(from))?;
-    let sink = sheets.entity(to).ok_or_else(|| no_sink(to))?;
+    let sink = sheets.endpoint(to).ok_or_else(|| no_sink(to))?;
     let cut = disconnect(doc, to)?;
     // Nothing moves when a branch is cut, so the canonical cells still
     // name the source and the sink.
@@ -80,7 +80,7 @@ const LEADS: [usize; 6] = [3, 2, 1, 4, 5, 6];
 
 pub(crate) fn feed(doc: &Doc, to: Pos, source: &NewSource) -> Result<Edited, Refusal> {
     let sheets = Sheets::read(doc, to)?;
-    let sink = sheets.entity(to).ok_or_else(|| no_sink(to))?;
+    let sink = sheets.endpoint(to).ok_or_else(|| no_sink(to))?;
     let (grid, diagram) = sheets.canon();
     let model = Model::new(grid, diagram);
     let found = model.sink(sink).map_err(|r| Refusal { at: to, ..r })?;

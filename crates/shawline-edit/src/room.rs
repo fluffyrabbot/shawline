@@ -71,7 +71,7 @@ fn attempt(canon: &Doc, diagram: &Diagram, edit: &Edit, candidate: &[Insertion])
         let insertion = Insertion { at, ..*insertion };
         let (edited, cut) = cut::cut(doc.as_ref().unwrap_or(canon), insertion, false).ok()?;
         map = mapped::compose(&map, &edited.map);
-        edit = readdress(&edit, &|p| cut.cell(p).unwrap_or(p));
+        edit = readdress_by(&edit, &|p| cut.cell(p).unwrap_or(p), &|p| cut.place(p));
         doc = Some(edited.doc);
         inserted.push(insertion);
         cuts.push(cut);
@@ -200,40 +200,77 @@ fn landing(diagram: &Diagram, edit: &Edit) -> Option<(usize, usize, Rect)> {
                 .min_by_key(|&b| diagram.boxes[b].rect.area())?;
             Some((holder, corner.row, target))
         }
+        Edit::PlaceSwitch { rect, .. } => {
+            let corner = Pos::new(rect.top, rect.left);
+            let holder = (0..diagram.boxes.len())
+                .filter(|&b| diagram.boxes[b].rect.interior_contains(corner))
+                .min_by_key(|&b| diagram.boxes[b].rect.area())?;
+            Some((holder, corner.row, *rect))
+        }
+        Edit::SetPorts { corner, inputs, outputs } => {
+            let b = diagram.boxes.iter().position(|b| (b.rect.top, b.rect.left) == (corner.row, corner.col))?;
+            let rect = diagram.boxes[b].rect;
+            let word = diagram.texts.iter().find(|t| t.owner == Some(b) && rect.contains(t.pos))?;
+            let target = crate::wiring::node_rect(*corner, &word.content, *inputs, *outputs);
+            Some((diagram.boxes[b].parent?, corner.row, target))
+        }
         _ => None,
     }
 }
 
-/// `edit` with every cell it names taken through `f`.
+/// `edit` with every cell it names taken through `f`, for a map under
+/// which parts and places go alike (the given text to the canonical one).
 pub(crate) fn readdress(edit: &Edit, f: &impl Fn(Pos) -> Pos) -> Edit {
+    readdress_by(edit, f, f)
+}
+
+/// `edit` with every cell it names taken through `part` when it names a
+/// part of the sheet, which the edit should follow, or through `place`
+/// when it names a place to draw in, which an insertion at its own row or
+/// column leaves on the new blank cells:
+///
+/// - **parts:** a move's or a box edit's corner, a connection's ends, a
+///   text to retext or remove, a sink to feed, a port, arm or wire to
+///   remove;
+/// - **places:** where a node, text, inline node, switch or definition is
+///   drawn (a rectangle by its top-left corner, its size kept), where a
+///   wire was dropped, and an insertion's own cell;
+/// - **both:** an arm's or a port's border cell. Its row is a place, where
+///   the divider or the port goes, and its column a part, the border. Only
+///   ports on a box's sides are ever refused for room.
+pub(crate) fn readdress_by(edit: &Edit, part: &impl Fn(Pos) -> Pos, place: &impl Fn(Pos) -> Pos) -> Edit {
+    let f = part;
     let rect = |r: Rect| {
-        let (a, b) = (f(Pos::new(r.top, r.left)), f(Pos::new(r.bottom, r.right)));
-        Rect { top: a.row, left: a.col, bottom: b.row, right: b.col }
+        let a = place(Pos::new(r.top, r.left));
+        Rect { top: a.row, left: a.col, bottom: a.row + (r.bottom - r.top), right: a.col + (r.right - r.left) }
     };
-    let insertion = |i: Insertion| Insertion { at: f(i.at), ..i };
+    let border = |p: Pos| Pos::new(place(p).row, part(p).col);
+    let insertion = |i: Insertion| Insertion { at: place(i.at), ..i };
     match edit.clone() {
         Edit::Move { corner, dr, dc } => Edit::Move { corner: f(corner), dr, dc },
         Edit::Connect { from, to } => Edit::Connect { from: f(from), to: f(to) },
         Edit::RemoveWire(at) => Edit::RemoveWire(f(at)),
         Edit::Disconnect(at) => Edit::Disconnect(f(at)),
-        Edit::PlaceNode { corner, word, inputs, outputs } => Edit::PlaceNode { corner: f(corner), word, inputs, outputs },
+        Edit::PlaceNode { corner, word, inputs, outputs } => {
+            Edit::PlaceNode { corner: place(corner), word, inputs, outputs }
+        }
         Edit::RemoveNode(at) => Edit::RemoveNode(f(at)),
         Edit::Rewire { from, to } => Edit::Rewire { from: f(from), to: f(to) },
         Edit::PlaceConnected { at, word, inputs, outputs, from } => {
-            Edit::PlaceConnected { at: f(at), word, inputs, outputs, from: f(from) }
+            Edit::PlaceConnected { at: place(at), word, inputs, outputs, from: f(from) }
         }
         Edit::Feed { to, source } => Edit::Feed { to: f(to), source },
         Edit::Insert(i) => Edit::Insert(insertion(i)),
         Edit::Delete(i) => Edit::Delete(insertion(i)),
-        Edit::MakeRoom(inner) => Edit::MakeRoom(Box::new(readdress(&inner, f))),
+        Edit::MakeRoom(inner) => Edit::MakeRoom(Box::new(readdress_by(&inner, part, place))),
         Edit::SetText { at, content } => Edit::SetText { at: f(at), content },
-        Edit::PlaceText { at, content } => Edit::PlaceText { at: f(at), content },
+        Edit::PlaceText { at, content } => Edit::PlaceText { at: place(at), content },
         Edit::RemoveText(at) => Edit::RemoveText(f(at)),
         Edit::PlaceDefinition { rect: r, name } => Edit::PlaceDefinition { rect: rect(r), name },
         Edit::PlaceSwitch { rect: r, guard } => Edit::PlaceSwitch { rect: rect(r), guard },
-        Edit::AddPort { at, name } => Edit::AddPort { at: f(at), name },
-        Edit::AddArm { at, guard } => Edit::AddArm { at: f(at), guard },
-        Edit::PlaceInline { at, word } => Edit::PlaceInline { at: f(at), word },
+        Edit::AddPort { at, name } => Edit::AddPort { at: border(at), name },
+        Edit::AddArm { at, guard } => Edit::AddArm { at: border(at), guard },
+        Edit::PlaceInline { at, word } => Edit::PlaceInline { at: place(at), word },
         Edit::RemovePort(at) => Edit::RemovePort(f(at)),
         Edit::RemoveArm(at) => Edit::RemoveArm(f(at)),
         Edit::RemoveBox(corner) => Edit::RemoveBox(f(corner)),

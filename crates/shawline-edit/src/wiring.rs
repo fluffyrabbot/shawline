@@ -1,5 +1,7 @@
 //! Studio Phase 1's edits (PLAN P7): connect, remove a wire, disconnect a
-//! branch, place and remove nodes, and the palette.
+//! branch, place and remove nodes, and the palette. Since P10 wave 2 they
+//! reach merged outputs ([`crate::merge`]) and inline nodes, whose wires
+//! stay while the node does.
 //!
 //! Each edit draws on a copy of the canonical sheet, formats the result and
 //! recognizes it again. What it recognizes to must equal the input's
@@ -32,20 +34,20 @@ use crate::{Blockage, Candidate, Placed, Refusal, RefusalKind};
 const MAX_PORTS: u16 = 16;
 
 /// The sheet's characters, edited in place.
-struct Canvas {
-    rows: Vec<Vec<char>>,
+pub(crate) struct Canvas {
+    pub rows: Vec<Vec<char>>,
 }
 
 impl Canvas {
-    fn new(grid: &Grid) -> Self {
+    pub(crate) fn new(grid: &Grid) -> Self {
         Self { rows: (0..grid.height()).map(|r| grid.row(r).to_vec()).collect() }
     }
 
-    fn get(&self, p: Pos) -> char {
+    pub(crate) fn get(&self, p: Pos) -> char {
         self.rows.get(p.row).and_then(|r| r.get(p.col)).copied().unwrap_or(' ')
     }
 
-    fn set(&mut self, p: Pos, ch: char) {
+    pub(crate) fn set(&mut self, p: Pos, ch: char) {
         if self.rows.len() <= p.row {
             self.rows.resize(p.row + 1, Vec::new());
         }
@@ -56,7 +58,7 @@ impl Canvas {
         row[p.col] = ch;
     }
 
-    fn render(&self) -> String {
+    pub(crate) fn render(&self) -> String {
         let mut out = String::new();
         for row in &self.rows {
             let line: String = row.iter().collect();
@@ -68,7 +70,7 @@ impl Canvas {
 }
 
 /// A refusal about the canonical sheet, pointed at the caller's cell `at`.
-fn here(at: Pos) -> impl Fn(Refusal) -> Refusal {
+pub(crate) fn here(at: Pos) -> impl Fn(Refusal) -> Refusal {
     move |r| Refusal { at, ..r }
 }
 
@@ -76,7 +78,7 @@ fn here(at: Pos) -> impl Fn(Refusal) -> Refusal {
 /// `expected`, given where each box and text of `old` went. Nothing moves in
 /// a wiring edit, so they're found where they were, and a stray move leaves
 /// one unfound. Gives the revision the edit returns, already read.
-fn finish(
+pub(crate) fn finish(
     text: String,
     old: &Diagram,
     at: Pos,
@@ -100,7 +102,7 @@ fn finish(
 }
 
 /// The grid and diagram of a text an edit wrote.
-fn read(doc: &Doc) -> (&Grid, &Diagram) {
+pub(crate) fn read(doc: &Doc) -> (&Grid, &Diagram) {
     let grid = doc.grid().expect("edits write only repertoire characters");
     (grid, doc.diagram().expect("a sheet on the grid is recognized"))
 }
@@ -111,12 +113,12 @@ fn read(doc: &Doc) -> (&Grid, &Diagram) {
 /// Erases wire cell `p`, whose own connections are `mask`. A crossing keeps
 /// the axis that isn't `mask`'s, if any: another wire's line, or another
 /// branch of a wire crossing itself.
-fn erase(canvas: &mut Canvas, model: &Model, p: Pos, mask: u8) {
+pub(crate) fn erase(canvas: &mut Canvas, model: &Model, p: Pos, mask: u8) {
     let crossing = model.diagram.strokes.get(p).filter(|s| s.kind == Kind::Crossing);
     canvas.set(p, crossing.map_or(' ', |s| glyph(s.conn & !mask)));
 }
 
-fn erase_wire(canvas: &mut Canvas, model: &Model, w: usize) {
+pub(crate) fn erase_wire(canvas: &mut Canvas, model: &Model, w: usize) {
     let wire = &model.diagram.wires[w];
     for (&p, &mask) in wire.cells.iter().zip(&wire.links) {
         erase(canvas, model, p, mask);
@@ -171,12 +173,22 @@ fn branch(model: &Model, w: usize, start: Pos, facing: Dir) -> Branch {
 
 /// Removes the branch of wire `w` that reaches `sink`, or the whole wire
 /// when it has no other branch.
-fn cut_branch(canvas: &mut Canvas, model: &Model, w: usize, sink: &Sink) {
+pub(crate) fn cut_branch(canvas: &mut Canvas, model: &Model, w: usize, sink: &Sink) {
     let end = model.diagram.wires[w]
         .ends
         .iter()
-        .find(|e| e.kind == EndKind::Port(sink.at) && e.facing == sink.dir)
+        .find(|e| match e.kind {
+            EndKind::Port(p) => p == sink.at && e.facing == sink.dir && !sink.free,
+            EndKind::Arrow => e.pos == sink.at && sink.free,
+            _ => false,
+        })
         .expect("the sink's wire ends at it");
+    cut_end(canvas, model, w, end);
+}
+
+/// Removes the run of wire `w` from its end `end` back to the tee it
+/// leaves from, or the whole wire when the run reaches its other end.
+pub(crate) fn cut_end(canvas: &mut Canvas, model: &Model, w: usize, end: &shawline_shape::WireEnd) {
     let found = branch(model, w, end.pos, end.facing);
     match found.tee {
         Some((tee, into)) => {
@@ -199,8 +211,13 @@ pub(crate) fn remove_wire(doc: &Doc, at: Pos) -> Result<Doc, Refusal> {
     let Some(&first) = through.first() else {
         return Err(Refusal::new(at, RefusalKind::Target, "no wire passes through this cell"));
     };
-    let w = through.iter().copied().find(|&w| given.editable(w).is_ok()).ok_or_else(|| {
-        Refusal::new(at, RefusalKind::Unsupported, given.editable(first).unwrap_err())
+    // A wire into or out of an inline node stays while the node does.
+    let strands = |w: usize| {
+        let (into, from) = given.inline_ends(w);
+        into.or(from)
+    };
+    let w = through.iter().copied().find(|&w| strands(w).is_none()).ok_or_else(|| {
+        given.strands(at, strands(first).expect("every wire here meets an inline node"))
     })?;
     let (grid, diagram) = sheets.canon();
     let model = Model::new(grid, diagram);
@@ -222,31 +239,63 @@ pub(crate) fn remove_wire(doc: &Doc, at: Pos) -> Result<Doc, Refusal> {
 
 pub(crate) fn disconnect(doc: &Doc, to: Pos) -> Result<Doc, Refusal> {
     let sheets = Sheets::read(doc, to)?;
-    let sink = sheets.entity(to).ok_or_else(|| no_sink(to))?;
+    let sink = sheets.endpoint(to).ok_or_else(|| no_sink(to))?;
     let (grid, diagram) = sheets.canon();
     let model = Model::new(grid, diagram);
     let sink = model.sink(sink).map_err(here(to))?;
     let w = model
         .wire_of(sink.term())
         .ok_or_else(|| Refusal::new(to, RefusalKind::Target, "no wire reaches this arrowhead"))?;
-    model.editable(w).map_err(|why| Refusal::new(to, RefusalKind::Unsupported, why))?;
     let mut canvas = Canvas::new(grid);
-    cut_branch(&mut canvas, &model, w, &sink);
     let mut expected = Structure::of(grid, diagram);
-    expected.disconnect(model.named(sink.term()).expect("a sink is a port"));
+    let term = model.named(sink.term()).expect("a sink is a port or an inline node's input");
+    cut_sink(&mut canvas, &model, &mut expected, w, &sink, term).map_err(here(to))?;
     finish(canvas.render(), diagram, to, "the wire can't be cut here", |map| expected.relabel(map))
+}
+
+/// Cuts the branch of wire `w` reaching `sink` (named `term` in
+/// `expected`), and declares it. Refused where an inline node would lose
+/// its input or its last output branch. A merged output's wire goes whole
+/// with its last sink, stubs and all.
+pub(crate) fn cut_sink(
+    canvas: &mut Canvas,
+    model: &Model,
+    expected: &mut Structure,
+    w: usize,
+    sink: &Sink,
+    term: shawline_shape::structure::Term,
+) -> Result<(), Refusal> {
+    if let Some(t) = model.inline_after(sink.at).filter(|_| sink.free) {
+        return Err(model.strands(sink.at, t));
+    }
+    let last = model.sink_count(w) <= 1;
+    if last && let Some(t) = model.inline_ends(w).1 {
+        return Err(model.strands(sink.at, t));
+    }
+    if last && model.source_count(w) > 1 {
+        erase_wire(canvas, model, w);
+        expected.remove_wire(term);
+    } else {
+        cut_branch(canvas, model, w, sink);
+        expected.disconnect(term);
+    }
+    Ok(())
 }
 
 pub(crate) fn remove_node(doc: &Doc, corner: Pos) -> Result<Doc, Refusal> {
     let sheets = Sheets::read(doc, corner)?;
     let (g, d) = sheets.given();
-    let b = Model::new(g, d).box_at(corner).ok_or_else(|| {
+    let given = Model::new(g, d);
+    if let Some(t) = given.text_at(corner).filter(|&t| d.texts[t].pos == corner && given.inline_word(t)) {
+        return crate::inline::splice(&sheets, t, corner);
+    }
+    let b = given.box_at(corner).ok_or_else(|| {
         Refusal::new(corner, RefusalKind::Target, "there is no box with its top-left corner here")
     })?;
     let (grid, diagram) = sheets.canon();
     let model = Model::new(grid, diagram);
     if model.kind(b) != BoxKind::Node {
-        let why = "only a node can be deleted; a definition or switch stays";
+        let why = "only a node can be deleted this way; a definition or switch is removed as a whole box";
         return Err(Refusal::new(corner, RefusalKind::Target, why));
     }
     let shape = &diagram.boxes[b];
@@ -257,10 +306,21 @@ pub(crate) fn remove_node(doc: &Doc, corner: Pos) -> Result<Doc, Refusal> {
         .filter(|p| p.kind == PortKind::Tee)
         .map(|p| Term::Port(p.pos, Dir::W))
         .collect();
-    for w in inputs.iter().filter_map(|s| model.wire_of(s.term())).chain(
-        outputs.iter().filter_map(|&t| model.wire_of(t)),
-    ) {
-        model.editable(w).map_err(|why| Refusal::new(corner, RefusalKind::Unsupported, why))?;
+    // An inline node keeps its wires: a node whose input is an inline
+    // node's last branch, or whose output feeds one, stays.
+    let fed: Vec<usize> = inputs.iter().filter_map(|s| model.wire_of(s.term())).collect();
+    for &w in &fed {
+        let here = fed.iter().filter(|&&v| v == w).count();
+        if model.sink_count(w) <= here
+            && let Some(t) = model.inline_ends(w).1
+        {
+            return Err(model.strands(corner, t));
+        }
+    }
+    for w in outputs.iter().filter_map(|&t| model.wire_of(t)) {
+        if let Some(t) = model.inline_ends(w).0 {
+            return Err(model.strands(corner, t));
+        }
     }
 
     // One wire at a time, reading the sheet again after each: two inputs
@@ -272,7 +332,13 @@ pub(crate) fn remove_node(doc: &Doc, corner: Pos) -> Result<Doc, Refusal> {
         let m = Model::new(g, d);
         if let Some(w) = m.wire_of(sink.term()) {
             let mut canvas = Canvas::new(g);
-            cut_branch(&mut canvas, &m, w, sink);
+            // A merged output goes whole with its last sink.
+            let mine = inputs.iter().filter(|s| m.wire_of(s.term()) == Some(w)).count();
+            if m.sink_count(w) <= mine && m.source_count(w) > 1 {
+                erase_wire(&mut canvas, &m, w);
+            } else {
+                cut_branch(&mut canvas, &m, w, sink);
+            }
             cut = Some(Doc::new(canvas.render()));
         }
     }
@@ -297,6 +363,15 @@ pub(crate) fn remove_node(doc: &Doc, corner: Pos) -> Result<Doc, Refusal> {
     let mut expected = Structure::of(grid, diagram);
     for term in outputs.iter().filter_map(|&t| model.named(t)) {
         expected.remove_wire(term);
+    }
+    for &w in &fed {
+        let here = fed.iter().filter(|&&v| v == w).count();
+        if model.sink_count(w) <= here && model.source_count(w) > 1 {
+            let source = model.terms[w].iter().find(|t| matches!(t, Term::Port(_, Dir::W)));
+            if let Some(term) = source.and_then(|&t| model.named(t)) {
+                expected.remove_wire(term);
+            }
+        }
     }
     let what = "the node can't be deleted";
     finish(canvas.render(), diagram, corner, what, |map| expected.relabel(map))
@@ -475,6 +550,9 @@ struct Wiring<'a> {
     blocked: HashSet<Pos>,
     /// Every wire's end cells: never crossed or joined.
     ends: HashSet<Pos>,
+    /// The line cell before each inline node's arrowhead: never crossed or
+    /// joined, so the straight stretch through the node stays straight.
+    stretch: HashSet<Pos>,
     /// The cell before the sink's arrowhead, if the route starts at a sink.
     target: Option<Pos>,
 }
@@ -518,12 +596,20 @@ impl<'a> Wiring<'a> {
             }
         }
         let ends = d.wires.iter().flat_map(|w| w.ends.iter().map(|e| e.pos)).collect();
-        Wiring { model, source, wire, own, region, blocked, ends, target: sink.and_then(Sink::target) }
+        let stretch = d
+            .wires
+            .iter()
+            .flat_map(|w| &w.ends)
+            .filter(|e| e.kind == EndKind::Arrow && model.inline_after(e.pos).is_some())
+            .filter_map(|e| e.pos.step(Dir::W))
+            .collect();
+        let target = sink.and_then(Sink::target);
+        Wiring { model, source, wire, own, region, blocked, ends, stretch, target }
     }
 
     fn joinable(&self, p: Pos, heading: Dir) -> bool {
         let Some(w) = self.wire else { return false };
-        if !self.own.contains(&p) || self.ends.contains(&p) {
+        if !self.own.contains(&p) || self.ends.contains(&p) || self.stretch.contains(&p) {
             return false;
         }
         let Some(s) = self.model.diagram.strokes.get(p) else { return false };
@@ -541,7 +627,11 @@ impl Terrain for Wiring<'_> {
         if p.row < r.top || p.row > r.bottom || p.col < r.left || p.col > r.right {
             return Cell::Blocked;
         }
-        if self.blocked.contains(&p) || self.own.contains(&p) || self.ends.contains(&p) {
+        if self.blocked.contains(&p)
+            || self.own.contains(&p)
+            || self.ends.contains(&p)
+            || self.stretch.contains(&p)
+        {
             return Cell::Blocked;
         }
         let first = self.wire.is_none() && p == self.source.first();
@@ -605,7 +695,7 @@ fn search_from_sink(wiring: &Wiring, sink: &Sink) -> Result<Found, Miss> {
 pub(crate) fn connect(doc: &Doc, from: Pos, to: Pos) -> Result<Doc, Refusal> {
     let sheets = Sheets::read(doc, to)?;
     let source = sheets.entity(from).ok_or_else(|| no_source(from))?;
-    let sink = sheets.entity(to).ok_or_else(|| no_sink(to))?;
+    let sink = sheets.endpoint(to).ok_or_else(|| no_sink(to))?;
     let (grid, diagram) = sheets.canon();
     let model = Model::new(grid, diagram);
     let source = model.source(source).map_err(here(from))?;
@@ -621,8 +711,11 @@ pub(crate) fn connect(doc: &Doc, from: Pos, to: Pos) -> Result<Doc, Refusal> {
             format!("{} can't reach this arrowhead: they're in different boxes or arms", source.name),
         ));
     }
-    if let Some(w) = model.wire_of(source.term) {
-        model.editable(w).map_err(|why| Refusal::new(from, RefusalKind::Unsupported, why))?;
+    if !source.merged.is_empty() && model.wire_of(source.term).is_none() {
+        // The merge first, as its own wire with no sink yet; then the wire
+        // from it, as for any wired source.
+        let merged = crate::merge::draw(grid, &model, &source).map_err(here(from))?;
+        return connect(&merged, source.goal, sink.at).map_err(here(to));
     }
     if sink.target().is_none_or(|t| grid.get(t) != ' ') {
         let why = "the cell before this arrowhead is taken; move what's there or try Make room";
@@ -723,12 +816,8 @@ pub(crate) fn preview(doc: &Doc, anchor: crate::Anchor, to: Pos) -> Option<crate
     let sheets = Sheets::read(doc, at).ok()?;
     let (grid, diagram) = sheets.canon();
     let model = Model::new(grid, diagram);
-    let editable_source = |source: &Source| match model.wire_of(source.term) {
-        Some(w) => model.editable(w).is_ok(),
-        None => true,
-    };
     let released = |scope: (usize, usize)| -> Option<Release> {
-        if let Some(sink) = sheets.entity(to).and_then(|p| model.sink(p).ok()) {
+        if let Some(sink) = sheets.endpoint(to).and_then(|p| model.sink(p).ok()) {
             return Some(Release::Sink(sink));
         }
         if sheets.given().0.get(to) != ' ' {
@@ -744,7 +833,7 @@ pub(crate) fn preview(doc: &Doc, anchor: crate::Anchor, to: Pos) -> Option<crate
             (source, release)
         }
         crate::Anchor::Sink(sink) => {
-            let sink = model.sink(sheets.entity(sink)?).ok()?;
+            let sink = model.sink(sheets.endpoint(sink)?).ok()?;
             if model.wire_of(sink.term()).is_some() {
                 return None;
             }
@@ -765,6 +854,7 @@ pub(crate) fn preview(doc: &Doc, anchor: crate::Anchor, to: Pos) -> Option<crate
                         goal: to,
                         text: None,
                         name: String::new(),
+                        merged: Vec::new(),
                     };
                     let terrain = Loose { wiring: Wiring::new(&model, &stand_in, Some(&sink)), to };
                     let start = Start { pos: sink.at, heading: Some(sink.dir.opposite()), straight: true };
@@ -776,31 +866,21 @@ pub(crate) fn preview(doc: &Doc, anchor: crate::Anchor, to: Pos) -> Option<crate
             }
         }
     };
-    if !editable_source(&source) {
-        return None;
-    }
     let found = polyline(&model, &source, &release)?;
     let path: Option<Vec<Pos>> = found.path.iter().map(|&p| sheets.back(source.scope.0, p)).collect();
     Some(crate::Preview { path: path?, ..found })
 }
 
 /// The source a drag anchored on a sink would connect to when released at
-/// given cell `to`: the source there, or the source of the editable wire
-/// through it.
+/// given cell `to`: the source there, or the source of the wire through
+/// it.
 fn source_under(sheets: &Sheets, model: &Model, to: Pos) -> Option<Source> {
     if let Some(source) = sheets.entity(to).and_then(|p| model.source(p).ok()) {
         return Some(source);
     }
     let cell = sheets.place(to)?;
     let w = (0..model.diagram.wires.len()).find(|&w| model.diagram.wires[w].cells.contains(&cell))?;
-    model.editable(w).ok()?;
-    model.terms[w].iter().find_map(|&term| {
-        let p = match term {
-            Term::Port(p, Dir::W) | Term::Text(p, Dir::W) => p,
-            _ => return None,
-        };
-        model.source(p).ok().filter(|s| s.term == term)
-    })
+    model.source(model.source_cell(w)?).ok()
 }
 
 // ---------------------------------------------------------------------------
@@ -864,16 +944,5 @@ pub(crate) fn palette(doc: &Doc, from: Option<Pos>) -> Vec<Candidate> {
 pub(crate) fn wire_sources(doc: &Doc) -> Vec<Option<Pos>> {
     let (Ok(grid), Some(diagram)) = (doc.grid(), doc.diagram()) else { return Vec::new() };
     let model = Model::new(grid, diagram);
-    (0..diagram.wires.len())
-        .map(|w| {
-            model.editable(w).ok()?;
-            model.terms[w].iter().find_map(|&term| {
-                let cell = match term {
-                    Term::Port(p, Dir::W) | Term::Text(p, Dir::W) => p,
-                    _ => return None,
-                };
-                model.source(cell).ok().filter(|s| s.term == term).map(|_| cell)
-            })
-        })
-        .collect()
+    (0..diagram.wires.len()).map(|w| model.source_cell(w)).collect()
 }

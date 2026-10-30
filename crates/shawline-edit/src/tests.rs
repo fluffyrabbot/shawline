@@ -320,12 +320,19 @@ fn connect_refuses_what_it_cannot_name_or_reach() {
 }
 
 #[test]
-fn wires_at_inline_nodes_and_switch_outputs_stay_put() {
+fn an_inline_node_keeps_its_wires_and_a_merged_output_goes_whole() {
     let fanout = include_str!("../../../corpus/13-fanout.shaw");
+    // 7 feeds 𐑖, and 𐑠's only branch is its output.
     let inline = remove_wire(fanout, Pos::new(5, 4)).unwrap_err();
-    assert!(inline.reason.contains("inline"), "{inline:?}");
-    let merged = remove_wire(ABS, Pos::new(13, 28)).unwrap_err();
-    assert!(merged.reason.contains("merged output"), "{merged:?}");
+    assert!(inline.reason.contains("𐑖"), "{inline:?}");
+    let last = disconnect(fanout, Pos::new(14, 26)).unwrap_err();
+    assert_eq!((last.kind, last.at), (RefusalKind::Target, Pos::new(14, 26)));
+    assert!(last.reason.contains("𐑠"), "{last:?}");
+    // abs's merged output: every stub and the run go with its wire.
+    let merged = canon(remove_wire(ABS, Pos::new(13, 28)).unwrap());
+    let at = |row: usize, col: usize| merged.lines().nth(row).unwrap().chars().nth(col).unwrap_or(' ');
+    assert!((10..=13).all(|row| (27..=33).all(|col| at(row, col) == ' ')), "{merged}");
+    assert_eq!((at(10, 26), at(13, 26), at(13, 34)), ('▶', '▶', '▶'), "{merged}");
     assert!(remove_wire(DOUBLE, Pos::new(3, 3)).unwrap_err().reason.contains("no wire"));
 }
 
@@ -791,10 +798,9 @@ fn refusals_say_what_kind_of_obstacle_they_are() {
     let outside = crate::place_node(&double, Pos::new(20, 30), "𐑐", 2, 1).unwrap_err();
     assert_eq!(outside.kind, RefusalKind::Target);
 
+    // The wire into an inline node stays while the node does.
     let fanout = Doc::new(include_str!("../../../corpus/13-fanout.shaw"));
-    assert_eq!(kind(crate::remove_wire(&fanout, Pos::new(5, 4))), RefusalKind::Unsupported);
-    let merged = crate::remove_wire(&Doc::new(ABS), Pos::new(13, 28));
-    assert_eq!(kind(merged), RefusalKind::Unsupported);
+    assert_eq!(kind(crate::remove_wire(&fanout, Pos::new(5, 4))), RefusalKind::Target);
     let latin = crate::place_node(&double, Pos::new(8, 3), "x", 1, 1).unwrap_err();
     assert_eq!(latin.kind, RefusalKind::Unsupported);
 

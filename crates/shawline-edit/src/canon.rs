@@ -105,6 +105,18 @@ impl<'a> Sheets<'a> {
         Some(Pos::new(to.row, to.col + (p.col - given.texts[t].pos.col)))
     }
 
+    /// The canonical cell naming the endpoint at given cell `p`: a port or
+    /// text as [`Sheets::entity`] carries it, or a free arrowhead (an inline
+    /// node's input) by its place in the box around it.
+    pub(crate) fn endpoint(&self, p: Pos) -> Option<Pos> {
+        let (grid, diagram) = self.given();
+        let free = || {
+            let arrow = diagram.strokes.get(p).is_some_and(|s| matches!(s.kind, shawline_shape::stroke::Kind::Arrow(_)));
+            arrow && grid.get(p) != ' '
+        };
+        self.entity(p).or_else(|| if free() { self.place(p) } else { None })
+    }
+
     /// Given cell `p` carried over by its place in the innermost box around
     /// it. `None` outside every box, where nothing holds a place.
     pub(crate) fn place(&self, p: Pos) -> Option<Pos> {

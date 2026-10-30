@@ -47,10 +47,13 @@ pub(crate) struct Source {
     /// The cell a route arrives at, heading west, to start here: the tee or
     /// through-port itself, or the space after a text.
     pub goal: Pos,
-    /// The text a constant or input name source is.
+    /// The text a constant, input name or inline node source is.
     pub text: Option<usize>,
     /// What to call it in a refusal.
     pub name: String,
+    /// A switch's merged output of two or more arms: each arm's right
+    /// through-port at its ordinal, top to bottom. Empty for any other.
+    pub merged: Vec<Pos>,
 }
 
 impl Source {
@@ -60,18 +63,21 @@ impl Source {
     }
 }
 
-/// Where a wire can end: an arrowhead on a box border.
+/// Where a wire can end: an arrowhead on a box border, or an inline
+/// node's free arrowhead.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct Sink {
     pub at: Pos,
     /// The way the arrowhead points.
     pub dir: Dir,
     pub scope: Scope,
+    /// An inline node's input: a free arrowhead, not a box port.
+    pub free: bool,
 }
 
 impl Sink {
     pub(crate) fn term(&self) -> Term {
-        Term::Port(self.at, self.dir)
+        if self.free { Term::Arrow(self.at) } else { Term::Port(self.at, self.dir) }
     }
 
     /// The cell before the arrowhead, which the wire's last stroke takes.
@@ -79,9 +85,6 @@ impl Sink {
         self.at.step(self.dir.opposite())
     }
 }
-
-/// Why a wire at an inline node is refused ([`RefusalKind::Unsupported`]).
-const INLINE: &str = "wires at an inline node can't be edited by mouse yet; edit them in the text pane";
 
 /// The refusal for a cell that is neither a port nor text, as a source.
 pub(crate) fn no_source(at: Pos) -> Refusal {
@@ -263,6 +266,7 @@ impl<'a> Model<'a> {
             goal,
             text: Some(t),
             name: text.content.clone(),
+            merged: Vec::new(),
         })
     }
 
@@ -278,6 +282,7 @@ impl<'a> Model<'a> {
                     goal: at,
                     text: None,
                     name: format!("the output of {}", self.word_of(b)),
+                    merged: Vec::new(),
                 }),
                 (BoxKind::Definition, PortKind::Arrow, Dir::W) => match self.input_name(at) {
                     Some(t) => self.text_source(t, self.inside(b, row)),
@@ -293,12 +298,26 @@ impl<'a> Model<'a> {
                     goal: at,
                     text: None,
                     name: "this arm's input".to_owned(),
+                    merged: Vec::new(),
                 }),
-                (BoxKind::Switch, _, Dir::E) => Err(Refusal::new(
-                    at,
-                    RefusalKind::Unsupported,
-                    "a switch's merged output can't be wired by mouse yet; draw it in the text pane",
-                )),
+                (BoxKind::Switch, PortKind::Arrow, Dir::E) => {
+                    let Some(scope) = self.outside(b, row) else {
+                        let why = "this switch has no definition around it";
+                        return Err(Refusal::new(at, RefusalKind::Target, why));
+                    };
+                    let ports = self.merged(b, at);
+                    // Whichever arm's port a wire leaves names that wire.
+                    let wired = ports.iter().copied().find(|&p| self.wire_of(Term::Port(p, Dir::W)).is_some());
+                    let named = wired.unwrap_or(at);
+                    Ok(Source {
+                        term: Term::Port(named, Dir::W),
+                        scope,
+                        goal: named,
+                        text: None,
+                        name: "the switch's output".to_owned(),
+                        merged: if ports.len() > 1 { ports } else { Vec::new() },
+                    })
+                }
                 _ => Err(Refusal::new(
                     at,
                     RefusalKind::Target,
@@ -313,8 +332,13 @@ impl<'a> Model<'a> {
             if let Some((b, port)) = self.input_named(t) {
                 return self.text_source(t, self.inside(b, port.pos.row));
             }
-            if self.after_free_arrow(t) {
-                return Err(Refusal::new(at, RefusalKind::Unsupported, INLINE));
+            if self.inline_word(t) {
+                let text = &self.diagram.texts[t];
+                let Some(owner) = text.owner else {
+                    let why = "an inline node goes inside a definition";
+                    return Err(Refusal::new(at, RefusalKind::Target, why));
+                };
+                return self.text_source(t, self.inside(owner, text.pos.row));
             }
             let why = format!("{} can't feed a wire", self.content(t));
             return Err(Refusal::new(at, RefusalKind::Target, why));
@@ -322,9 +346,15 @@ impl<'a> Model<'a> {
         Err(no_source(at))
     }
 
-    /// The sink named by cell `at`: an arrowhead on a box border.
+    /// The sink named by cell `at`: an arrowhead on a box border, or an
+    /// inline node's free arrowhead.
     pub(crate) fn sink(&self, at: Pos) -> Result<Sink, Refusal> {
         let not = || no_sink(at);
+        if let Some(t) = self.inline_after(at) {
+            let text = &self.diagram.texts[t];
+            let owner = text.owner.ok_or_else(not)?;
+            return Ok(Sink { at, dir: Dir::E, scope: self.inside(owner, text.pos.row), free: true });
+        }
         let (b, port) = self.port(at).ok_or_else(not)?;
         if port.kind != PortKind::Arrow {
             return Err(not());
@@ -344,7 +374,23 @@ impl<'a> Model<'a> {
             _ => None,
         };
         let scope = scope.ok_or_else(not)?;
-        Ok(Sink { at, dir: port.dir, scope })
+        Ok(Sink { at, dir: port.dir, scope, free: false })
+    }
+
+    /// The text of the word written in box `b`, if it holds one.
+    pub(crate) fn word(&self, b: usize) -> Option<usize> {
+        let rect = self.diagram.boxes[b].rect;
+        self.diagram.texts.iter().position(|t| t.owner == Some(b) && rect.contains(t.pos) && t.kind == TextKind::Word)
+    }
+
+    /// Whether box `b` is a switch, or the square box [`crate::place_switch`]
+    /// draws before its selector: a box in a definition with no word.
+    pub(crate) fn switch_like(&self, b: usize) -> bool {
+        match self.kind(b) {
+            BoxKind::Switch => true,
+            BoxKind::Node => self.word(b).is_none(),
+            BoxKind::Definition => false,
+        }
     }
 
     /// The word written in node box `b`.
@@ -362,27 +408,90 @@ impl<'a> Model<'a> {
         self.terms.iter().position(|ts| ts.contains(&term))
     }
 
-    /// `Err` with the reason when wire `w` isn't editable in Phase 1: it
-    /// touches an inline node, or carries a switch's merged output. Either
-    /// is [`RefusalKind::Unsupported`].
-    pub(crate) fn editable(&self, w: usize) -> Result<(), &'static str> {
+    /// Whether text `t` is an inline node's word: a word that a free
+    /// arrowhead points at across spaces (SPEC §6).
+    pub(crate) fn inline_word(&self, t: usize) -> bool {
+        self.diagram.texts[t].kind == TextKind::Word && self.after_free_arrow(t)
+    }
+
+    /// The inline node's word that a free arrowhead at `p` points at.
+    pub(crate) fn inline_after(&self, p: Pos) -> Option<usize> {
+        if self.borders.contains(&p) || self.diagram.strokes.get(p)?.kind != Kind::Arrow(Dir::E) {
+            return None;
+        }
+        let t = across(self.grid, &self.texts, p, Dir::E).1?;
+        self.inline_word(t).then_some(t)
+    }
+
+    /// The words of the inline nodes wire `w` feeds and leaves: the node
+    /// whose input it is, and the node whose output it is.
+    pub(crate) fn inline_ends(&self, w: usize) -> (Option<usize>, Option<usize>) {
+        let (mut into, mut from) = (None, None);
         for &term in &self.terms[w] {
             match term {
-                Term::Arrow(_) => return Err(INLINE),
-                Term::Text(p, Dir::W) if self.text_at(p).is_some_and(|t| self.after_free_arrow(t)) => {
-                    return Err(INLINE);
-                }
-                Term::Port(p, Dir::W)
-                    if self.port(p).is_some_and(|(b, port)| {
-                        self.kind(b) == BoxKind::Switch && port.side == Dir::E
-                    }) =>
-                {
-                    return Err("a switch's merged output can't be edited by mouse yet; edit it in the text pane");
-                }
+                Term::Arrow(p) => into = into.or(self.inline_after(p)),
+                Term::Text(p, Dir::W) => from = from.or(self.text_at(p).filter(|&t| self.inline_word(t))),
                 _ => {}
             }
         }
-        Ok(())
+        (into, from)
+    }
+
+    /// The refusal for an edit that would leave the inline node whose word
+    /// is text `t` without its input wire or its last output branch.
+    pub(crate) fn strands(&self, at: Pos, t: usize) -> Refusal {
+        let word = self.content(t);
+        let why = format!(
+            "the inline node {word} needs a wire in and a wire out; delete {word} first to join its wire up"
+        );
+        Refusal::new(at, RefusalKind::Target, why)
+    }
+
+    /// How many sinks wire `w` reaches: arrowheads, on a border or free.
+    pub(crate) fn sink_count(&self, w: usize) -> usize {
+        self.terms[w]
+            .iter()
+            .filter(|t| matches!(t, Term::Arrow(_)) || matches!(t, Term::Port(_, d) if *d != Dir::W))
+            .count()
+    }
+
+    /// How many sources wire `w` leaves: more than one only for a merged
+    /// output, whose stubs and run go with its last sink.
+    pub(crate) fn source_count(&self, w: usize) -> usize {
+        self.terms[w].iter().filter(|t| matches!(t, Term::Port(_, Dir::W) | Term::Text(_, Dir::W))).count()
+    }
+
+    /// Each arm's right through-port at the ordinal of switch `b`'s right
+    /// through-port `at`, top to bottom: the ports of one merged output.
+    pub(crate) fn merged(&self, b: usize, at: Pos) -> Vec<Pos> {
+        let shape = &self.diagram.boxes[b];
+        let right: Vec<Pos> = shape
+            .ports
+            .iter()
+            .filter(|p| p.side == Dir::E && p.kind == PortKind::Arrow)
+            .map(|p| p.pos)
+            .collect();
+        let arm = self.arm(b, at.row);
+        let Some(k) = right.iter().filter(|p| self.arm(b, p.row) == arm).position(|&p| p == at) else {
+            return vec![at];
+        };
+        (0..=shape.dividers.len())
+            .filter_map(|a| right.iter().copied().filter(|p| self.arm(b, p.row) == a).nth(k))
+            .collect()
+    }
+
+    /// The first cell of wire `w`'s source as [`Model::source`] names it:
+    /// a merged output by its first arm's port, which sorts first.
+    pub(crate) fn source_cell(&self, w: usize) -> Option<Pos> {
+        self.terms[w].iter().find_map(|&term| {
+            let cell = match term {
+                Term::Port(p, Dir::W) | Term::Text(p, Dir::W) => p,
+                _ => return None,
+            };
+            let source = self.source(cell).ok()?;
+            let first = source.merged.first().copied().unwrap_or(cell);
+            (source.term == term || source.merged.contains(&cell)).then_some(first)
+        })
     }
 
     /// The directions in which cell `p` joins wire `w` ([`Wire::links`]):
@@ -409,7 +518,10 @@ impl<'a> Model<'a> {
         let mut sinks = Vec::new();
         for b in &self.diagram.boxes {
             for p in &b.ports {
-                if let Ok(s) = self.source(p.pos) {
+                // A merged output is named once, by its first arm's port.
+                if let Ok(s) = self.source(p.pos)
+                    && s.merged.first().is_none_or(|&first| first == p.pos)
+                {
                     let wired = self.wire_of(s.term).is_some();
                     sources.push((p.pos, s, wired));
                 }
@@ -418,8 +530,15 @@ impl<'a> Model<'a> {
                 }
             }
         }
+        for w in &self.diagram.wires {
+            for e in w.ends.iter().filter(|e| e.kind == EndKind::Arrow) {
+                if let Ok(s) = self.sink(e.pos) {
+                    sinks.push((s, true));
+                }
+            }
+        }
         for t in 0..self.diagram.texts.len() {
-            if self.constant(t).is_some() {
+            if self.constant(t).is_some() || self.inline_word(t) {
                 let at = self.diagram.texts[t].pos;
                 if let Ok(s) = self.source(at) {
                     let wired = self.wire_of(s.term).is_some();
@@ -443,7 +562,8 @@ impl<'a> Model<'a> {
                 (facing, End::Port(b, k))
             }
             Term::Text(p, facing) => (facing, End::Open(Across::Text(self.text_at(p)?))),
-            Term::Arrow(_) | Term::Loose(..) => return None,
+            Term::Arrow(p) => (Dir::E, End::Arrow(Across::Text(self.inline_after(p)?))),
+            Term::Loose(..) => return None,
         };
         Some(structure::Term { facing, end })
     }

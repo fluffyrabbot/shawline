@@ -109,6 +109,21 @@ fn moved(
     Ok(Moved { doc: result, drawn })
 }
 
+/// Node box `index` redrawn in place as `cells`, which cover all of
+/// `new_rect`, with each port in `ports` taken to its new cell. The wire at
+/// a port that moves is re-routed as a move re-routes it; every other wire
+/// stays as drawn. Returns the drawing, for the caller to check.
+pub(crate) fn reshape(
+    grid: &Grid,
+    diagram: &Diagram,
+    index: usize,
+    new_rect: Rect,
+    cells: &[(Pos, char)],
+    ports: &HashMap<Pos, Pos>,
+) -> Result<String, Refusal> {
+    Mover::reshaped(grid, diagram, index, new_rect, cells, ports)?.run(BUDGET)
+}
+
 /// Non-lint diagnostic codes, sorted: positions move with the box.
 fn codes(doc: &Doc) -> Vec<&'static str> {
     let mut codes: Vec<&'static str> =
@@ -498,6 +513,154 @@ impl<'a> Mover<'a> {
                     .copied()
                     .filter(|p| !erased.contains(p))
                     .collect()
+            });
+        }
+        Ok(Mover { grid, rect, work, ends, region, blocked, footprint, wires })
+    }
+
+    /// [`reshape`]'s sheet: the box lifted and `cells` put down in its
+    /// place, and each wire at a moving port cut back to its chain, as
+    /// [`Mover::new`] does for a move.
+    fn reshaped(
+        grid: &'a Grid,
+        diagram: &'a Diagram,
+        index: usize,
+        new_rect: Rect,
+        cells: &[(Pos, char)],
+        ports: &HashMap<Pos, Pos>,
+    ) -> Result<Self, Refusal> {
+        let b = &diagram.boxes[index];
+        let rect = b.rect;
+        let at = Pos::new(rect.top, rect.left);
+        let no_room = |why: &str| Refusal::new(at, RefusalKind::Blocked(Blockage::NoRoom), why);
+        let Some(parent) = b.parent.map(|p| &diagram.boxes[p]) else {
+            return Err(Refusal::new(at, RefusalKind::Target, "only a box inside a definition is redrawn this way"));
+        };
+        if !parent.rect.encloses(&new_rect) {
+            return Err(no_room("the box would leave its definition; try Make room to grow it"));
+        }
+        let r = parent.rect;
+        let above = parent.dividers.iter().map(|d| d.row).filter(|&d| d < rect.top).max();
+        let below = parent.dividers.iter().map(|d| d.row).filter(|&d| d > rect.bottom).min();
+        let (top, bottom) = (above.unwrap_or(r.top) + 1, below.unwrap_or(r.bottom) - 1);
+        if new_rect.top < top || new_rect.bottom > bottom {
+            return Err(no_room("the box would cross into the next arm; try Make room to grow its arm"));
+        }
+        let region = Rect { top, left: r.left + 1, bottom, right: r.right - 1 };
+
+        let border = borders(diagram);
+        let texts = text_cells(diagram);
+        let mut ends = Vec::new();
+        for (w, wire) in diagram.wires.iter().enumerate() {
+            for e in &wire.ends {
+                let EndKind::Port(port) = e.kind else { continue };
+                let Some(p) = b.ports.iter().find(|p| p.pos == port) else { continue };
+                let Some(&new_port) = ports.get(&port).filter(|&&q| q != port) else { continue };
+                if rect.contains(e.pos) {
+                    continue;
+                }
+                let chain = walk(grid, diagram, &border, &texts, e.pos, e.facing);
+                let Some(target) = new_port.step(p.side) else {
+                    let why = "the wire at this port would run off the sheet";
+                    return Err(Refusal::new(port, RefusalKind::Blocked(Blockage::Edge), why));
+                };
+                let arrow = p.kind == PortKind::Arrow;
+                ends.push(End { wire: w, port, new_port, side: p.side, arrow, target, chain });
+            }
+        }
+        ends.sort_by_key(|e| e.port);
+        let starts: HashSet<Pos> = ends.iter().filter_map(|e| e.chain.cells.first().copied()).collect();
+        for e in &ends {
+            if let Some((anchor, _)) = e.chain.anchor
+                && (starts.contains(&anchor) || b.ports.iter().any(|p| e.chain.cells.contains(&p.pos)))
+            {
+                let why = "this wire loops back into the same box";
+                return Err(Refusal::new(e.port, RefusalKind::Unsupported, why));
+            }
+        }
+
+        let orig: HashMap<Pos, u8> = diagram
+            .wires
+            .iter()
+            .flat_map(|w| &w.cells)
+            .filter_map(|&p| diagram.strokes.get(p).map(|s| (p, s.conn)))
+            .collect();
+        let base = (0..grid.height()).map(|r| grid.row(r).to_vec()).collect();
+        let mut work = Work { base, mask: HashMap::new(), orig };
+        for e in &ends {
+            let c = &e.chain;
+            for (i, &p) in c.cells.iter().enumerate() {
+                let m = work.mask(p) & !c.orig[i];
+                work.set(p, m);
+            }
+            if let Some((anchor, into)) = c.anchor {
+                let m = work.mask(anchor) & !into.bit();
+                work.set(anchor, m);
+            }
+        }
+        let erased: HashSet<Pos> = ends.iter().flat_map(|e| e.chain.cells.iter().copied()).collect();
+
+        // Lift the box, then draw it anew.
+        for row in rect.top..=rect.bottom {
+            for col in rect.left..=rect.right {
+                work.write(Pos::new(row, col), ' ');
+            }
+        }
+        let mut footprint = HashSet::new();
+        for &(q, ch) in cells {
+            if work.ch(q) != ' ' {
+                return Err(no_room("the redrawn box would land on something; try Make room"));
+            }
+            footprint.insert(q);
+            if ch != ' ' {
+                work.write(q, ch);
+            }
+        }
+
+        // What no route may take: as for a move, with each port's kept-clear
+        // cell going where the port goes.
+        let skip: HashSet<(Pos, Dir)> = ends
+            .iter()
+            .flat_map(|e| {
+                let first = e.chain.cells.first().map(|&p| (p, e.chain.back[0]));
+                let open = e
+                    .chain
+                    .open
+                    .as_ref()
+                    .and_then(|open| e.chain.cells.last().map(|&leaf| (leaf, open.facing)));
+                first.into_iter().chain(open)
+            })
+            .collect();
+        let mut blocked: HashSet<Pos> = HashSet::new();
+        for (anchor, cell) in keep_clear(grid, diagram, |p, d| skip.contains(&(p, d))) {
+            if !rect.contains(anchor) {
+                blocked.insert(cell);
+            } else if let Some(&to) = ports.get(&anchor) {
+                let dr = to.row as isize - anchor.row as isize;
+                let dc = to.col as isize - anchor.col as isize;
+                blocked.extend(add(cell, dr, dc));
+            }
+        }
+        let inside = moved_boxes(diagram, index);
+        let ancestors: HashSet<usize> = std::iter::successors(b.parent, |&p| diagram.boxes[p].parent).collect();
+        for (i, other) in diagram.boxes.iter().enumerate() {
+            if ancestors.contains(&i) || inside.contains(&i) || !other.rect.intersects(&region) {
+                continue;
+            }
+            let r = other.rect;
+            blocked.extend((r.top..=r.bottom).flat_map(|row| (r.left..=r.right).map(move |c| Pos::new(row, c))));
+        }
+        blocked.extend(perimeter(new_rect));
+        blocked.extend(footprint.iter().copied());
+        for e in &ends {
+            if let Some(open) = &e.chain.open {
+                blocked.extend(open.gap.iter().copied());
+            }
+        }
+        let mut wires: HashMap<usize, HashSet<Pos>> = HashMap::new();
+        for e in &ends {
+            wires.entry(e.wire).or_insert_with(|| {
+                diagram.wires[e.wire].cells.iter().copied().filter(|p| !erased.contains(p)).collect()
             });
         }
         Ok(Mover { grid, rect, work, ends, region, blocked, footprint, wires })

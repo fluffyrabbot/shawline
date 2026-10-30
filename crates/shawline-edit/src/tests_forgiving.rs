@@ -191,9 +191,17 @@ fn placed_text_stays_clear_of_wires_until_connected() {
     let placed = ok(place_text(&doc, Pos::new(3, 3), "9"));
     assert_eq!(line(placed.doc.text(), 3), "│  9              │");
     assert!(placed.doc.diagnostics().iter().any(|d| d.code == "Y012"));
-    // Beside a wire's open end it would meet it.
-    let near = place_text(&ok(remove_wire(&doc, Pos::new(5, 6))).doc, Pos::new(5, 6), "4").unwrap_err();
-    assert!(matches!(near.kind, RefusalKind::Blocked(_) | RefusalKind::Target), "{near:?}");
+    // Before a wire's open end it would meet it, and become its constant.
+    let dangling = Doc::new(ARITH.replacen("│  6 ───▶", "│    ───▶", 1));
+    let near = place_text(&dangling, Pos::new(5, 3), "4").unwrap_err();
+    assert_eq!(near.kind, RefusalKind::Blocked(Blockage::Spacing), "{near:?}");
+    // Before an unwired node input it reads nothing, and waits for a wire.
+    let unwired = ok(remove_wire(&doc, Pos::new(5, 6)));
+    let cut = ok(remove_text(&unwired.doc, Pos::new(5, 3)));
+    let waiting = ok(place_text(&cut.doc, Pos::new(5, 3), "4"));
+    assert_eq!(line(waiting.doc.text(), 5), "│  4    ▶ 𐑑 ├─────▶ 𐑢𐑳𐑯");
+    let wired = ok(connect(&waiting.doc, Pos::new(5, 3), Pos::new(5, 8)));
+    assert_eq!(line(wired.doc.text(), 5), "│  4 ───▶ 𐑑 ├─────▶ 𐑢𐑳𐑯");
     // A top-level comment on an empty sheet.
     let empty = ok(place_text(&Doc::new(""), Pos::new(0, 0), "※ 𐑛𐑳𐑚𐑩𐑤"));
     assert_eq!(empty.doc.text(), "※ 𐑛𐑳𐑚𐑩𐑤\n");

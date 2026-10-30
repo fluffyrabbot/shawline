@@ -52,6 +52,18 @@ impl Cut {
         }
     }
 
+    /// Where a cell naming a place went, rather than a part: as
+    /// [`Cut::cell`], except that an insertion at the cell's own row or
+    /// column leaves it where it was, on the new blank cells. Only an
+    /// insertion strictly before it shifts it.
+    pub(crate) fn place(&self, p: Pos) -> Pos {
+        let own = match self.axis {
+            Axis::Row => p.row == self.row,
+            Axis::Column => p.row.checked_sub(self.row).and_then(|k| self.cols.get(k)) == Some(&p.col),
+        };
+        if own && !self.delete { p } else { self.cell(p).unwrap_or(p) }
+    }
+
     fn shift(&self, i: usize, at: usize) -> Option<usize> {
         match (self.delete, i >= at) {
             (_, false) => Some(i),

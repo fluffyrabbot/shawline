@@ -23,10 +23,14 @@
 
 mod canon;
 mod check;
+mod clearing;
 mod compound;
 mod cut;
 mod describe;
+mod drawing;
+mod inline;
 mod mapped;
+mod merge;
 mod model;
 mod mover;
 mod retext;
@@ -608,8 +612,7 @@ pub fn remove_text(doc: &Doc, at: Pos) -> Result<Edited, Refusal> {
 ///   too small for its title and one row inside; `Blocked(Spacing)` when
 ///   `rect.top` is a row of another top-level item.
 pub fn place_definition(doc: &Doc, rect: Rect, name: &str) -> Result<Edited, Refusal> {
-    let _ = (doc, name);
-    Err(pending(Pos::new(rect.top, rect.left)))
+    drawing::place_definition(doc, rect, name)
 }
 
 /// Draws an empty switch box at `rect`, square, wholly inside one
@@ -623,8 +626,7 @@ pub fn place_definition(doc: &Doc, rect: Rect, name: &str) -> Result<Edited, Ref
 /// `Blocked(NoRoom)` when the box would overlap anything or leave its
 /// definition or arm.
 pub fn place_switch(doc: &Doc, rect: Rect, guard: Option<&str>) -> Result<Edited, Refusal> {
-    let _ = (doc, guard);
-    Err(pending(Pos::new(rect.top, rect.left)))
+    drawing::place_switch(doc, rect, guard)
 }
 
 /// Adds a port at border cell `at`, which must be plain border: not a
@@ -645,8 +647,7 @@ pub fn place_switch(doc: &Doc, rect: Rect, guard: Option<&str>) -> Result<Edited
 ///   that doesn't fit the port; `Blocked(NoRoom)` when the cells the
 ///   arrowhead or the name need aren't clear.
 pub fn add_port(doc: &Doc, at: Pos, name: Option<&str>) -> Result<Edited, Refusal> {
-    let _ = (doc, name);
-    Err(pending(at))
+    drawing::add_port(doc, at, name)
 }
 
 /// Removes the port at border cell `at`, [`add_port`]'s inverse, with its
@@ -663,8 +664,7 @@ pub fn add_port(doc: &Doc, at: Pos, name: Option<&str>) -> Result<Edited, Refusa
 ///
 /// Refused as `Target` when no port is at `at`.
 pub fn remove_port(doc: &Doc, at: Pos) -> Result<Edited, Refusal> {
-    let _ = doc;
-    Err(pending(at))
+    clearing::remove_port(doc, at)
 }
 
 /// Draws a switch divider across the row of left-border cell `at`
@@ -678,8 +678,7 @@ pub fn remove_port(doc: &Doc, at: Pos) -> Result<Edited, Refusal> {
 /// isn't a constant, and as `Blocked(NoRoom)` when the row isn't blank
 /// inside the box or either arm would be left with no row.
 pub fn add_arm(doc: &Doc, at: Pos, guard: Option<&str>) -> Result<Edited, Refusal> {
-    let _ = (doc, guard);
-    Err(pending(at))
+    drawing::add_arm(doc, at, guard)
 }
 
 /// Removes the divider through `at` (any of its cells) and the arm below
@@ -688,8 +687,7 @@ pub fn add_arm(doc: &Doc, at: Pos, guard: Option<&str>) -> Result<Edited, Refusa
 /// removes them. The arm's rows stay, blank, in the arm above. Refused as
 /// `Target` when no divider runs through `at`.
 pub fn remove_arm(doc: &Doc, at: Pos) -> Result<Edited, Refusal> {
-    let _ = doc;
-    Err(pending(at))
+    clearing::remove_arm(doc, at)
 }
 
 /// Removes the box whose top-left corner is `corner` with everything inside
@@ -705,8 +703,7 @@ pub fn remove_arm(doc: &Doc, at: Pos) -> Result<Edited, Refusal> {
 ///
 /// Refused as `Target` when no box has its corner at `corner`.
 pub fn remove_box(doc: &Doc, corner: Pos) -> Result<Edited, Refusal> {
-    let _ = doc;
-    Err(pending(corner))
+    clearing::remove_box(doc, corner)
 }
 
 /// Gives the node box whose top-left corner is `corner` `inputs` inputs and
@@ -720,8 +717,7 @@ pub fn remove_box(doc: &Doc, corner: Pos) -> Result<Edited, Refusal> {
 /// node box can hold, and as `Blocked(NoRoom)` when the taller box would
 /// overlap anything or leave its parent.
 pub fn set_ports(doc: &Doc, corner: Pos, inputs: u16, outputs: u16) -> Result<Edited, Refusal> {
-    let _ = (doc, inputs, outputs);
-    Err(pending(corner))
+    clearing::set_ports(doc, corner, inputs, outputs)
 }
 
 /// Splices a 1→1 call of `word` into the straight horizontal stretch of
@@ -737,8 +733,7 @@ pub fn set_ports(doc: &Doc, corner: Pos, inputs: u16, outputs: u16) -> Result<Ed
 /// isn't one Shavian word, and as `Blocked(NoRoom)` when the straight
 /// stretch is too short.
 pub fn place_inline(doc: &Doc, at: Pos, word: &str) -> Result<Edited, Refusal> {
-    let _ = (doc, word);
-    Err(pending(at))
+    inline::place_inline(doc, at, word)
 }
 
 impl Edit {
@@ -903,11 +898,6 @@ pub fn describe(doc: &Doc, at: Pos, gloss: bool) -> Option<Description> {
     describe::describe(doc, at, gloss)
 }
 
-/// The refusal of an edit whose wave hasn't landed.
-fn pending(at: Pos) -> Refusal {
-    Refusal::new(at, RefusalKind::Unsupported, "Studio can't make this edit yet")
-}
-
 // ---------------------------------------------------------------------------
 // Studio helpers beyond the P7 contract, for the playground's drag gesture.
 // They read the sheet exactly as the contract's edits do.
@@ -1041,3 +1031,5 @@ impl Terrain for Plain<'_> {
 mod tests;
 #[cfg(test)]
 mod tests_forgiving;
+#[cfg(test)]
+mod tests_drawing;
