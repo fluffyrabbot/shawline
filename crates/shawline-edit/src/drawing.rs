@@ -49,7 +49,7 @@ pub(crate) fn put(rows: &mut Vec<Vec<char>>, p: Pos, ch: char) {
 }
 
 /// Writes `line` from cell `at` eastward.
-fn write(rows: &mut Vec<Vec<char>>, at: Pos, line: &str) {
+pub(crate) fn write(rows: &mut Vec<Vec<char>>, at: Pos, line: &str) {
     for (k, ch) in line.chars().enumerate() {
         put(rows, Pos::new(at.row, at.col + k), ch);
     }
@@ -57,7 +57,7 @@ fn write(rows: &mut Vec<Vec<char>>, at: Pos, line: &str) {
 
 /// A box's top border or divider: `left`, a rule with `title` in a gap
 /// after one rule cell (`─ title ─…`), and `right`, `width` cells in all.
-fn rule(left: char, line: char, title: Option<&str>, right: char, width: usize) -> String {
+pub(crate) fn rule(left: char, line: char, title: Option<&str>, right: char, width: usize) -> String {
     let mut out = String::from(left);
     if let Some(title) = title {
         out.push(line);

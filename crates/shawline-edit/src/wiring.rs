@@ -739,6 +739,25 @@ pub(crate) fn connect(doc: &Doc, from: Pos, to: Pos) -> Result<Doc, Refusal> {
     finish(canvas.render(), diagram, to, "the wire can't go there", |map| expected.relabel(map))
 }
 
+/// Routes a new branch from `sink` back to `source`'s wire, joining it
+/// with a tee, and draws it on `canvas`, a copy of `model`'s sheet. `sink`
+/// need not be one [`Model::sink`] names: a switch's new right
+/// through-port, say, whose stub leaves eastward to join a merge. Nothing
+/// is checked; the caller checks the sheet it makes.
+pub(crate) fn join(canvas: &mut Canvas, model: &Model, source: &Source, sink: &Sink) -> Result<(), Refusal> {
+    if model.wire_of(source.term).is_none() {
+        let why = format!("{} has no wire to join", source.name);
+        return Err(Refusal::new(sink.at, RefusalKind::Target, why));
+    }
+    let wiring = Wiring::new(model, source, Some(sink));
+    let found = search_from_sink(&wiring, sink).map_err(|miss| {
+        let why = format!("no free path to {}; try Make room", source.name);
+        Refusal::new(sink.at, miss.kind(), why)
+    })?;
+    draw(canvas, &wiring, &found.path);
+    Ok(())
+}
+
 /// Where a dragged wire is released: a free sink, or a blank cell.
 enum Release {
     Sink(Sink),

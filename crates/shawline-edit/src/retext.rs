@@ -11,13 +11,14 @@
 use shawline_doc::Doc;
 use shawline_grid::{Dir, Grid, Pos};
 use shawline_shape::stroke::Kind;
-use shawline_shape::structure::{Mapping, Routing, Structure, TextPart};
+use shawline_shape::structure::{self, Across, Mapping, Routing, Structure, TextPart};
 use shawline_shape::{Diagram, PortKind, Text, TextKind, recognize};
 
 use crate::canon::Sheets;
 use crate::cut::render;
 use crate::mapped::{self, Read};
 use crate::model::{Model, NIL};
+use crate::sheet::across;
 use crate::{BoxKind, Blockage, Edited, Refusal, RefusalKind, Remedy};
 
 /// What a text is to the sheet, which decides how it may change.
@@ -155,6 +156,9 @@ fn clear_beside(grid: &Grid, diagram: &Diagram, model: &Model, p: Option<Pos>, d
 pub(crate) fn set_text(doc: &Doc, at: Pos, content: &str) -> Result<Edited, Refusal> {
     let refuse = |kind, why: &str| Refusal::new(at, kind, why);
     let sheets = Sheets::read(doc, at)?;
+    if let Some(named) = name_port(&sheets, at, content) {
+        return named;
+    }
     let none = || refuse(RefusalKind::Target, "there is no text here; place one with the palette or type it");
     let cell = sheets.entity(at).ok_or_else(none)?;
     let (grid, diagram) = sheets.canon();
@@ -264,6 +268,52 @@ pub(crate) fn set_text(doc: &Doc, at: Pos, content: &str) -> Result<Edited, Refu
     })
     .map_err(|why| Refusal::new(at, RefusalKind::Changed, why))?;
     Ok(edited)
+}
+
+/// Writes `content` as the name of the definition port whose arrowhead is
+/// at given cell `at`, when that port has no name (`Y009`), where
+/// [`crate::add_port`] writes a name: one space after the arrowhead, inside
+/// for an input and outside for an output. `None` when `at` is no such
+/// port, for the other text edits to try.
+fn name_port(sheets: &Sheets, at: Pos, content: &str) -> Option<Result<Edited, Refusal>> {
+    let (b, k) = structure::port_index(&sheets.given().1.boxes, at)?;
+    let (grid, diagram) = sheets.canon();
+    let model = Model::new(grid, diagram);
+    let port = diagram.boxes[b].ports[k];
+    let named = across(grid, &model.texts, port.pos, Dir::E).1.is_some();
+    if model.kind(b) != BoxKind::Definition || port.kind != PortKind::Arrow || !port.side.is_horizontal() || named {
+        return None;
+    }
+    let refuse = |kind, why: &str| Refusal::new(at, kind, why);
+    if !crate::drawing::is_word(content) {
+        return Some(Err(refuse(RefusalKind::Target, "a port's name is one Shavian word")));
+    }
+    let rect = diagram.boxes[b].rect;
+    let row = port.pos.row;
+    let start = if port.side == Dir::W { rect.left + 2 } else { rect.right + 2 };
+    let n = content.chars().count();
+    // The arrowhead's space, the name and the space after it.
+    let clear = (start - 1..=start + n).all(|col| grid.get(Pos::new(row, col)) == ' ');
+    let inside = port.side == Dir::E || start + n < rect.right;
+    if !clear || !inside {
+        let why = "there's no room for the port's name here; try Make room or move what's beside it";
+        return Some(Err(refuse(RefusalKind::Blocked(Blockage::NoRoom), why)));
+    }
+    let mut lines = rows(grid);
+    for (j, ch) in content.chars().enumerate() {
+        put(&mut lines, Pos::new(row, start + j), ch);
+    }
+    let first = Pos::new(row, start);
+    let index = diagram.texts.iter().filter(|t| t.pos < first).count();
+    let owner = (port.side == Dir::W).then_some(b);
+    let part = TextPart { kind: TextKind::Word, content: content.to_owned(), owner, title_of: None, divider_of: None };
+    let result = Doc::new(render(&lines));
+    let settled = settle(sheets, result, Some, |expected, map| {
+        let nb = map.boxes[b].expect("a box keeps its place when a name is written");
+        expected.boxes[nb].ports[k].meets = Across::Text(index);
+        expected.texts.insert(index.min(expected.texts.len()), TextPart { owner: owner.map(|_| nb), ..part });
+    });
+    Some(settled.map_err(|why| refuse(RefusalKind::Changed, &why)))
 }
 
 /// Checks a text edit's result: canonical, and the structure `change` says,

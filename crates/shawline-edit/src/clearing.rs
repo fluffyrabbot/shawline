@@ -181,6 +181,87 @@ fn outer_cuts(model: &Model, b: usize, p: &shawline_shape::Port) -> Vec<Cut> {
 // Ports.
 
 pub(crate) fn remove_port(doc: &Doc, at: Pos) -> Result<Edited, Refusal> {
+    let removed = remove_port_alone(doc, at)?;
+    let Some(unused) = unused_input(doc, at) else { return Ok(removed) };
+    drop_arguments(removed, &unused, at)
+}
+
+/// A definition input with no wire, which `remove_port` is about to
+/// remove: the definition's name, its input count, and the input's index
+/// among its inputs.
+struct Unused {
+    name: String,
+    inputs: usize,
+    index: usize,
+}
+
+/// The input at given cell `at`, if it is a definition's input that no
+/// wire leaves.
+fn unused_input(doc: &Doc, at: Pos) -> Option<Unused> {
+    let sheets = Sheets::read(doc, at).ok()?;
+    let (b, k) = shawline_shape::structure::port_index(&sheets.given().1.boxes, at)?;
+    let (grid, diagram) = sheets.canon();
+    let model = Model::new(grid, diagram);
+    let shape = &diagram.boxes[b];
+    let port = shape.ports[k];
+    if model.kind(b) != BoxKind::Definition || port.side != Dir::W || port.kind != PortKind::Arrow {
+        return None;
+    }
+    let named = crate::sheet::across(grid, &model.texts, port.pos, Dir::E).1;
+    if named.is_some_and(|t| model.wire_of(Term::Text(diagram.texts[t].pos, Dir::W)).is_some()) {
+        return None;
+    }
+    let title = diagram.texts.iter().find(|t| t.title_of == Some(b))?;
+    let name = title.content.strip_prefix('·')?.to_owned();
+    let inputs: Vec<Pos> =
+        shape.ports.iter().filter(|p| p.side == Dir::W && p.kind == PortKind::Arrow).map(|p| p.pos).collect();
+    let index = inputs.iter().position(|&p| p == port.pos)?;
+    Some(Unused { name, inputs: inputs.len(), index })
+}
+
+/// Removes the argument at `unused.index` from each call of the
+/// definition that matched it, one call at a time in row-major order: an
+/// unused input's calls lose what nothing reads, so they keep matching
+/// (`W002`'s repair). A constant that fed only that argument goes with it,
+/// rather than being left stray. Calls that didn't match are left as they
+/// are, so `add_port` and `remove_port` stay each other's inverse.
+fn drop_arguments(removed: Edited, unused: &Unused, at: Pos) -> Result<Edited, Refusal> {
+    let mut edited = removed;
+    // Each step takes one input from one call, so the loop ends.
+    loop {
+        let (grid, diagram) = read(&edited.doc);
+        let model = Model::new(grid, diagram);
+        let call = (0..diagram.boxes.len()).find_map(|b| {
+            if model.kind(b) != BoxKind::Node || model.switch_like(b) || model.word_of(b) != unused.name {
+                return None;
+            }
+            let inputs: Vec<Pos> =
+                diagram.boxes[b].ports.iter().filter(|p| p.side == Dir::W).map(|p| p.pos).collect();
+            (inputs.len() == unused.inputs).then(|| inputs[unused.index])
+        });
+        let Some(port) = call else { return Ok(edited) };
+        let sink = model.sink(port).map_err(|r| Refusal { at, ..r })?;
+        let fed = model.wire_of(sink.term()).filter(|&w| model.sink_count(w) == 1);
+        let constant = fed.and_then(|w| {
+            model.terms[w].iter().find_map(|&term| match term {
+                Term::Text(p, Dir::W) => model.text_at(p).filter(|&t| model.constant(t).is_some()).map(|_| p),
+                _ => None,
+            })
+        });
+        let step = remove_port_alone(&edited.doc, port).map_err(|r| Refusal { at, ..r })?;
+        let mut map = mapped::compose(&edited.map, &step.map);
+        let mut doc = step.doc;
+        if let Some(p) = constant {
+            let gone = crate::retext::remove_text(&doc, p).map_err(|r| Refusal { at, ..r })?;
+            map = mapped::compose(&map, &gone.map);
+            doc = gone.doc;
+        }
+        edited = Edited { doc, map, tidied: edited.tidied };
+    }
+}
+
+/// [`remove_port`] without the calls of a removed input.
+fn remove_port_alone(doc: &Doc, at: Pos) -> Result<Edited, Refusal> {
     let refuse = |kind, why: &str| Refusal::new(at, kind, why);
     let sheets = Sheets::read(doc, at)?;
     let none = || refuse(RefusalKind::Target, "there is no port here");

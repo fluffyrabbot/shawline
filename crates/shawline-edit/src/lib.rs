@@ -26,13 +26,17 @@ mod check;
 mod clearing;
 mod compound;
 mod cut;
+mod default_arm;
 mod describe;
 mod drawing;
+mod extract;
 mod inline;
 mod mapped;
 mod merge;
 mod model;
 mod mover;
+mod repair;
+mod restyle;
 mod retext;
 mod room;
 mod router;
@@ -816,8 +820,7 @@ pub struct Extracted {
 ///   that no definition has; `Blocked(NoRoom)` when the call doesn't fit
 ///   where the pick was; `Changed` when the codes would change.
 pub fn extract(doc: &Doc, picks: &[Pos], name: &str) -> Result<Extracted, Refusal> {
-    let _ = (doc, name);
-    Err(pending(picks.first().copied().unwrap_or(Pos::new(0, 0))))
+    extract::extract(doc, picks, name)
 }
 
 /// Redraws the corners of the box whose top-left corner is `corner`,
@@ -825,8 +828,7 @@ pub fn extract(doc: &Doc, picks: &[Pos], name: &str) -> Result<Extracted, Refusa
 /// `Y014`, `Y015` and `Y018`: its structure is the input's, and its codes
 /// may change. Refused as `Target` when no box has its corner at `corner`.
 pub fn restyle(doc: &Doc, corner: Pos, rounded: bool) -> Result<Edited, Refusal> {
-    let _ = (doc, rounded);
-    Err(pending(corner))
+    restyle::restyle(doc, corner, rounded)
 }
 
 /// Moves every slipped border cell home, as `shawline fmt --fix` does
@@ -835,8 +837,7 @@ pub fn restyle(doc: &Doc, corner: Pos, rounded: bool) -> Result<Edited, Refusal>
 /// each slipped cell's box to the box made whole. Refused as `Target` when
 /// the sheet has no slip.
 pub fn fix(doc: &Doc, at: Pos) -> Result<Edited, Refusal> {
-    let _ = doc;
-    Err(pending(at))
+    restyle::fix(doc, at)
 }
 
 /// Adds a default arm below the last arm of the switch whose top-left
@@ -854,8 +855,7 @@ pub fn fix(doc: &Doc, at: Pos) -> Result<Edited, Refusal> {
 /// already has a default arm, and as `Blocked(NoRoom)` when a merge can't
 /// take the new stub.
 pub fn add_default_arm(doc: &Doc, corner: Pos) -> Result<Edited, Refusal> {
-    let _ = doc;
-    Err(pending(corner))
+    default_arm::add_default_arm(doc, corner)
 }
 
 /// A known fix for one diagnostic (PLAN P10, "Repairs").
@@ -924,13 +924,7 @@ impl Followup {
 /// `edit` clears its diagnostic when applied and adds no error code, except
 /// those its follow-up resolves (`Y019` for `DrawWire`).
 pub fn repairs(doc: &Doc) -> Vec<Repair> {
-    let _ = doc;
-    Vec::new()
-}
-
-/// The refusal of an edit whose wave hasn't landed.
-fn pending(at: Pos) -> Refusal {
-    Refusal::new(at, RefusalKind::Unsupported, "Studio can't make this edit yet")
+    repair::repairs(doc)
 }
 
 impl Edit {
@@ -1234,3 +1228,5 @@ mod tests;
 mod tests_forgiving;
 #[cfg(test)]
 mod tests_drawing;
+#[cfg(test)]
+mod tests_repair;
