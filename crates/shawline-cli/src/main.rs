@@ -1,7 +1,8 @@
 //! `shawline`: the command-line front end.
 
+use std::io::{BufWriter, Write};
 use std::process::ExitCode;
-use std::{env, fs};
+use std::{env, fs, io};
 
 use shawline_doc::Doc;
 use shawline_grid::Diagnostic;
@@ -69,8 +70,9 @@ fn main() -> ExitCode {
     // A byte-order mark is not a cell (SPEC §2), so it can't shift row 0.
     let lines: Vec<&str> = src.strip_prefix('\u{feff}').unwrap_or(&src).lines().collect();
     let report_all = |diagnostics: &[Diagnostic]| {
+        let mut err = BufWriter::new(io::stderr().lock());
         for d in diagnostics {
-            report(path, &lines, d, &message(&d.message));
+            report(&mut err, path, &lines, d, &message(&d.message));
         }
         ExitCode::FAILURE
     };
@@ -117,7 +119,7 @@ fn main() -> ExitCode {
                     Ok(values) => values.iter().for_each(|v| println!("{v}")),
                     Err(e) => {
                         // SPEC §9: nothing on stdout, and the same form as `check`.
-                        report(path, &lines, &e, &message(&e.message));
+                        report(&mut io::stderr().lock(), path, &lines, &e, &message(&e.message));
                         return ExitCode::FAILURE;
                     }
                 }
@@ -147,9 +149,10 @@ fn replace(path: &str, text: &str) -> std::io::Result<()> {
 
 /// Prints `d` with `message`, its source line and a caret. Every repertoire
 /// character is one cell wide, so the caret lines up in Shawline Mono.
-fn report(path: &str, lines: &[&str], d: &Diagnostic, message: &str) {
-    eprintln!("{path}:{}:{}: {} {message}", d.at.row + 1, d.at.col + 1, d.code);
+fn report(err: &mut impl Write, path: &str, lines: &[&str], d: &Diagnostic, message: &str) {
+    // A closed stderr leaves nothing to tell.
+    let _ = writeln!(err, "{path}:{}:{}: {} {message}", d.at.row + 1, d.at.col + 1, d.code);
     if let Some(line) = lines.get(d.at.row) {
-        eprintln!("  {line}\n  {}^", " ".repeat(d.at.col));
+        let _ = writeln!(err, "  {line}\n  {}^", " ".repeat(d.at.col));
     }
 }
