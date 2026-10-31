@@ -1127,8 +1127,13 @@ Five read-only audits (interaction mechanics, product legibility, conceptual int
   - none of the 20 examples made the page wider than 320 px, with Reset shown or hidden;
 - at 1024 px, a mouse double-click opened the same palette.
 
+**In VS Code** (1.139, after the gate, with the user's go-ahead): `shawline-lsp` was installed with `cargo install` and the `.vsix` with `code --install-extension`. Two sheets copied to the git-ignored `review/vscode-check` were opened there, and the user agreed to trust that folder, since in Restricted Mode VS Code turns the extension off (Backlog).
+- semantic colouring came on, so the server was running;
+- `unused-input.shaw` showed one warning, whose message carries its reading ("the second input of ·𐑒𐑰𐑐 (keep), 𐑚 (b), is unused"), and its row in Problems offered fixes. The fix menu is a native pop-up, which background control closes at once, so it wasn't read or applied there;
+- the status item and the hover open on hover, which click-only control can't do. The installed binary was driven over stdio instead, with the requests VS Code sends: the hover on `·𐑛𐑳𐑚𐑩𐑤` gives its arity, ports, `Reading: dubəl · Type: =dub@l`; the quick fix is "Remove the unused input 𐑚", preferred; and `shutdown` then `exit` ends the server with status 0.
+
 **Not checked:**
-- the extension in VS Code itself. Neither it nor `shawline-lsp` is installed on this machine, so that check waits for the user;
+- the status item's text, and applying the quick fix in the editor (left to the user's pass);
 - a real finger on a real device. Synthetic touch events can't reach the browser's own gestures, such as the callout `-webkit-touch-callout` suppresses.
 
 **Found, not fixed:** at 1024 px the drawing pane's head needs about 580 px in a 440 px pane, so the Values switch lies past the window's right edge on every example. This was already true before P11. Wrapping that head would put the two panes out of line, so it waits for a layout decision (Backlog).

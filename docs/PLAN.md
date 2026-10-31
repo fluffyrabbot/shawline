@@ -159,9 +159,9 @@ The user repeats the lead's four by-hand checks from the wave 3 gate (HISTORY.md
 3. extract a node and its constant from `11-even-odd`'s default arm, and the output stays 0 and 1;
 4. draw a definition with the Box tool after the marquee change.
 
-In the same sitting, the check P11 left for an editor:
+In the same sitting, the one editor check the lead couldn't make (HISTORY.md, P11, "In VS Code"):
 
-5. install `shawline-lsp` (`cargo install --path crates/shawline-lsp`) and `editors/vscode/shawline-0.1.0.vsix`, then check the status item, a hover on `·𐑛𐑳𐑚𐑩𐑤`, and one repair offered as a quick fix.
+5. in the VS Code window on `review/vscode-check`, point at `{ } Shawline` in the status bar and read the server's state; then apply the quick fix on `unused-input.shaw`'s warning, and the warning goes.
 
 Faults found are fixed before P12 starts. P10 is then marked closed in HISTORY.md.
 
@@ -188,6 +188,7 @@ Not scheduled. Each was found or set aside at a gate. HISTORY.md has the context
 | Tidy and `shawline fmt --relayout`: full automatic layout | A milestone of its own (SPEC §11). The router's tight wires (`│0`, a re-routed wire hugging a moved node) wait for it too: the user chose to keep them, since changing the router rewrites many corpus files. |
 | Inline, the inverse of extract | It lays a body out inside the caller, where there is rarely room, so it waits for Tidy. |
 | Dragging a wire's segments or bends, the knife, free typing on the canvas, copying as text | Outside Phase 2's chosen scope. The text pane covers free typing. |
+| The VS Code extension in Restricted Mode | `package.json` declares no `untrustedWorkspaces` capability, so VS Code turns the whole extension off in a folder the user hasn't trusted, and a downloaded sheet opens as Plain Text with no hint why. Declaring `"supported": "limited"` with `shawline.serverPath` in `restrictedConfigurations` would keep a workspace from choosing the server binary while the rest works. |
 | The drawing pane's head at 900 to about 1,150 px wide | Its controls need about 580 px where the pane gives 440, so the Values switch lies past the window's edge. Wrapping it would put the panes out of line, so which control moves is a layout decision (HISTORY.md, P11). |
 | A text outline of the drawing for screen readers | The drawing has a role and a name but no text equivalent of its boxes and wires. Its own design question, after touch. |
 | One position search in `shawline-edit` | `make_room`, `place_connected` (which retries rows) and `feed` (which retries wire lengths) each search positions in private. |
