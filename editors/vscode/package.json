@@ -17,6 +17,13 @@
   "extensionKind": [
     "workspace"
   ],
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": "limited",
+      "description": "In a folder you haven't trusted, the folder's own shawline.serverPath is ignored and a relative server path isn't looked up inside it, so the folder can't choose the program that runs. Everything else works.",
+      "restrictedConfigurations": ["shawline.serverPath"]
+    }
+  },
   "contributes": {
     "languages": [
       {

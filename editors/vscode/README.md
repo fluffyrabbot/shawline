@@ -12,6 +12,8 @@ Editor support for Shawline, the dataflow language you draw. You get diagnostics
 
    The extension looks for `shawline-lsp` on `PATH` and in `~/.cargo/bin`. To use another build, set `shawline.serverPath` (a relative path is resolved against the first workspace folder, e.g. `target/debug/shawline-lsp`). With a `.shaw` file open, the `{}` beside **Shawline** in the status bar says whether the server is starting, running, stopped or not found; click it to restart the server or to set its path.
 
+   In a folder you haven't trusted (Restricted Mode), everything works except that the folder's own `shawline.serverPath` is ignored, and a relative path isn't looked up inside the folder, so a folder you opened can't choose the program that runs. Trusting the folder restarts the server with its settings.
+
 2. Build and install the extension:
 
    ```bash

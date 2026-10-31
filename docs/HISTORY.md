@@ -1137,3 +1137,11 @@ Five read-only audits (interaction mechanics, product legibility, conceptual int
 - a real finger on a real device. Synthetic touch events can't reach the browser's own gestures, such as the callout `-webkit-touch-callout` suppresses.
 
 **Found, not fixed:** at 1024 px the drawing pane's head needs about 580 px in a 440 px pane, so the Values switch lies past the window's right edge on every example. This was already true before P11. Wrapping that head would put the two panes out of line, so it waits for a layout decision (Backlog).
+
+**After P11: the extension in untrusted folders** ✅. VS Code turned the whole extension off in a folder the user hadn't trusted, because `package.json` declared no `untrustedWorkspaces` capability, so a downloaded sheet opened as Plain Text with no hint why.
+- **Decisions:**
+  - the extension declares `"supported": "limited"`, with `shawline.serverPath` in `restrictedConfigurations`, so an untrusted folder's own setting is ignored;
+  - a relative `serverPath`, such as `target/debug/shawline-lsp`, is resolved against the workspace folder. In an untrusted folder the extension doesn't start the server, and its status item says why and offers Manage Trust;
+  - relative `PATH` entries are skipped everywhere, since they would be looked up from wherever the editor started;
+  - granting trust restarts the server, so the folder's own settings then apply.
+- **Checks:** the extension's `tsc` build is green, and the `.vsix` was rebuilt and reinstalled. In VS Code, a copy of `static/12-unused-input` in a new, untrusted `/tmp` folder opened as Shawline in Restricted Mode, with the server's colouring and its one warning. The relative-path refusal wasn't exercised, since that would mean changing the user's own VS Code settings.

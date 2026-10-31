@@ -15,6 +15,8 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('shawline.toggleTransliteration', toggleTransliteration),
     vscode.commands.registerCommand('shawline.installFont', () => installFont(context)),
     vscode.commands.registerCommand('shawline.restartServer', () => server?.restart()),
+    // Trust lifts the restriction on shawline.serverPath, so the folder's own setting may now apply.
+    vscode.workspace.onDidGrantWorkspaceTrust(() => server?.restart()),
     vscode.workspace.onDidChangeConfiguration((event) => {
       // A restart reads the gloss setting afresh, so it needs no separate update.
       if (event.affectsConfiguration('shawline.serverPath')) {

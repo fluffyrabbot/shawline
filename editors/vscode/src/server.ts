@@ -31,6 +31,10 @@ export class ServerController implements vscode.Disposable {
 
   async start(): Promise<void> {
     const configured = vscode.workspace.getConfiguration('shawline').get<string>('serverPath') || 'shawline-lsp';
+    if (!vscode.workspace.isTrusted && isRelativePath(configured)) {
+      this.show('untrusted', configured);
+      return;
+    }
     const command = resolveExecutable(configured);
     if (!command) {
       this.show('missing', configured);
@@ -62,11 +66,11 @@ export class ServerController implements vscode.Disposable {
   }
 
   /** Shows `state` in the language status item; `detail` is the server's path, or the setting when missing. */
-  private show(state: 'starting' | 'running' | 'stopped' | 'missing' | 'failed', detail = ''): void {
+  private show(state: 'starting' | 'running' | 'stopped' | 'missing' | 'failed' | 'untrusted', detail = ''): void {
     const item = this.status;
     item.busy = state === 'starting';
     item.severity =
-      state === 'missing' || state === 'failed'
+      state === 'missing' || state === 'failed' || state === 'untrusted'
         ? vscode.LanguageStatusSeverity.Error
         : state === 'stopped'
           ? vscode.LanguageStatusSeverity.Warning
@@ -77,14 +81,22 @@ export class ServerController implements vscode.Disposable {
       stopped: 'Shawline server stopped',
       missing: 'Shawline server not found',
       failed: 'Shawline server failed to start',
+      untrusted: 'Shawline server not started in an untrusted folder',
     }[state];
-    item.detail = state === 'missing' ? `"${detail}" is not on PATH or in ~/.cargo/bin` : detail;
+    item.detail =
+      state === 'missing'
+        ? `"${detail}" is not on PATH or in ~/.cargo/bin`
+        : state === 'untrusted'
+          ? `"${detail}" would be found inside this folder, which isn't trusted`
+          : detail;
     item.command =
       state === 'missing'
         ? { title: 'Set Path', command: 'workbench.action.openSettings', arguments: ['shawline.serverPath'] }
-        : state === 'starting'
-          ? undefined
-          : { title: 'Restart', command: 'shawline.restartServer' };
+        : state === 'untrusted'
+          ? { title: 'Manage Trust', command: 'workbench.trust.manage' }
+          : state === 'starting'
+            ? undefined
+            : { title: 'Restart', command: 'shawline.restartServer' };
   }
 
   async stop(): Promise<void> {
@@ -130,7 +142,8 @@ function resolveExecutable(configured: string): string | undefined {
   const extensions = process.platform === 'win32' ? ['', ...(process.env.PATHEXT ?? '.EXE').split(';')] : [''];
   // ~/.cargo/bin is where `cargo install` puts it, and GUI-launched editors may not have it on PATH.
   const dirs = [...(process.env.PATH ?? '').split(path.delimiter), path.join(os.homedir(), '.cargo', 'bin')];
-  for (const dir of dirs.filter(Boolean)) {
+  // A relative PATH entry would be looked up from wherever the editor started, so it could name a folder's own file.
+  for (const dir of dirs.filter((d) => path.isAbsolute(d))) {
     for (const ext of extensions) {
       const candidate = path.join(dir, expanded + ext);
       if (isFile(candidate)) {
@@ -139,6 +152,12 @@ function resolveExecutable(configured: string): string | undefined {
     }
   }
   return undefined;
+}
+
+/** True for a path, like target/debug/shawline-lsp, that resolveExecutable looks up inside the workspace folder. */
+function isRelativePath(configured: string): boolean {
+  const expanded = configured.startsWith('~') ? path.join(os.homedir(), configured.slice(1)) : configured;
+  return (expanded.includes('/') || expanded.includes('\\')) && !path.isAbsolute(expanded);
 }
 
 function isFile(file: string): boolean {
