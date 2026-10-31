@@ -1090,3 +1090,45 @@ Five read-only audits (interaction mechanics, product legibility, conceptual int
   - the router prefers a new tee two strokes along the source's wire (`TEE_AT`, as the corpus draws `──┬`), and charges 1.5 cells (`LATE`) for each cell it lies from there. That is more than a branch cell costs, so a branch leaves its wire as near the source as open ground allows;
   - `build` places each inline chain's nodes right after the chain connects, before the next chain. A chain whose first nodes are already placed connects from the last of them, by its word.
 - **Checks:** `studio_build` rebuilds both cases. In the `.studio` dumps only digests moved, apart from the reordered `build` steps of `05-inline` and `13-fanout`, which end on the same sheets; no step changed outcome. Rewiring every wire from scratch now redraws 11 of the 17 earlier programs exactly as drawn, against 6 before.
+
+### P11: Loose ends (lead) ✅
+
+**Goal.** Close the faults that earlier gates found and left, so P12 starts on a clean base. Each item comes from a "Found, not fixed" list in HISTORY.md and was checked against `db15f90`. The items touch disjoint crates, so they can land as separate commits in any order.
+
+| Item | Decision | Rationale |
+|---|---|---|
+| `shawline run` prints a runtime error's position zero-based, and `check` one-based | `run` prints `path:ROW:COL: CODE message` one-based, the way `check` does. The corpus `.out` files keep `error ROW:COL CODE` zero-based, and SPEC §9 says which is which | Positions are one-based in user-facing CLI output (CLAUDE.md). The corpus writes `.out` itself (`shawline-corpus/src/lib.rs`), so nothing is re-blessed. |
+| The CLI's diagnostic printer rescans the source for each diagnostic | Split the source into lines once per file | Quadratic in diagnostics on a large broken sheet. |
+| The language server has no panic containment or logging, and ignores `$/cancelRequest` | Catch a panic per request and answer it with an error. Log through `window/logMessage`. A cancelled request still waiting is answered `RequestCancelled` | Nothing catches a panic today, so one failing request ends the server, and VS Code shows only that it stopped. |
+| Box parent and overlap checks are quadratic in the number of boxes (3.9 s at 65,536 boxes) | A sweep over boxes sorted by top row, tested against the current check on seeded inputs, as P7's batch 2 did for near-box recognition | Same method and the same oracle as the two quadratic fixes already landed. |
+| Touch: no `touch-action`, and the palette opens only by double-click | `touch-action: none` on the drawing, so a drag draws rather than scrolls. A long press opens the palette where a double-click does | Studio is the front door (Decisions), and a tablet reader currently can't draw. |
+| The VS Code status item was never checked in an editor, and the `.vsix` dates from 2026-10-17 while the extension changed on 2026-10-30 | Rebuild the `.vsix`. In VS Code, check the status item, a hover on `·𐑛𐑳𐑚𐑩𐑤` and one repair as a quick fix | The README tells readers to install that `.vsix`. |
+
+**Gate:** workspace tests and clippy on host and wasm, the playground's Node checks, Studio at 320 px and 1024 px wide in the browser for the touch change, and the VS Code check above.
+
+**Landed** (2026-10-31, `8b0a49c`–`62cd045`, one commit per item):
+- **CLI:** `run` reports a runtime error with the same one-based printer as `check`, source line and caret included, and SPEC §9 says the corpus `.out` files stay zero-based. The printer splits the source once, skips a byte-order mark, and writes through one buffered, locked stderr.
+- **Language server:** each message runs inside `catch_unwind`. A panicking request is answered `InternalError`, the panic is logged through `window/logMessage`, and any half-typed key is reset. Before each message the loop queues everything already arrived, and a request whose `$/cancelRequest` is in that queue is answered `RequestCanceled` without running. `onTypeFormatting` is never skipped, since the transliterator follows every key. A cancellation that arrives after its request has run can't help, because the server is synchronous.
+- **Boxes:** a sweep down the rows finds the pairs of boxes that share a cell, and gives both the parents and `S001`. Measuring showed the parser had the same all-pairs overlap test in its box classification, plus a scan of every text per box for node words, titles and guards. It now uses `shawline_shape::overlapping` and indexes texts by box once. A seeded test checks the sweep against the all-pairs checks on 3,000 scattered rectangle sets and 1,000 drawn jumbles.
+  - `shawline check` on a 512 × 512 sheet of 65,536 two-by-two boxes (release, `scripts/capped`): 6.1 s before, 2.8 s after the sweep and the parser's indexes, and 0.47 s with the buffered printer.
+- **Touch:** the drawing has `touch-action: none`. A finger drags wires, boxes and arrowheads as the mouse does. On blank sheet it pans the pane instead of starting a marquee. Held still for 500 ms, it opens the palette wherever a double-click would. The Box tool still draws with a finger.
+- **Narrow screens, found on the way:** at 320 px the drawing pane's head pushed the page to 601 px, which also stretched `innerWidth` and pushed the palette off screen. Below 900 px the pane heads and the example row now wrap, the palette is at most the screen's width less 16 px, and it is clamped to the page's width.
+- **VS Code:** the `.vsix` was rebuilt (`npm run package`, 222 files) and its `tsc` build is green.
+
+**Gate:**
+- 422 workspace tests pass with none ignored, three of them new;
+- clippy is clean on host and on `wasm32-unknown-unknown`;
+- the playground build (869,148-byte wasm) passes its 113 Node checks;
+- in the browser pane at 320 px, with touch pointer events dispatched to the drawing:
+  - a drag on blank sheet scrolled the pane 100 px with no marquee;
+  - a tap opened nothing;
+  - a 650 ms hold in `03-double`'s first definition opened the palette (Number, Text, `𐑯𐑦𐑤` first), which fit between 8 and 312 px;
+  - a hold that moved 30 px opened nothing;
+  - none of the 20 examples made the page wider than 320 px, with Reset shown or hidden;
+- at 1024 px, a mouse double-click opened the same palette.
+
+**Not checked:**
+- the extension in VS Code itself. Neither it nor `shawline-lsp` is installed on this machine, so that check waits for the user;
+- a real finger on a real device. Synthetic touch events can't reach the browser's own gestures, such as the callout `-webkit-touch-callout` suppresses.
+
+**Found, not fixed:** at 1024 px the drawing pane's head needs about 580 px in a 440 px pane, so the Values switch lies past the window's right edge on every example. This was already true before P11. Wrapping that head would put the two panes out of line, so it waits for a layout decision (Backlog).

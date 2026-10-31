@@ -138,14 +138,14 @@ Done = tests + clippy green for your crate, committed on your branch, ≤200-wor
 
 ## Where it stands (2026-10-31)
 
-Studio Phase 2 is built and its lead gate has passed. Only the user's by-hand pass remains. Every finished phase, with its decisions and gate record, is in [HISTORY.md](HISTORY.md).
+Studio Phase 2 is built and its lead gate has passed. Only the user's by-hand pass remains. P11's loose ends have landed. Every finished phase, with its decisions and gate record, is in [HISTORY.md](HISTORY.md).
 
 - **The language** works end to end: recognition, checking, the VM, the formatter, the SVG renderer, Shawline Mono, the language server and the VS Code extension. `𐑗` chop and `𐑡` join are the first mirror pair added since v1.
 - **Studio**'s edits rebuild every valid corpus program from an empty sheet (`studio_build`), and the whole language can be drawn by mouse or keyboard. Studio makes room on request, places constants and switches, extracts definitions, and offers a repair for each of the 18 codes that has one.
-- **Checks on `db15f90`:** 419 workspace tests pass with none ignored, and clippy is clean on host and on `wasm32-unknown-unknown`.
+- **Checks on `62cd045`:** 422 workspace tests pass with none ignored, clippy is clean on host and on `wasm32-unknown-unknown`, and the playground passes its 113 Node checks.
 
 ```
-P0–P9 ✅ ─► P10 Studio Phase 2 (user's pass left) ─► P11 loose ends ─► P12 Studio Phase 3, the toy layer
+P0–P9 ✅ ─► P10 Studio Phase 2 (user's pass left) ─► P11 loose ends ✅ ─► P12 Studio Phase 3, the toy layer
 ```
 
 ## Next
@@ -159,22 +159,11 @@ The user repeats the lead's four by-hand checks from the wave 3 gate (HISTORY.md
 3. extract a node and its constant from `11-even-odd`'s default arm, and the output stays 0 and 1;
 4. draw a definition with the Box tool after the marquee change.
 
-Faults found go to the top of P11. P10 is then marked closed in HISTORY.md.
+In the same sitting, the check P11 left for an editor:
 
-### P11: Loose ends (lead)
+5. install `shawline-lsp` (`cargo install --path crates/shawline-lsp`) and `editors/vscode/shawline-0.1.0.vsix`, then check the status item, a hover on `·𐑛𐑳𐑚𐑩𐑤`, and one repair offered as a quick fix.
 
-**Goal.** Close the faults that earlier gates found and left, so P12 starts on a clean base. Each item comes from a "Found, not fixed" list in HISTORY.md and was checked against `db15f90`. The items touch disjoint crates, so they can land as separate commits in any order.
-
-| Item | Decision | Rationale |
-|---|---|---|
-| `shawline run` prints a runtime error's position zero-based, and `check` one-based | `run` prints `path:ROW:COL: CODE message` one-based, the way `check` does. The corpus `.out` files keep `error ROW:COL CODE` zero-based, and SPEC §9 says which is which | Positions are one-based in user-facing CLI output (CLAUDE.md). The corpus writes `.out` itself (`shawline-corpus/src/lib.rs`), so nothing is re-blessed. |
-| The CLI's diagnostic printer rescans the source for each diagnostic | Split the source into lines once per file | Quadratic in diagnostics on a large broken sheet. |
-| The language server has no panic containment or logging, and ignores `$/cancelRequest` | Catch a panic per request and answer it with an error. Log through `window/logMessage`. A cancelled request still waiting is answered `RequestCancelled` | Nothing catches a panic today, so one failing request ends the server, and VS Code shows only that it stopped. |
-| Box parent and overlap checks are quadratic in the number of boxes (3.9 s at 65,536 boxes) | A sweep over boxes sorted by top row, tested against the current check on seeded inputs, as P7's batch 2 did for near-box recognition | Same method and the same oracle as the two quadratic fixes already landed. |
-| Touch: no `touch-action`, and the palette opens only by double-click | `touch-action: none` on the drawing, so a drag draws rather than scrolls. A long press opens the palette where a double-click does | Studio is the front door (Decisions), and a tablet reader currently can't draw. |
-| The VS Code status item was never checked in an editor, and the `.vsix` dates from 2026-10-17 while the extension changed on 2026-10-30 | Rebuild the `.vsix`. In VS Code, check the status item, a hover on `·𐑛𐑳𐑚𐑩𐑤` and one repair as a quick fix | The README tells readers to install that `.vsix`. |
-
-**Gate:** workspace tests and clippy on host and wasm, the playground's Node checks, Studio at 320 px and 1024 px wide in the browser for the touch change, and the VS Code check above.
+Faults found are fixed before P12 starts. P10 is then marked closed in HISTORY.md.
 
 ### P12: Studio Phase 3, the toy layer
 
@@ -199,6 +188,7 @@ Not scheduled. Each was found or set aside at a gate. HISTORY.md has the context
 | Tidy and `shawline fmt --relayout`: full automatic layout | A milestone of its own (SPEC §11). The router's tight wires (`│0`, a re-routed wire hugging a moved node) wait for it too: the user chose to keep them, since changing the router rewrites many corpus files. |
 | Inline, the inverse of extract | It lays a body out inside the caller, where there is rarely room, so it waits for Tidy. |
 | Dragging a wire's segments or bends, the knife, free typing on the canvas, copying as text | Outside Phase 2's chosen scope. The text pane covers free typing. |
+| The drawing pane's head at 900 to about 1,150 px wide | Its controls need about 580 px where the pane gives 440, so the Values switch lies past the window's edge. Wrapping it would put the panes out of line, so which control moves is a layout decision (HISTORY.md, P11). |
 | A text outline of the drawing for screen readers | The drawing has a role and a name but no text equivalent of its boxes and wires. Its own design question, after touch. |
 | One position search in `shawline-edit` | `make_room`, `place_connected` (which retries rows) and `feed` (which retries wire lengths) each search positions in private. |
 | A constant that grows leftwards can end up against a border (`│21`) | Canonical, only tight. |
