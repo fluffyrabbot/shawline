@@ -1,6 +1,6 @@
 # Shawline
 
-A dataflow programming language whose source is a drawing: Shavian-alphabet words, box-drawing boxes and wires. Language: [docs/SPEC.md](docs/SPEC.md). Build plan and orchestration rules: [docs/PLAN.md](docs/PLAN.md).
+A dataflow programming language whose source is a drawing: Shavian-alphabet words, box-drawing boxes and wires. Language: [docs/SPEC.md](docs/SPEC.md). Build plan, orchestration rules and what comes next: [docs/PLAN.md](docs/PLAN.md). Finished phases and their gate records: [docs/HISTORY.md](docs/HISTORY.md).
 
 ## Commands
 
