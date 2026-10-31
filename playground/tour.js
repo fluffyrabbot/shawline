@@ -66,7 +66,7 @@ const STEPS = [
 ];
 
 const FINISHED =
-  "That’s the loop. Drag a box to move it, or double-click empty space for a node. Try it on any example.";
+  "That’s the loop. Drag a box to move it, or double-click (on a touch screen, long-press) empty space for a node. Try it on any example.";
 
 /** A one-cell rectangle, spanning a source's whole text. */
 const cell = ({ row, col, span = 1 }) => ({ top: row, left: col, bottom: row, right: col + span - 1 });

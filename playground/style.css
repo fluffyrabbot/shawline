@@ -254,6 +254,9 @@ main {
 /* Drawn at the drawing's zoom, sized by wasm's Geometry, so a wide sheet
    scrolls rather than shrinks. */
 #drawing { position: relative; overflow: auto; font: var(--cell)/0 var(--mono); cursor: text; }
+/* A finger draws, wires and moves here rather than panning the page; the
+   page's own code pans the pane from blank sheet (app.js). */
+#drawing { touch-action: none; -webkit-touch-callout: none; }
 /* Past the text the pane is blank sheet, the same paper as the drawing's
    own: overlays drawn there (the cursor, a box being drawn) show through
    the <svg>'s edge, and `.sheet-end` stretches the scrolling to the
@@ -528,7 +531,7 @@ button[aria-pressed="true"] { background: var(--wash); border-color: var(--wire)
 .palette {
   position: fixed;
   z-index: 4;
-  width: 22em;
+  width: min(22em, calc(100vw - 16px));
   margin-top: 4px;
   font: 14px/1.4 var(--sans);
   background: var(--background);
@@ -651,6 +654,11 @@ kbd {
   body { padding-top: 32px; }
   main { grid-template-columns: minmax(0, 1fr); }
   .controls { flex-wrap: wrap; gap: 16px 24px; }
+  .example { flex-wrap: wrap; }
+  /* Stacked, the panes need not start level, so a head wraps rather than
+     pushing the page wider than a phone. */
+  .pane-head { height: auto; min-height: 46px; flex-wrap: wrap; row-gap: 8px; }
+  .trace-status { white-space: normal; }
   :root { --cell: 18px; }
   #keys { grid-template-columns: repeat(5, minmax(0, 72px)); }
 }

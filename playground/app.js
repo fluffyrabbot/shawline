@@ -699,14 +699,47 @@ drawing.addEventListener("click", (e) => {
 
 const cellOf = ({ row, col }) => ({ row, col });
 
+/** Opens the palette a double-click or a long press asks for at `at`, if any, and says whether it did. */
+function paletteAt(at) {
+  // A straight stretch of wire takes a 1→1 call spliced into it.
+  const inline = studio.inlineAt(at);
+  const box = boxAt(current(), at);
+  if (!inline && (charAt(at) !== " " || !box || box.kind === "node")) return false;
+  openMenu(at, { mode: inline ? "inline" : "place" });
+  return true;
+}
+
 drawing.addEventListener("dblclick", (e) => {
   const at = cellAt(e);
-  if (!at) return;
-  // A straight stretch of wire takes a 1→1 call spliced into it.
-  if (studio.inlineAt(at)) return void openMenu(at, { mode: "inline" });
-  const box = boxAt(current(), at);
-  if (charAt(at) === " " && box && box.kind !== "node") openMenu(at, { mode: "place" });
+  if (at) paletteAt(at);
 });
+
+// Touch has no double-click: a finger held still for HOLD_MS opens the
+// palette where a double-click would, dropping whatever drag the press began.
+const HOLD_MS = 500;
+const HOLD_SLOP_PX = 8;
+/** The pending long press: its timer and where the finger went down. */
+let hold = null;
+
+function clearHold() {
+  if (hold) clearTimeout(hold.timer);
+  hold = null;
+}
+
+function startHold(e, at) {
+  clearHold();
+  const timer = setTimeout(() => {
+    hold = null;
+    if (drag?.moved) return;
+    endDrag();
+    // The lift that follows isn't a click.
+    if (paletteAt(at)) dragged = true;
+  }, HOLD_MS);
+  hold = { timer, x: e.clientX, y: e.clientY, pointerId: e.pointerId };
+}
+
+drawing.addEventListener("pointerup", clearHold);
+drawing.addEventListener("pointercancel", clearHold);
 
 // The Box tool (PLAN P10, Gesture details: Drawing boxes; studio.js's
 // BoxTool): while it is on, a drag on blank sheet draws a box and a click
@@ -1101,6 +1134,7 @@ drawing.addEventListener("pointerdown", (e) => {
   const at = cellAt(e);
   pressed = at;
   if (!at) return;
+  if (e.pointerType === "touch") startHold(e, at);
   // The Box tool takes a press on plain border, or on blank sheet.
   if (boxTool.down(e)) {
     e.preventDefault();
@@ -1137,11 +1171,18 @@ drawing.addEventListener("pointerdown", (e) => {
     start = { kind: "wire", from: cellOf(from), scope: from.scope };
   } else if (lockedAt(at)) {
     return void refuse({ ...at, reason: LOCKED });
-  } else if (marquee.down(e)) {
+  } else if (e.pointerType !== "touch" && marquee.down(e)) {
     start = { kind: "marquee", ghost: null };
   } else {
     const box = boxAt(view, at);
     if (box) start = { kind: "box", box, dr: 0, dc: 0, ghost: null, verdict: null };
+  }
+  if (!start && e.pointerType === "touch") {
+    // A finger on blank sheet scrolls the pane, as it would anywhere else;
+    // the drawing takes no browser panning (style.css), so it pans here.
+    drawing.setPointerCapture(e.pointerId);
+    drag = { kind: "pan", pointerId: e.pointerId, x: e.clientX, y: e.clientY, left: drawing.scrollLeft, top: drawing.scrollTop };
+    return;
   }
   if (!start) return;
   e.preventDefault();
@@ -1294,9 +1335,12 @@ drawing.addEventListener("pointermove", moved);
 
 /** A pointer move over the drawing: a drag under way follows it, and otherwise the cursor says what a press would do. */
 function moved(e) {
+  if (hold && e.pointerId === hold.pointerId && Math.hypot(e.clientX - hold.x, e.clientY - hold.y) > HOLD_SLOP_PX) clearHold();
   if (drag?.kind === "pan") {
     drawing.scrollLeft = drag.left - (e.clientX - drag.x);
     drawing.scrollTop = drag.top - (e.clientY - drag.y);
+    // A pan that went somewhere isn't a click where it ends.
+    if (Math.hypot(e.clientX - drag.x, e.clientY - drag.y) > HOLD_SLOP_PX) dragged = true;
     return;
   }
   if (drag?.kind === "scrub") {
@@ -1845,7 +1889,9 @@ function placeMenu() {
   const below = clientOf({ row: at.row + 1, col: at.col });
   const above = clientOf(at).y - menu.offsetHeight - 8;
   const room = below.y + menu.offsetHeight + 8 <= innerHeight;
-  menu.style.left = `${Math.max(8, Math.min(below.x, innerWidth - menu.offsetWidth - 8))}px`;
+  // The page's width, not innerWidth, which anything too wide would stretch.
+  const width = document.documentElement.clientWidth;
+  menu.style.left = `${Math.max(8, Math.min(below.x, width - menu.offsetWidth - 8))}px`;
   menu.style.top = `${Math.max(8, room || above < 8 ? below.y : above)}px`;
 }
 
