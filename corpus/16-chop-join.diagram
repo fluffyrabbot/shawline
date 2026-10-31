@@ -13,11 +13,10 @@ box 2 square 8:25-11:29 in 0
 text comment 0:0 "𐑗𐑪𐑐 𐑡𐑶𐑯"
 text word 2:3 "·𐑥𐑱𐑯" title 0
 text literal 4:3 "𐑖𐑷𐑤𐑲𐑯" in 0
-text word 4:15 "𐑗" in 0
+text word 4:18 "𐑗" in 0
 text word 4:40 "𐑢𐑳𐑯"
-text literal 6:3 "𐑖𐑷𐑤𐑲𐑯" in 0
-text word 6:15 "𐑗" in 0
-text word 6:21 "𐑡" in 0
+text word 6:18 "𐑗" in 0
+text word 6:24 "𐑡" in 0
 text word 6:40 "𐑑𐑵"
 text literal 9:2 "𐑤𐑲𐑯" in 0
 text word 9:12 "𐑟" in 1

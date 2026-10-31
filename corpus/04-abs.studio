@@ -15,18 +15,18 @@ rewire
   connect 5:0 5:14 ok f378ea12fb5c
   connect 6:11 6:14 ok db59133041d8
   connect 5:18 9:20 ok 1afd435e76df
-  connect 5:0 10:12 ok 262cbc4350a8
-  connect 10:12 10:26 ok 4efdfcef1f0a
-  connect 13:15 13:18 ok 0f8b607b1b37
-  connect 13:22 13:26 ok cba814a726eb
-  connect 5:0 14:12 ok 9c7d6924a78d
-  connect 14:12 14:18 ok 5ad55072670c
-  connect 23:3 23:6 ok f8ae31de0136
-  connect 23:10 23:16 ok 0cb558ef74e7
-  connect 23:22 23:30 ok 2d6d7b1a6409
-  connect 24:3 24:6 ok 045e82c90b88
-  connect 26:3 26:16 ok c0269d135215
-  connect 26:22 26:30 ok b7342c9a4327
+  connect 5:0 10:12 ok 501fa02040bf
+  connect 10:12 10:26 ok f4e463c060a6
+  connect 13:15 13:18 ok 2212d9e88653
+  connect 13:22 13:26 ok 8a409c87ae5c
+  connect 5:0 14:12 ok af97aae5ff4a
+  connect 14:12 14:18 ok 03a84df69976
+  connect 23:3 23:6 ok 4fefd1c07cf5
+  connect 23:10 23:16 ok effcc60620db
+  connect 23:22 23:30 ok 957658e36e4d
+  connect 24:3 24:6 ok f852280770df
+  connect 26:3 26:16 ok e63613c39322
+  connect 26:22 26:30 ok c36182ab418a
 rebuild 𐑤 4:14
   remove_node 4:14 ok 69aa0e5a1a43
   place_node 4:14 𐑤 2 1 ok 9fe4b5dc0e5f
@@ -145,19 +145,19 @@ build
   connect 5:0 5:14 ok 1bbc52d36d5f
   connect 6:11 6:14 ok 5c76daa69a68
   connect 5:18 9:20 ok 8abc10e91420
-  connect 5:0 10:12 ok b608e905c9d2
-  connect 10:12 10:26 ok 1e5af93e322b
-  connect 13:15 13:18 ok 99861020004b
-  connect 13:22 13:26 ok b4551e352193
-  connect 10:26 13:34 ok cba814a726eb
-  connect 5:0 14:12 ok 9c7d6924a78d
-  connect 14:12 14:18 ok 5ad55072670c
-  connect 23:3 23:6 ok f8ae31de0136
-  connect 23:10 23:16 ok 0cb558ef74e7
-  connect 23:22 23:30 ok 2d6d7b1a6409
-  connect 24:3 24:6 ok 045e82c90b88
-  connect 26:3 26:16 ok c0269d135215
-  connect 26:22 26:30 ok b7342c9a4327
+  connect 5:0 10:12 ok 9af5647e66f1
+  connect 10:12 10:26 ok cc1f42a933fa
+  connect 13:15 13:18 ok 5992b5a6845d
+  connect 13:22 13:26 ok dac446cf9919
+  connect 10:26 13:34 ok 8a409c87ae5c
+  connect 5:0 14:12 ok af97aae5ff4a
+  connect 14:12 14:18 ok 03a84df69976
+  connect 23:3 23:6 ok 4fefd1c07cf5
+  connect 23:10 23:16 ok effcc60620db
+  connect 23:22 23:30 ok 957658e36e4d
+  connect 24:3 24:6 ok f852280770df
+  connect 26:3 26:16 ok e63613c39322
+  connect 26:22 26:30 ok c36182ab418a
 extract
   extract 𐑐𐑸𐑑 4:14 ok 4121407da7a8
   extract 𐑐𐑸𐑑 12:18 ok 6e8946e43223

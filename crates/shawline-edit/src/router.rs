@@ -25,6 +25,15 @@ pub(crate) const CROSS: u32 = 60;
 pub(crate) const CLEARANCE: u32 = 1;
 /// A new fan-out point on an existing wire.
 pub(crate) const TEE: u32 = 4;
+/// Where a new fan-out point goes on a source's wire, in cells from the
+/// source: two strokes in, as the corpus draws fan-out (`──┬───▶` over
+/// `└───▶`).
+pub(crate) const TEE_AT: u32 = 2;
+/// Each cell a new fan-out point lies from [`TEE_AT`]: a cell and a half,
+/// more than a branch's own cell costs, so a branch leaves its wire as near
+/// the source as open ground allows, and its straight run is long enough
+/// for inline nodes.
+pub(crate) const LATE: u32 = 3;
 /// Most search states one edit expands before giving up, over all its
 /// searches. A sheet's interior is a few thousand cells, four headings
 /// each, so this is several sheets' worth.

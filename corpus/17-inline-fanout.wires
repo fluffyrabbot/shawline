@@ -1,0 +1,11 @@
+wire 0 cells 2
+  end 4:6 W open
+  end 4:7 E arrow
+wire 1 cells 21
+  tee 4:13
+  end 4:11 W open
+  end 4:26 E port 4:27
+  end 6:16 E arrow
+wire 2 cells 7
+  end 6:20 W open
+  end 6:26 E port 6:27

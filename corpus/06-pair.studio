@@ -8,23 +8,23 @@ rewire
   connect 5:3 5:6 ok ba29f6296051
   connect 5:10 5:40 ok 3e0f2284acab
   connect 6:3 6:6 ok 45a1ca5f4ba0
-  connect 5:10 9:16 ok 24113666e798
-  connect 10:20 9:30 ok 843fd9b0e783
-  connect 9:34 9:40 ok a5e50bf0a134
-  connect 9:20 10:30 ok 54f781cee2f5
+  connect 5:10 9:16 ok 0f1cce8fca36
+  connect 10:20 9:30 ok 8ca375ecdb2b
+  connect 9:34 9:40 ok e04ac6091435
+  connect 9:20 10:30 ok 28225e8f7ab0
 rebuild 𐑒 4:6
   remove_node 4:6 ok 2e8aca1efb51
   place_node 4:6 𐑒 2 1 ok 6ab1150f65f7
   connect 5:3 5:6 ok aebbc33a6bed
   connect 6:3 6:6 ok b37978f1459a
   connect 5:10 5:40 ok d3c4fe28c036
-  connect 5:10 9:16 ok 1f4e4bc1a064
+  connect 5:10 9:16 ok 9d2c615ea440
 rebuild 𐑜 8:16
   remove_node 8:16 ok 22b4bca0722d
   place_node 8:16 𐑜 1 2 ok 720e02ff31dd
-  connect 5:10 9:16 ok b2a5fbf488d0
-  connect 9:20 10:30 ok 94a4e7bcb245
-  connect 10:20 9:30 ok f77abf639835
+  connect 5:10 9:16 ok d16220cf9238
+  connect 9:20 10:30 ok 57159e687a72
+  connect 10:20 9:30 ok 692eed89d6af
 rebuild 𐑒 8:30
   remove_node 8:30 ok 8cd5167de9d9
   place_node 8:30 𐑒 2 1 ok 0f1cce8fca36
@@ -72,10 +72,10 @@ build
   connect 5:3 5:6 ok ba29f6296051
   connect 5:10 5:40 ok 3e0f2284acab
   connect 6:3 6:6 ok 45a1ca5f4ba0
-  connect 5:10 9:16 ok 24113666e798
-  connect 10:20 9:30 ok 843fd9b0e783
-  connect 9:34 9:40 ok a5e50bf0a134
-  connect 9:20 10:30 ok 54f781cee2f5
+  connect 5:10 9:16 ok 0f1cce8fca36
+  connect 10:20 9:30 ok 8ca375ecdb2b
+  connect 9:34 9:40 ok e04ac6091435
+  connect 9:20 10:30 ok 28225e8f7ab0
 extract
   extract 𐑐𐑸𐑑 4:6 ok 8d5d7c4082fc
   extract 𐑐𐑸𐑑 8:16 ok 8e59c8a48ee1

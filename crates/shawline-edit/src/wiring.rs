@@ -12,7 +12,7 @@
 //! so each target is resolved there and carried over ([`Sheets`]).
 //! Refusals point at the caller's cells.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use shawline_doc::Doc;
 use shawline_grid::{Dir, Grid, Pos, Rect};
@@ -26,7 +26,7 @@ use shawline_vm::bytecode::Prim;
 use crate::canon::{Sheets, tidy};
 use crate::BoxKind;
 use crate::model::{Model, NIL, Sink, Source, Term, no_sink, no_source};
-use crate::router::{self, BEND, BUDGET, CLEARANCE, Cell, Found, Miss, Start, TEE, Terrain, toward};
+use crate::router::{self, BEND, BUDGET, CLEARANCE, Cell, Found, LATE, Miss, Start, TEE, TEE_AT, Terrain, toward};
 use crate::sheet::{glyph, keep_clear};
 use crate::{Blockage, Candidate, Placed, Refusal, RefusalKind};
 
@@ -545,6 +545,9 @@ struct Wiring<'a> {
     /// The source's wire, when it has one: the route joins it with a tee.
     wire: Option<usize>,
     own: HashSet<Pos>,
+    /// How many cells along the source's wire each of its cells lies from
+    /// the source.
+    along: HashMap<Pos, u32>,
     region: Rect,
     /// Cells no route may take.
     blocked: HashSet<Pos>,
@@ -604,7 +607,8 @@ impl<'a> Wiring<'a> {
             .filter_map(|e| e.pos.step(Dir::W))
             .collect();
         let target = sink.and_then(Sink::target);
-        Wiring { model, source, wire, own, region, blocked, ends, stretch, target }
+        let along = wire.map(|w| along(model, w, source.first())).unwrap_or_default();
+        Wiring { model, source, wire, own, region, blocked, ends, stretch, target, along }
     }
 
     fn joinable(&self, p: Pos, heading: Dir) -> bool {
@@ -655,7 +659,9 @@ impl Terrain for Wiring<'_> {
     fn goal(&self, p: Pos, heading: Dir) -> Option<u32> {
         match self.wire {
             None => (p == self.source.goal && heading == Dir::W).then_some(0),
-            Some(_) => self.joinable(p, heading).then_some(TEE),
+            Some(_) => self
+                .joinable(p, heading)
+                .then(|| TEE + LATE * self.along.get(&p).map_or(0, |&n| n.abs_diff(TEE_AT))),
         }
     }
 
@@ -667,6 +673,31 @@ impl Terrain for Wiring<'_> {
             0
         }
     }
+}
+
+/// Each cell of wire `w`'s distance in cells from `start`, its first cell,
+/// following the wire's own links.
+fn along(model: &Model, w: usize, start: Pos) -> HashMap<Pos, u32> {
+    let mut out = HashMap::new();
+    if model.links(w, start) == 0 {
+        return out;
+    }
+    out.insert(start, 0);
+    let mut queue = std::collections::VecDeque::from([start]);
+    while let Some(p) = queue.pop_front() {
+        let mask = model.links(w, p);
+        let next = out[&p] + 1;
+        for d in Dir::ALL {
+            if mask & d.bit() == 0 {
+                continue;
+            }
+            if let Some(q) = p.step(d).filter(|q| model.links(w, *q) != 0 && !out.contains_key(q)) {
+                out.insert(q, next);
+                queue.push_back(q);
+            }
+        }
+    }
+    out
 }
 
 /// Draws a route found from a sink back to its source (or the source's

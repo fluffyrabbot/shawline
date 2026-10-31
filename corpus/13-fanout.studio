@@ -34,14 +34,14 @@ build
   place_node 9:10 𐑑 2 1 ok cf1aa007cbaa
   place_text 5:2 7 ok cd67111d3c16
   connect 5:2 14:26 ok 007b31b04a00
-  connect 5:2 5:10 ok 6fcd1e1ceaeb
-  connect 5:14 5:26 ok 329e6dd3ffd7
-  connect 5:2 6:10 ok f5f39b7361a0
-  connect 5:2 10:10 ok 14f9bd3cc285
-  connect 10:14 10:26 ok 2a160f971352
-  connect 5:2 11:10 ok b38ea43b3f36
-  place_inline 14:10 𐑖 ok 171191dd7bb2
-  place_inline 14:16 𐑠 ok 39652cad2fbd
+  place_inline 14:10 𐑖 ok 80c4e753c35f
+  place_inline 14:16 𐑠 ok 6d20ed3094de
+  connect 5:2 5:10 ok 97abd3abb3b6
+  connect 5:14 5:26 ok 4d324f64c895
+  connect 5:2 6:10 ok f4531ae9b97e
+  connect 5:2 10:10 ok f5ade58981ca
+  connect 10:14 10:26 ok b7c5e6830418
+  connect 5:2 11:10 ok 39652cad2fbd
 extract
   extract 𐑐𐑸𐑑 4:10 ok d16de8c076ac
   extract 𐑐𐑸𐑑 9:10 ok 567ba84743be

@@ -299,11 +299,15 @@ fn collect_constants(graph: &Graph, out: &mut Vec<Pos>) {
 ///    selector and through-ports and a divider per arm after the first;
 /// 4. constants and comments inside boxes;
 /// 5. every connection: first each inline chain's, from its first source
-///    straight through to its sinks, then the rest, each group with sinks
-///    in row-major order. A branch that fans out beside a chain then tees
-///    off the chain's wire, which leaves the chain's stretch straight for
-///    its nodes;
-/// 6. inline nodes, each placed on that wire.
+///    straight through to its sink, followed at once by the chain's inline
+///    nodes, each placed on that wire; then the rest, each group with sinks
+///    in row-major order. Placing a chain's nodes before the next chain
+///    connects leaves its source's wire ending at the first node, so a
+///    second chain from that source tees off ahead of the nodes rather than
+///    beside the sinks, and its own stretch is straight for its nodes. A
+///    chain whose first nodes are already placed connects from the last of
+///    them. A branch that fans out beside a chain tees off the chain's wire
+///    in the same way.
 pub fn build(src: &str, sheet: &Sheet) -> Vec<Edit> {
     let grid = Grid::parse(src).expect("a valid program");
     let diagram = recognize(&grid);
@@ -377,34 +381,52 @@ pub fn build(src: &str, sheet: &Sheet) -> Vec<Edit> {
         }
     }
 
-    // 5. Connections, inline nodes connected straight through.
+    // 5. Connections, each inline chain connected straight through and its
+    // nodes placed at once.
     let mut inline = Vec::new();
     for def in &sheet.definitions {
         collect_inline(&def.body, &mut inline);
     }
     let all = links(sheet);
     let feeds = |sink: Pos| all.iter().find(|l| l.to.contains(&sink)).map(|l| l.from);
-    let resolve = |mut from: Pos| {
+    // The inline nodes between a sink's first source and the sink, first
+    // source first.
+    let chain = |to: Pos| {
+        let mut nodes = Vec::new();
+        let mut from = feeds(to).expect("every sink of a valid program is wired");
         while let Some(node) = inline.iter().find(|n| n.output == from) {
+            nodes.push(node);
             match feeds(node.input) {
                 Some(source) => from = source,
                 None => break,
             }
         }
-        from
+        nodes.reverse();
+        (from, nodes)
     };
-    let mut connects: Vec<(bool, Pos, Pos)> = all
+    let mut sinks: Vec<(bool, Pos, Pos)> = all
         .iter()
         .flat_map(|l| l.to.iter().map(move |&to| (l.from, to)))
         .filter(|&(_, to)| !inline.iter().any(|n| n.input == to))
-        .map(|(from, to)| (!inline.iter().any(|n| n.output == from), resolve(from), to))
+        .map(|(from, to)| (!inline.iter().any(|n| n.output == from), from, to))
         .collect();
-    connects.sort_by_key(|&(later, _, to)| (later, to));
-    steps.extend(connects.into_iter().map(|(_, from, to)| Edit::Connect { from, to }));
-
-    // 6. Inline nodes.
-    inline.sort_by_key(|n| n.at);
-    steps.extend(inline.into_iter().map(|n| Edit::PlaceInline { at: n.at, word: n.word }));
+    sinks.sort_by_key(|&(later, _, to)| (later, to));
+    let mut placed: Vec<Pos> = Vec::new();
+    for (later, from, to) in sinks {
+        if later {
+            steps.push(Edit::Connect { from, to });
+            continue;
+        }
+        let (source, nodes) = chain(to);
+        let done = nodes.iter().rposition(|n| placed.contains(&n.at));
+        // A connection names an inline node's output by its word.
+        let from = done.map_or(source, |i| nodes[i].at);
+        steps.push(Edit::Connect { from, to });
+        for n in &nodes[done.map_or(0, |i| i + 1)..] {
+            steps.push(Edit::PlaceInline { at: n.at, word: n.word.clone() });
+            placed.push(n.at);
+        }
+    }
     steps
 }
 

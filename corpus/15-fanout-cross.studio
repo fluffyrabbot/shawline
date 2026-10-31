@@ -1,7 +1,7 @@
 rewire
   remove_wire 2:4 ok 1d104b3f637e
   connect 2:2 6:22 ok 9466815b25ba
-  connect 2:2 7:22 ok 9cfea41f00dc
+  connect 2:2 7:22 ok 081eb2d81b47
 insert 0:0
   insert row 9:0 1 ok 5d9fbbb752f8
   delete row 9:0 1 ok fae102cac20f
@@ -21,4 +21,4 @@ build
   add_port 7:22 𐑚 ok c36f859e2409
   place_text 2:2 1 ok 1d104b3f637e
   connect 2:2 6:22 ok 9466815b25ba
-  connect 2:2 7:22 ok 9cfea41f00dc
+  connect 2:2 7:22 ok 081eb2d81b47

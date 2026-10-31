@@ -1,0 +1,23 @@
+insert 2:0
+  insert row 8:0 1 ok ab502e7d008f
+  delete row 8:0 1 ok 8c2d1e656211
+  insert column 2:27 1 ok 809f22ef2aab
+  delete column 2:27 1 ok 8c2d1e656211
+  insert row 5:0 1 ok fa24a1a9fe33
+  delete row 5:0 1 ok 8c2d1e656211
+  insert column 2:13 1 ok 6cfa911d884c
+  delete column 2:13 1 ok 8c2d1e656211
+retext
+  set_text 4:3 43 ok a20fd99a6cd4
+  set_text 4:3 430 ok ee0c19e33c88
+  set_text 4:2 42 ok 8c2d1e656211
+build
+  place_text 0:0 ※ 𐑖𐑴 𐑮𐑰𐑛 ok 68d883d46a59
+  place_definition 2:0-8:27 𐑥𐑱𐑯 ok 22ab87e749be
+  add_port 4:27 𐑢𐑳𐑯 ok 7e2edc7f9b1b
+  add_port 6:27 𐑑𐑵 ok 7f0e2ac03f25
+  place_text 4:3 42 ok ba24d5403aa5
+  connect 4:3 4:27 ok 48704369744d
+  place_inline 4:9 𐑖 ok 98052d42a0e2
+  connect 4:9 6:27 ok d47ceee33d84
+  place_inline 6:18 𐑠 ok 8c2d1e656211

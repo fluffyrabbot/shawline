@@ -1216,6 +1216,12 @@ Five read-only audits (interaction mechanics, product legibility, conceptual int
   - dragging `03-double`'s 𐑐 node 9 columns right put the Make room button at 460–488 px and the reason below it from 490 px;
   - in `05-inline`, Make definition on 𐑖 was refused for room, Make room offered "Insert 1 column", and one click made `·𐑯𐑿` with its call in the chain's row. It prints 40, as `05-inline.out` does. No console errors.
 
+**After P10: fan-out near the source** ✅. `build` couldn't rebuild a branch that carries inline nodes when the source's wire already ran on past it (`16-chop-join`'s first drawing, `17-inline-fanout`). The router teed a new branch off next to the sink, which left it no straight run for the nodes.
+- **Decisions:**
+  - the router prefers a new tee two strokes along the source's wire (`TEE_AT`, as the corpus draws `──┬`), and charges 1.5 cells (`LATE`) for each cell it lies from there. That is more than a branch cell costs, so a branch leaves its wire as near the source as open ground allows;
+  - `build` places each inline chain's nodes right after the chain connects, before the next chain. A chain whose first nodes are already placed connects from the last of them, by its word.
+- **Checks:** `studio_build` rebuilds both cases. In the `.studio` dumps only digests moved, apart from the reordered `build` steps of `05-inline` and `13-fanout`, which end on the same sheets; no step changed outcome. Rewiring every wire from scratch now redraws 11 of the 17 earlier programs exactly as drawn, against 6 before.
+
 **Then Phase 3**, the toy layer, with step-through runs.
 
 ## Risks
