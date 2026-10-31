@@ -17,7 +17,7 @@ use std::fmt;
 
 use shawline_grid::{Diagnostic, Grid, Pos};
 
-pub use boxes::{BoxShape, BoxStyle, Divider, Port, PortKind, Slip};
+pub use boxes::{BoxShape, BoxStyle, Divider, Port, PortKind, Slip, overlapping};
 pub use stroke::StrokeMap;
 pub use text::{Text, TextKind};
 pub use wire::{EndKind, Wire, WireEnd};

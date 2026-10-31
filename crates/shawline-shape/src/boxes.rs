@@ -97,27 +97,80 @@ pub(crate) fn find(grid: &Grid, strokes: &StrokeMap) -> Vec<BoxShape> {
     boxes.sort_by_key(|b| key(b.rect));
 
     let rects: Vec<Rect> = boxes.iter().map(|b| b.rect).collect();
-    for (i, b) in boxes.iter_mut().enumerate() {
-        b.parent = (0..rects.len())
-            .filter(|&j| rects[j].encloses(&rects[i]))
-            .min_by_key(|&j| rects[j].area());
+    for (i, parent) in parents(&rects).into_iter().enumerate() {
+        boxes[i].parent = parent;
     }
     boxes
 }
 
-/// Boxes must nest or stay apart; anything else is ambiguous.
-pub(crate) fn overlaps(boxes: &[BoxShape]) -> Vec<Diagnostic> {
-    let mut found = Vec::new();
-    for (i, a) in boxes.iter().enumerate() {
-        for b in &boxes[i + 1..] {
-            let (ra, rb) = (a.rect, b.rect);
-            if ra.intersects(&rb) && !ra.encloses(&rb) && !rb.encloses(&ra) {
-                let at = Pos::new(rb.top, rb.left);
-                found.push(Diagnostic::new(at, "S001", format!("box {rb} overlaps box {ra}")));
+/// Each rectangle's parent: the smallest that encloses it, the first of
+/// those by index on a tie.
+fn parents(rects: &[Rect]) -> Vec<Option<usize>> {
+    let mut parent: Vec<Option<usize>> = vec![None; rects.len()];
+    let mut offer = |outer: usize, inner: usize| {
+        let better = parent[inner].is_none_or(|p| (rects[outer].area(), outer) < (rects[p].area(), p));
+        if better {
+            parent[inner] = Some(outer);
+        }
+    };
+    // Enclosing is strict, so an enclosing pair always intersects.
+    for (i, j) in intersecting(rects) {
+        if rects[i].encloses(&rects[j]) {
+            offer(i, j);
+        } else if rects[j].encloses(&rects[i]) {
+            offer(j, i);
+        }
+    }
+    parent
+}
+
+/// Every pair of rectangles that share a cell, as `(i, j)` with `i < j`, in
+/// order. A sweep down the rows compares each rectangle only with those
+/// still open at its top row, so a sheet of many small boxes costs about
+/// the boxes times the boxes across one row, not the boxes squared.
+fn intersecting(rects: &[Rect]) -> Vec<(usize, usize)> {
+    let mut by_top: Vec<usize> = (0..rects.len()).collect();
+    by_top.sort_by_key(|&i| rects[i].top);
+    let (mut open, mut pairs): (Vec<usize>, Vec<(usize, usize)>) = (Vec::new(), Vec::new());
+    for i in by_top {
+        let r = rects[i];
+        // Tops only grow, so a rectangle that ends above this one ends above all the rest.
+        open.retain(|&j| rects[j].bottom >= r.top);
+        for &j in &open {
+            if rects[j].left <= r.right && r.left <= rects[j].right {
+                pairs.push((i.min(j), i.max(j)));
             }
+        }
+        open.push(i);
+    }
+    pairs.sort_unstable();
+    pairs
+}
+
+/// For each box, whether it overlaps another: shares a cell with it while
+/// neither encloses the other.
+pub fn overlapping(boxes: &[BoxShape]) -> Vec<bool> {
+    let rects: Vec<Rect> = boxes.iter().map(|b| b.rect).collect();
+    let mut found = vec![false; boxes.len()];
+    for (i, j) in intersecting(&rects) {
+        if !rects[i].encloses(&rects[j]) && !rects[j].encloses(&rects[i]) {
+            (found[i], found[j]) = (true, true);
         }
     }
     found
+}
+
+/// Boxes must nest or stay apart; anything else is ambiguous.
+pub(crate) fn overlaps(boxes: &[BoxShape]) -> Vec<Diagnostic> {
+    let rects: Vec<Rect> = boxes.iter().map(|b| b.rect).collect();
+    intersecting(&rects)
+        .into_iter()
+        .filter(|&(i, j)| !rects[i].encloses(&rects[j]) && !rects[j].encloses(&rects[i]))
+        .map(|(i, j)| {
+            let (ra, rb) = (rects[i], rects[j]);
+            Diagnostic::new(Pos::new(rb.top, rb.left), "S001", format!("box {rb} overlaps box {ra}"))
+        })
+        .collect()
 }
 
 /// One `S012` per slipped border cell, at the cell (SPEC §14).
@@ -477,7 +530,10 @@ mod tests {
 
     use shawline_grid::{Grid, Pos, Rect};
 
-    use super::{E, N, RectKey, S, StrokeMap, W, corner, key, near, near_candidates, trace};
+    use super::{
+        E, N, RectKey, S, StrokeMap, W, corner, find, intersecting, key, near, near_candidates,
+        overlaps, parents, trace,
+    };
 
     /// Every rectangle with three corners in place, by taking every
     /// combination of them: what `near_candidates` prunes.
@@ -603,6 +659,74 @@ mod tests {
         }
         // So the jumbles exercise both sides of the pruning.
         assert!(near_boxes > 300 && pruned_away > 3000, "{near_boxes} {pruned_away}");
+    }
+
+    /// The all-pairs checks the sweep replaced, kept as its reference.
+    fn every_pair(rects: &[Rect]) -> (Vec<Option<usize>>, Vec<(usize, usize)>) {
+        let parent = (0..rects.len())
+            .map(|i| {
+                (0..rects.len())
+                    .filter(|&j| rects[j].encloses(&rects[i]))
+                    .min_by_key(|&j| rects[j].area())
+            })
+            .collect();
+        let mut overlapping = Vec::new();
+        for i in 0..rects.len() {
+            for j in i + 1..rects.len() {
+                let (a, b) = (rects[i], rects[j]);
+                if a.intersects(&b) && !a.encloses(&b) && !b.encloses(&a) {
+                    overlapping.push((i, j));
+                }
+            }
+        }
+        (parent, overlapping)
+    }
+
+    /// Rectangles that nest, cross, share edges and repeat, in no order.
+    fn scatter(rng: &mut Rng) -> Vec<Rect> {
+        (0..rng.below(24))
+            .map(|_| {
+                let (top, left) = (rng.below(12), rng.below(12));
+                let bottom = top + 1 + rng.below(8);
+                let right = left + 1 + rng.below(8);
+                Rect { top, left, bottom, right }
+            })
+            .collect()
+    }
+
+    #[test]
+    fn the_sweep_finds_what_every_pair_finds() {
+        let mut rng = Rng(11);
+        let (mut nested, mut crossed) = (0, 0);
+        for _ in 0..3000 {
+            let rects = scatter(&mut rng);
+            let (want_parent, want_overlapping) = every_pair(&rects);
+            assert_eq!(parents(&rects), want_parent, "{rects:?}");
+            let overlapping: Vec<(usize, usize)> = intersecting(&rects)
+                .into_iter()
+                .filter(|&(i, j)| !rects[i].encloses(&rects[j]) && !rects[j].encloses(&rects[i]))
+                .collect();
+            assert_eq!(overlapping, want_overlapping, "{rects:?}");
+            nested += want_parent.iter().flatten().count();
+            crossed += want_overlapping.len();
+        }
+        // On drawn boxes too, where `find` sorts them and jumbles slip cells.
+        for _ in 0..1000 {
+            let src = jumble(&mut rng);
+            let grid = Grid::parse(&src).unwrap();
+            let boxes = find(&grid, &StrokeMap::new(&grid));
+            let rects: Vec<Rect> = boxes.iter().map(|b| b.rect).collect();
+            let (want_parent, want_overlapping) = every_pair(&rects);
+            assert_eq!(boxes.iter().map(|b| b.parent).collect::<Vec<_>>(), want_parent, "\n{src}");
+            let at: Vec<Pos> = overlaps(&boxes).iter().map(|d| d.at).collect();
+            let want_at: Vec<Pos> = want_overlapping
+                .iter()
+                .map(|&(_, j)| Pos::new(rects[j].top, rects[j].left))
+                .collect();
+            assert_eq!(at, want_at, "\n{src}");
+        }
+        // So both outcomes are exercised often.
+        assert!(nested > 1000 && crossed > 50000, "{nested} {crossed}");
     }
 
     /// Rows of `┌┐┌┐…` over rows of `└┘└┘…` hold a quarter of a million

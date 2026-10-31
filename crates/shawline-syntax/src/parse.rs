@@ -114,6 +114,14 @@ struct Parser<'a> {
     arrow_e: HashMap<Pos, usize>,
     /// Texts accounted for by some construct; the rest are stray.
     used: Vec<bool>,
+    /// Each box's texts, in text order: those it owns, its title's and its
+    /// dividers'. Looked up per box, so a sheet costs texts plus boxes, not
+    /// their product.
+    owned: Vec<Vec<usize>>,
+    titles: Vec<Vec<usize>>,
+    divider_texts: Vec<Vec<usize>>,
+    /// Whether some box has this one as its parent.
+    has_child: Vec<bool>,
     pending: HashMap<Scope, Vec<Pending>>,
     edges: HashMap<Scope, Vec<Edge>>,
     box_node: HashMap<usize, (Scope, NodeId)>,
@@ -140,6 +148,10 @@ pub fn parse(grid: &Grid, diagram: &Diagram) -> (Sheet, Vec<Diagnostic>) {
         open_w: HashMap::new(),
         arrow_e: HashMap::new(),
         used: vec![false; diagram.texts.len()],
+        owned: vec![Vec::new(); diagram.boxes.len()],
+        titles: vec![Vec::new(); diagram.boxes.len()],
+        divider_texts: vec![Vec::new(); diagram.boxes.len()],
+        has_child: vec![false; diagram.boxes.len()],
         pending: HashMap::new(),
         edges: HashMap::new(),
         box_node: HashMap::new(),
@@ -238,6 +250,18 @@ impl<'a> Parser<'a> {
                 self.text_at.insert(Pos::new(t.pos.row, col), i);
             }
             self.used[i] = t.kind == TextKind::Comment;
+            if let Some(b) = t.owner {
+                self.owned[b].push(i);
+            }
+            if let Some(b) = t.title_of {
+                self.titles[b].push(i);
+            }
+            if let Some(b) = t.divider_of {
+                self.divider_texts[b].push(i);
+            }
+        }
+        for parent in d.boxes.iter().filter_map(|b| b.parent) {
+            self.has_child[parent] = true;
         }
         for (wi, w) in d.wires.iter().enumerate() {
             for e in &w.ends {
@@ -275,16 +299,11 @@ impl<'a> Parser<'a> {
     /// switches (with a selector or dividers) or nodes.
     fn classify_boxes(&mut self) {
         let boxes = &self.d.boxes;
-        let overlapping = |i: usize| {
-            let a = boxes[i].rect;
-            boxes.iter().enumerate().any(|(j, b)| {
-                j != i && a.intersects(&b.rect) && !a.encloses(&b.rect) && !b.rect.encloses(&a)
-            })
-        };
+        let overlapping = shawline_shape::overlapping(boxes);
         // Parents enclose their children strictly, so they come first in
         // row-major order and already have a role.
         for (i, b) in boxes.iter().enumerate() {
-            let role = if overlapping(i) {
+            let role = if overlapping[i] {
                 Role::Skip
             } else {
                 match b.parent.map(|p| self.roles[p]) {
@@ -468,8 +487,7 @@ impl<'a> Parser<'a> {
 
     fn definition_name(&mut self, boxi: usize) -> Name {
         let d = self.d;
-        let titles: Vec<usize> =
-            (0..d.texts.len()).filter(|&t| d.texts[t].title_of == Some(boxi)).collect();
+        let titles = self.titles[boxi].clone();
         for &t in &titles {
             self.used[t] = true;
         }
@@ -786,17 +804,18 @@ impl<'a> Parser<'a> {
         let name = match self.node_word(b) {
             Some(t) => name_of(t),
             None => {
-                let first = d.texts.iter().find(|t| t.owner == Some(b) && t.kind != TextKind::Comment);
+                let first = self.owned[b]
+                    .iter()
+                    .map(|&t| &d.texts[t])
+                    .find(|t| t.kind != TextKind::Comment);
                 let at = first.map_or(top_left(shape.rect), |t| t.pos);
                 self.error(at, "Y002", "a node box must hold exactly one word");
                 Name { text: first.map(|t| t.content.clone()).unwrap_or_default(), at }
             }
         };
-        for (i, t) in d.texts.iter().enumerate() {
-            if t.title_of == Some(b) {
-                self.used[i] = true;
-                self.error(t.pos, "Y016", "a guard on a box that is not a switch");
-            }
+        for i in self.titles[b].clone() {
+            self.used[i] = true;
+            self.error(d.texts[i].pos, "Y016", "a guard on a box that is not a switch");
         }
         let ports_where = |want: fn(&PortRole) -> bool| -> Vec<Pos> {
             shape.ports.iter().map(|p| p.pos).filter(|q| want(&self.ports[q])).collect()
@@ -850,13 +869,12 @@ impl<'a> Parser<'a> {
     /// stays unused and is reported as stray.
     fn guard(&mut self, b: usize, k: usize) -> Option<Guard> {
         let d = self.d;
-        let first = d.texts.iter().position(|t| {
-            if k == 0 {
-                t.title_of == Some(b)
-            } else {
-                t.divider_of == Some(b) && t.pos.row == d.boxes[b].dividers[k - 1].row
-            }
-        })?;
+        let first = if k == 0 {
+            self.titles[b].first().copied()
+        } else {
+            let row = d.boxes[b].dividers[k - 1].row;
+            self.divider_texts[b].iter().copied().find(|&t| d.texts[t].pos.row == row)
+        }?;
         if !is_literal(&d.texts[first]) {
             return None;
         }
@@ -868,10 +886,9 @@ impl<'a> Parser<'a> {
     /// Otherwise the node is `Y002`.
     fn node_word(&self, b: usize) -> Option<&'a Text> {
         let d = self.d;
-        let mut owned = d.texts.iter().filter(|t| t.owner == Some(b) && t.kind != TextKind::Comment);
+        let mut owned = self.owned[b].iter().map(|&t| &d.texts[t]).filter(|t| t.kind != TextKind::Comment);
         let (Some(t), None) = (owned.next(), owned.next()) else { return None };
-        let nested = d.boxes.iter().any(|c| c.parent == Some(b));
-        (!nested && t.kind == TextKind::Word).then_some(t)
+        (!self.has_child[b] && t.kind == TextKind::Word).then_some(t)
     }
 
     /// The name of definition box `boxi`, if its title is a `·`-word.
