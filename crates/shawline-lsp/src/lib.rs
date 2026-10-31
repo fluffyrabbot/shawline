@@ -8,28 +8,34 @@
 //!
 //! The server is synchronous. Messages are handled strictly in arrival order,
 //! which transliteration relies on: the `didChange` carrying a typed key must
-//! land before the `onTypeFormatting` request that rewrites it.
+//! land before the `onTypeFormatting` request that rewrites it. A request
+//! whose `$/cancelRequest` has already arrived is answered `RequestCanceled`
+//! without being run, and a handler that panics is answered with an error and
+//! logged, while the server goes on.
 
 pub mod actions;
 pub mod analysis;
 pub mod position;
 pub mod typing;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::error::Error;
+use std::panic::{AssertUnwindSafe, catch_unwind};
+use std::time::Duration;
 
-use lsp_server::{Connection, ErrorCode, Message, Notification, Request, Response};
+use lsp_server::{Connection, ErrorCode, Message, Notification, Request, RequestId, Response};
 use lsp_types::notification::{
-    DidChangeConfiguration, DidChangeTextDocument, DidCloseTextDocument, DidOpenTextDocument,
-    Notification as _, PublishDiagnostics,
+    Cancel, DidChangeConfiguration, DidChangeTextDocument, DidCloseTextDocument,
+    DidOpenTextDocument, Exit, LogMessage, Notification as _, PublishDiagnostics,
 };
 use lsp_types::request::{
     CodeActionRequest, Formatting, HoverRequest, OnTypeFormatting, Request as _,
-    SemanticTokensFullRequest,
+    SemanticTokensFullRequest, Shutdown,
 };
 use lsp_types::{
-    CodeAction, CodeActionKind, CodeActionOptions, CodeActionOrCommand, CodeActionParams,
-    CodeActionProviderCapability, CodeActionResponse, WorkspaceEdit,
+    CancelParams, CodeAction, CodeActionKind, CodeActionOptions, CodeActionOrCommand,
+    CodeActionParams, CodeActionProviderCapability, CodeActionResponse, LogMessageParams,
+    MessageType, WorkspaceEdit,
 };
 use lsp_types::{
     DiagnosticSeverity, DocumentFormattingParams, DocumentOnTypeFormattingOptions,
@@ -74,23 +80,127 @@ pub fn run(connection: &Connection) -> Result<(), BoxError> {
             "serverInfo": { "name": "shawline-lsp", "version": env!("CARGO_PKG_VERSION") },
         }),
     )?;
-    for msg in &connection.receiver {
+    // Messages that have arrived but not been handled, so that a request can
+    // see whether its cancellation is already behind it.
+    let mut queue = VecDeque::new();
+    loop {
+        queue.extend(connection.receiver.try_iter());
+        let msg = match queue.pop_front() {
+            Some(msg) => msg,
+            None => match connection.receiver.recv() {
+                Ok(msg) => msg,
+                Err(_) => return Ok(()),
+            },
+        };
         match msg {
+            Message::Request(req) if req.method == Shutdown::METHOD => {
+                connection
+                    .sender
+                    .send(Response::new_ok(req.id, ()).into())?;
+                return await_exit(connection, queue);
+            }
+            Message::Request(req) if cancellable(&req) && cancelled(&queue, &req.id) => {
+                let response = Response::new_err(
+                    req.id,
+                    ErrorCode::RequestCanceled as i32,
+                    "cancelled".into(),
+                );
+                connection.sender.send(response.into())?;
+            }
             Message::Request(req) => {
-                if connection.handle_shutdown(&req)? {
-                    return Ok(());
-                }
-                connection.sender.send(server.request(req).into())?;
+                let (id, method) = (req.id.clone(), req.method.clone());
+                let response = match contained(|| server.request(req)) {
+                    Ok(response) => response,
+                    Err(panic) => {
+                        server.recover();
+                        connection
+                            .sender
+                            .send(log_failure(&method, &panic).into())?;
+                        let message = format!("{method} failed: {panic}");
+                        Response::new_err(id, ErrorCode::InternalError as i32, message)
+                    }
+                };
+                connection.sender.send(response.into())?;
             }
             Message::Notification(note) => {
-                for out in server.notify(note) {
-                    connection.sender.send(out.into())?;
+                let method = note.method.clone();
+                match contained(|| server.notify(note)) {
+                    Ok(outs) => {
+                        for out in outs {
+                            connection.sender.send(out.into())?;
+                        }
+                    }
+                    Err(panic) => {
+                        server.recover();
+                        connection
+                            .sender
+                            .send(log_failure(&method, &panic).into())?;
+                    }
                 }
             }
             Message::Response(_) => {}
         }
     }
-    Ok(())
+}
+
+/// Waits for the `exit` that follows `shutdown`, among the messages already
+/// queued and then those still to come, as `Connection::handle_shutdown`
+/// does. Anything else after `shutdown` is dropped.
+fn await_exit(connection: &Connection, queue: VecDeque<Message>) -> Result<(), BoxError> {
+    let is_exit =
+        |msg: &Message| matches!(msg, Message::Notification(n) if n.method == Exit::METHOD);
+    if queue.iter().any(is_exit) {
+        return Ok(());
+    }
+    loop {
+        let msg = connection.receiver.recv_timeout(Duration::from_secs(30))?;
+        if is_exit(&msg) {
+            return Ok(());
+        }
+    }
+}
+
+/// False for `onTypeFormatting`, which must run even when cancelled: the
+/// transliterator's state follows every key it is shown.
+fn cancellable(req: &Request) -> bool {
+    req.method != OnTypeFormatting::METHOD
+}
+
+/// True if `queue` holds a `$/cancelRequest` for the request `id`.
+fn cancelled(queue: &VecDeque<Message>, id: &RequestId) -> bool {
+    queue.iter().any(|msg| {
+        let Message::Notification(note) = msg else {
+            return false;
+        };
+        if note.method != Cancel::METHOD {
+            return false;
+        }
+        match serde_json::from_value::<CancelParams>(note.params.clone()).map(|p| p.id) {
+            Ok(NumberOrString::Number(n)) => *id == RequestId::from(n),
+            Ok(NumberOrString::String(s)) => *id == RequestId::from(s),
+            Err(_) => false,
+        }
+    })
+}
+
+/// Runs `f`, turning a panic into its message.
+fn contained<T>(f: impl FnOnce() -> T) -> Result<T, String> {
+    catch_unwind(AssertUnwindSafe(f)).map_err(|payload| {
+        payload
+            .downcast_ref::<&str>()
+            .map(|s| (*s).to_owned())
+            .or_else(|| payload.downcast_ref::<String>().cloned())
+            .unwrap_or_else(|| "a panic with no message".into())
+    })
+}
+
+/// The `window/logMessage` that reports `method`'s handler panicking.
+fn log_failure(method: &str, panic: &str) -> Notification {
+    let params = LogMessageParams {
+        typ: MessageType::ERROR,
+        message: format!("shawline-lsp: {method} panicked: {panic}"),
+    };
+    Notification::new(LogMessage::METHOD.into(), params)
 }
 
 /// What the server offers, given the negotiated position encoding.
@@ -142,6 +252,15 @@ struct Server {
 }
 
 impl Server {
+    /// Forgets what a handler may have left half-done when it panicked. Each
+    /// document's text is whole, since it is replaced in one assignment, but
+    /// a transliteration may have been cut off mid-key.
+    fn recover(&mut self) {
+        for open in self.docs.values_mut() {
+            open.typing.reset();
+        }
+    }
+
     fn request(&mut self, req: Request) -> Response {
         match req.method.as_str() {
             Formatting::METHOD => respond::<Formatting>(req, |p| self.formatting(p)),
@@ -519,6 +638,97 @@ mod tests {
                     .is_empty()
             );
         }
+    }
+
+    /// Runs the server over a whole session sent before it starts, so
+    /// every message is already queued when the first request is handled.
+    /// Returns the responses by request id, and the notifications.
+    fn session(messages: Vec<Message>) -> (HashMap<RequestId, Response>, Vec<Notification>) {
+        let (server, client) = Connection::memory();
+        let initialize = Request::new(
+            1.into(),
+            "initialize".into(),
+            serde_json::json!({"capabilities": {}}),
+        );
+        client.sender.send(initialize.into()).unwrap();
+        let initialized = Notification::new("initialized".into(), serde_json::json!({}));
+        client.sender.send(initialized.into()).unwrap();
+        for msg in messages {
+            client.sender.send(msg).unwrap();
+        }
+        client
+            .sender
+            .send(Request::new(99.into(), Shutdown::METHOD.into(), ()).into())
+            .unwrap();
+        client
+            .sender
+            .send(Notification::new(Exit::METHOD.into(), ()).into())
+            .unwrap();
+        run(&server).unwrap();
+        drop(server);
+        let (mut responses, mut notes) = (HashMap::new(), Vec::new());
+        for msg in client.receiver.try_iter() {
+            match msg {
+                Message::Response(r) => {
+                    responses.insert(r.id.clone(), r);
+                }
+                Message::Notification(n) => notes.push(n),
+                Message::Request(_) => {}
+            }
+        }
+        (responses, notes)
+    }
+
+    #[test]
+    fn a_request_cancelled_before_it_runs_is_not_run() {
+        let uri = "file:///sheet.shaw";
+        let open = serde_json::json!({"textDocument": {
+            "uri": uri, "languageId": "shawline", "version": 1, "text": corpus("03-double.shaw"),
+        }});
+        let at = serde_json::json!({"textDocument": {"uri": uri}, "position": {"line": 0, "character": 4}});
+        let mut typed = at.clone();
+        typed["ch"] = "p".into();
+        typed["options"] = serde_json::json!({"tabSize": 4, "insertSpaces": true});
+        let cancel =
+            |id: i32| Notification::new(Cancel::METHOD.into(), serde_json::json!({"id": id}));
+        let (responses, _) = session(vec![
+            Notification::new(DidOpenTextDocument::METHOD.into(), open).into(),
+            Request::new(2.into(), HoverRequest::METHOD.into(), at.clone()).into(),
+            cancel(2).into(),
+            Request::new(3.into(), HoverRequest::METHOD.into(), at).into(),
+            Request::new(4.into(), OnTypeFormatting::METHOD.into(), typed).into(),
+            cancel(4).into(),
+            // A cancellation for no pending request is ignored.
+            cancel(8).into(),
+        ]);
+        let result = |id: i32| &responses[&RequestId::from(id)].response_result;
+        let code = |id: i32| result(id).as_ref().err().map(|e| e.code);
+        assert_eq!(code(2), Some(ErrorCode::RequestCanceled as i32));
+        assert_eq!(code(3), None);
+        assert!(result(3).as_ref().is_ok_and(|hover| !hover.is_null()));
+        // The transliterator follows every key, so typing is never cancelled.
+        assert_eq!(code(4), None);
+        assert_eq!(code(99), None);
+    }
+
+    #[test]
+    fn a_panic_becomes_an_error_and_a_log_line() {
+        assert_eq!(contained(|| 7), Ok(7));
+        let hook = std::panic::take_hook();
+        std::panic::set_hook(Box::new(|_| {}));
+        let failed = contained(|| -> () { panic!("no cell at {}:{}", 3, 4) });
+        let failed_str = contained(|| -> () { panic!("plain") });
+        std::panic::set_hook(hook);
+        assert_eq!(failed, Err("no cell at 3:4".into()));
+        assert_eq!(failed_str, Err("plain".into()));
+        let note = log_failure(HoverRequest::METHOD, "no cell at 3:4");
+        assert_eq!(note.method, LogMessage::METHOD);
+        let params: LogMessageParams = serde_json::from_value(note.params).unwrap();
+        assert_eq!(params.typ, MessageType::ERROR);
+        assert_eq!(
+            params.message,
+            "shawline-lsp: textDocument/hover panicked: no cell at 3:4"
+        );
     }
 
     #[test]
