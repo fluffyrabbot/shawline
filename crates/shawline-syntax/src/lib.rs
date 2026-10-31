@@ -2,7 +2,7 @@
 //! switches and ports, and wires into edges.
 //!
 //! Contract: `ast.rs`, written by the lead at Gate P1 and read-only to agents.
-//! Built in Wave B (agent B1). See `docs/PLAN.md`.
+//! Built in Wave B (agent B1). See `docs/HISTORY.md`.
 
 pub mod ast;
 mod dump;

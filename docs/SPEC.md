@@ -1,6 +1,6 @@
 # Shawline language specification
 
-Status: **v1, frozen at Gate P1.** Changes go through the lead only (see [PLAN.md](PLAN.md)). The contracts that implement it are `shawline-shape/src/wire.rs`, `shawline-syntax/src/ast.rs`, `shawline-ir/src/ir.rs` and `shawline-vm/src/bytecode.rs`.
+Status: **v1, frozen at Gate P1.** Changes since go through the lead only (see [PLAN.md](PLAN.md)), and each is recorded with its phase in [HISTORY.md](HISTORY.md). The contracts that implement it are `shawline-shape/src/wire.rs`, `shawline-syntax/src/ast.rs`, `shawline-ir/src/ir.rs` and `shawline-vm/src/bytecode.rs`.
 
 Shawline is a dataflow language whose source is a drawing. Definitions are rounded boxes, calls are square boxes, values travel along wires, and every name is written in the Shavian alphabet.
 
