@@ -1,0 +1,59 @@
+rewire
+  remove_wire 9:8 ok 404d50d199a9
+  remove_wire 9:15 ok fa70eb0b2e72
+  remove_wire 9:23 ok e03b6c81c697
+  remove_wire 10:8 ok 9c0a334d2b45
+  connect 9:2 9:10 ok 5ae5f00984c4
+  connect 9:18 9:25 ok 670a682a70a8
+  connect 10:4 10:10 ok 8b0173788d4d
+  connect 9:14 10:25 ok 7ddba2b5a71e
+rebuild 𐑟 8:10
+  remove_node 8:10 ok eeeae8529a0a
+  place_node 8:10 𐑟 2 1 ok 0cdae9c81e7b
+  connect 9:2 9:10 ok 670a682a70a8
+  connect 10:4 10:10 ok 8b0173788d4d
+  connect 9:14 10:25 ok 7ddba2b5a71e
+move 8:10 -1 0 ok 71e992439b30
+move 8:10 1 0 ok 85f614f9391c
+move 8:10 0 -1 ok 8091dc2c439f
+move 8:10 0 1 ok c90f9aa94af3
+move 8:25 -1 0 ok 192d88154beb
+move 8:25 1 0 ok cac7bc14e0b3
+move 8:25 0 -1 ok 1ca28f1fc7f9
+move 8:25 0 1 ok 8471ac467352
+insert 2:0
+  insert row 13:0 1 ok d8f4faaf87ef
+  delete row 13:0 1 ok 7ddba2b5a71e
+  insert column 2:38 1 ok 13c54bd3fedb
+  delete column 2:38 1 ok 7ddba2b5a71e
+  insert row 7:0 1 ok 1b69f2a1315d
+  delete row 7:0 1 ok 7ddba2b5a71e
+  insert column 2:19 1 ok c0110d7e3dee
+  delete column 2:19 1 ok 7ddba2b5a71e
+build
+  place_text 0:0 ※ 𐑗𐑪𐑐 𐑡𐑶𐑯 ok 8fce4ce4f0b4
+  place_definition 2:0-13:38 𐑥𐑱𐑯 ok 2a56bc2bbe83
+  add_port 4:38 𐑢𐑳𐑯 ok 96d919589eea
+  add_port 6:38 𐑑𐑵 ok 0464920d5ba0
+  add_port 9:38 𐑔𐑮𐑰 ok 20fb18f9c287
+  place_node 8:10 𐑟 2 1 ok 331f916ca45b
+  place_node 8:25 𐑟 2 1 ok 8c8cc98b3412
+  place_text 4:3 «𐑖𐑷𐑤𐑲𐑯» ok b9ac2a60a5f8
+  place_text 6:3 «𐑖𐑷𐑤𐑲𐑯» ok 918feaa6f2ba
+  place_text 9:2 «𐑤𐑲𐑯» ok 917a98e46b14
+  place_text 9:18 «𐑖𐑷» ok 4c573fd51e21
+  place_text 10:4 𐑯𐑦𐑤 ok 4b38a51a3500
+  connect 4:3 4:38 ok cdebc9112339
+  connect 6:3 6:38 ok de50cb6680a2
+  connect 9:29 9:38 ok 44b08f4563e8
+  connect 9:2 9:10 ok 3238f70d0415
+  connect 9:18 9:25 ok 9129ed02a206
+  connect 10:4 10:10 ok fc256af0918e
+  connect 9:14 10:25 ok 32ff40ea2f58
+  place_inline 4:15 𐑗 ok 7827c6bd7b8c
+  place_inline 6:15 𐑗 ok f664aa1073c1
+  place_inline 6:21 𐑡 ok 0497da6777f6
+  place_inline 9:33 𐑡 ok 7ddba2b5a71e
+extract
+  extract 𐑐𐑸𐑑 8:10 ok 8653f4e69079
+  extract 𐑐𐑸𐑑 8:25 refused blocked 8:25

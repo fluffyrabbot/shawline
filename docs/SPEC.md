@@ -231,8 +231,11 @@ A runtime error prints nothing on stdout. It prints `error ROW:COL CODE: message
 | 𐑦 | same | equal | 2→1 | 𐑰 | differ | not equal | 2→1 |
 | 𐑥 | min | minimum | 2→1 | 𐑯 | max | maximum | 2→1 |
 | 𐑖 | show | show (Int → Text) | 1→1 | 𐑠 | read | read (Text → Int) | 1→1 |
+| 𐑗 | chop | chop (Text → list of its letters, each a Text) | 1→1 | 𐑡 | join | join (list of Texts → one Text) | 1→1 |
 
 `𐑯𐑦𐑤` is the empty list (0→1), whether written as a constant (`𐑯𐑦𐑤 ──▶`) or boxed. The other single letters are reserved for future primitives, and each pair is still to be assigned as a pair.
+
+**Chop and join.** `𐑗` turns a text into the list of its letters, each a one-letter text; the empty text gives `𐑯𐑦𐑤`. A space or the namer dot is a letter too. `𐑡` joins a list of texts into one, so `𐑡` of two texts is their concatenation and `𐑡` of `𐑯𐑦𐑤` is the empty text. Joining a chopped text gives it back. Pieces are always texts, never letter codes, so a running program can only make text out of letters its sheet or `𐑖` already wrote.
 
 ## 10. Evaluation
 
@@ -243,7 +246,7 @@ A runtime error prints nothing on stdout. It prints `error ROW:COL CODE: message
 - Calls must not consume the host stack, and recursion at least 100 000 deep must work.
 - Memory is bounded, so a program whose base case is never reached stops with an error instead of exhausting the machine:
   - **Calls** (`R007`, at the call that went too deep): more than 1 000 000 calls nested below `·𐑥𐑱𐑯`, or more than 16 777 216 values held by live calls together (about 400 MB). Tail calls don't nest, so they never reach the first limit.
-  - **Heap** (`R008`, at the node that allocated): more than 8 388 608 pairs and list cells alive at once. This catches a tail loop that keeps growing a list, which the call limit can't see.
+  - **Heap** (`R008`, at the node that allocated): more than 8 388 608 pairs, list cells and text letters alive at once. Every text made while running counts one per letter; the texts written on the sheet don't count. This catches a tail loop that keeps growing a list or a text, which the call limit can't see. `𐑗` and `𐑡` check the limit before they build their result.
   - **Output** (`R009`, at `·𐑥𐑱𐑯`'s namer dot): a result whose printed form would exceed 1 000 000 characters. Pairs can share parts, so a few cells can describe an astronomically large value.
 - A call whose outputs are exactly the enclosing definition's outputs, all of them, in the same order, and read by nothing else (directly, or through switch arm outputs), is a **tail call**, and it must run in constant stack. A call whose results reach the outputs reordered, duplicated or only partly is an ordinary call. Calls inside `·𐑥𐑱𐑯` itself are never tail calls, so its results can be measured (`R009`) before the program ends.
 
@@ -379,7 +382,7 @@ Every diagnostic has a stable code. The corpus checks codes and positions, never
 | R005 | runtime | No arm matches |
 | R006 | runtime | `𐑠` (read) of text that isn't a number |
 | R007 | runtime | Call stack exhausted: calls nested too deep (§10) |
-| R008 | runtime | Heap exhausted: too many pairs and list cells alive (§10) |
+| R008 | runtime | Heap exhausted: too many pairs, list cells and text letters alive (§10) |
 | R009 | runtime | Result too large to print (§10) |
 | A001 | asm | Malformed `.shawasm` or bytecode |
 | I001 | internal | A sheet with no errors failed to compile. Always a bug in Shawline, never in the program. |

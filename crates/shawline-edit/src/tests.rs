@@ -371,11 +371,11 @@ fn the_palette_lists_primitives_then_definitions() {
     let words: Vec<&str> = all.iter().map(|c| c.word.as_str()).collect();
     assert_eq!(
         words,
-        ["𐑐", "𐑚", "𐑑", "𐑛", "𐑒", "𐑜", "𐑟", "𐑕", "𐑤", "𐑮", "𐑦", "𐑰", "𐑥", "𐑯", "𐑖", "𐑠", "𐑯𐑦𐑤", "𐑛𐑳𐑚𐑩𐑤"]
+        ["𐑐", "𐑚", "𐑑", "𐑛", "𐑒", "𐑜", "𐑟", "𐑕", "𐑤", "𐑮", "𐑦", "𐑰", "𐑥", "𐑯", "𐑖", "𐑠", "𐑗", "𐑡", "𐑯𐑦𐑤", "𐑛𐑳𐑚𐑩𐑤"]
     );
     assert_eq!((all[0].gloss.as_str(), all[0].mirror.as_deref()), ("add", Some("𐑚")));
     assert_eq!((all[5].inputs, all[5].outputs), (1, 2));
-    assert_eq!((all[17].gloss.as_str(), all[17].inputs, all[17].outputs), ("𐑯 → 𐑬", 1, 1));
+    assert_eq!((all[19].gloss.as_str(), all[19].inputs, all[19].outputs), ("𐑯 → 𐑬", 1, 1));
     let dragging = palette(DOUBLE, Some(Pos::new(5, 0)));
     assert!(!dragging.iter().any(|c| c.inputs == 0), "{dragging:?}");
     assert_eq!(dragging.len(), all.len() - 1);

@@ -20,8 +20,8 @@ pub const MAX_FRAMES: usize = 1_000_000;
 /// with many values, which reach it in fewer than [`MAX_FRAMES`] calls.
 pub const MAX_REGISTERS: usize = 1 << 24;
 
-/// The most pairs and list cells that may be alive at once (SPEC §10). One
-/// more stops the program with `R008`.
+/// The most pairs, list cells and text letters that may be alive at once
+/// (SPEC §10). One more stops the program with `R008`.
 pub const MAX_CELLS: usize = 1 << 23;
 
 /// The most characters a result of `main` may print as (SPEC §10). A longer
@@ -143,11 +143,12 @@ pub(crate) fn dispatch<const TRACE: bool>(
             }
             Instr::Prim { prim, dst, src } => {
                 let (a, b) = (&regs[r(src[0])], &regs[r(src[1])]);
-                let (x, y) = apply(prim, a, b)
+                let (x, y) = apply(prim, a, b, limits.cells)
                     .map_err(|(code, msg)| Diagnostic::new(f.spans[pc], code, msg))?;
-                if matches!(prim, Prim::Pair | Prim::Prepend) && heap::live() > limits.cells {
-                    let message = format!("heap exhausted: {} cells alive", heap::live());
-                    return Err(Diagnostic::new(f.spans[pc], "R008", message).into());
+                if matches!(prim, Prim::Pair | Prim::Prepend | Prim::Show)
+                    && heap::live() > limits.cells
+                {
+                    return Err(Diagnostic::new(f.spans[pc], "R008", exhausted(0)).into());
                 }
                 regs[r(dst[0])] = x;
                 let two = prim.arity().1 == 2;
@@ -244,8 +245,10 @@ pub(crate) fn dispatch<const TRACE: bool>(
 type Fault = (Code, String);
 
 /// Runs one primitive. Primitives with one output leave the second unused.
-/// Pairs and list cells are made through [`heap::cell`], so they count.
-fn apply(p: Prim, a: &Value, b: &Value) -> Result<(Value, Value), Fault> {
+/// Pairs and list cells are made through [`heap::cell`] and texts through
+/// [`heap::text`], so they count. `𐑗` and `𐑡` check `cells`, the heap limit,
+/// before they build anything, since one text can be millions of letters.
+fn apply(p: Prim, a: &Value, b: &Value, cells: usize) -> Result<(Value, Value), Fault> {
     let one = |v| Ok((v, Value::Int(0)));
     let truth = |t: bool| one(Value::Int(t.into()));
     let overflow = || ("R001", format!("{} overflows", p.letter()));
@@ -282,12 +285,62 @@ fn apply(p: Prim, a: &Value, b: &Value) -> Result<(Value, Value), Fault> {
             Value::List(None) => Err(("R003", format!("{} of the empty list", p.letter()))),
             other => Err(mismatch(p, "a list", other)),
         },
-        Prim::Show => one(Value::Text(int(p, a)?.to_string().into())),
+        Prim::Show => {
+            let t = int(p, a)?.to_string();
+            one(Value::Text(heap::text(&t, t.len())))
+        }
         Prim::Read => match a {
             Value::Text(t) => one(Value::Int(read(t)?)),
             other => Err(mismatch(p, "text", other)),
         },
+        Prim::Chop => match a {
+            Value::Text(t) => {
+                // A list cell and a one-letter text for each letter.
+                let letters = t.chars().count();
+                if heap::live() + 2 * letters > cells {
+                    return Err(("R008", exhausted(2 * letters)));
+                }
+                let mut list = Value::List(None);
+                let mut buf = [0; 4];
+                for c in t.chars().rev() {
+                    let letter = Value::Text(heap::text(c.encode_utf8(&mut buf), 1));
+                    list = Value::List(Some(heap::cell(letter, list)));
+                }
+                one(list)
+            }
+            other => Err(mismatch(p, "text", other)),
+        },
+        Prim::Join => {
+            let mut joined = String::new();
+            let mut letters = 0;
+            let mut rest = a;
+            loop {
+                match rest {
+                    Value::List(None) => break,
+                    Value::List(Some(cell)) => {
+                        let Value::Text(t) = &cell.0 else {
+                            return Err(mismatch(p, "a list of texts", &cell.0));
+                        };
+                        // Counted before it is copied, so a list that repeats
+                        // one long text stops here and not in the allocator.
+                        letters += t.chars().count();
+                        if heap::live() + letters > cells {
+                            return Err(("R008", exhausted(letters)));
+                        }
+                        joined.push_str(t);
+                        rest = &cell.1;
+                    }
+                    other => return Err(mismatch(p, "a list", other)),
+                }
+            }
+            one(Value::Text(heap::text(&joined, letters)))
+        }
     }
+}
+
+/// The message of `R008`, with `wanted` more cells and letters than are alive.
+fn exhausted(wanted: usize) -> String {
+    format!("heap exhausted: {} cells and letters alive", heap::live() + wanted)
 }
 
 fn int(p: Prim, v: &Value) -> Result<i64, Fault> {
@@ -519,5 +572,123 @@ main 𐑥𐑱𐑯
         // 2^17 leaves print in under a million characters; 2^18 don't.
         assert!(run(&assemble(&dag(17)).unwrap()).is_ok());
         assert_eq!(run(&assemble(&dag(18)).unwrap()).unwrap_err().code, "R009");
+    }
+
+    #[test]
+    fn chop_and_join_are_duals() {
+        let src = "
+fn 𐑥𐑱𐑯 params 0 results 4 registers 4
+  const k0 «𐑖𐑷 ·𐑤𐑲𐑯»
+  const k1 «»
+  const k2 nil
+  const r0 k0
+  prim 𐑗 r0 r0
+  prim 𐑡 r1 r0
+  const r2 k1
+  prim 𐑗 r2 r2
+  const r3 k2
+  prim 𐑡 r3 r3
+  ret r0 4
+end
+main 𐑥𐑱𐑯
+";
+        let out = run(&assemble(src).unwrap()).unwrap();
+        let shown: Vec<String> = out.iter().map(|v| v.to_string()).collect();
+        assert_eq!(shown, ["[«𐑖» «𐑷» « » «·» «𐑤» «𐑲» «𐑯»]", "𐑖𐑷 ·𐑤𐑲𐑯", "[]", ""]);
+    }
+
+    #[test]
+    fn chop_and_join_want_text() {
+        let fails = |k: &str, letter: char| {
+            let src = format!(
+                "
+fn 𐑥𐑱𐑯 params 0 results 1 registers 1
+  const k0 {k}
+  const r0 k0
+  prim {letter} r0 r0 at 3:4
+  ret r0 1
+end
+main 𐑥𐑱𐑯
+"
+            );
+            let err = run(&assemble(&src).unwrap()).unwrap_err();
+            (err.code, err.at)
+        };
+        let at = Pos::new(3, 4);
+        assert_eq!(fails("7", '𐑗'), ("R004", at));
+        assert_eq!(fails("«𐑩»", '𐑡'), ("R004", at));
+        assert_eq!(fails("[«𐑩» 7]", '𐑡'), ("R004", at));
+    }
+
+    /// `double(n, t)` joins `t` to itself n times in a tail loop: 2^n letters.
+    fn double(n: u32) -> Module {
+        let src = format!(
+            "
+fn 𐑛𐑳𐑚 params 2 results 1 registers 4
+  const k0 0
+  const k1 1
+  const k2 nil
+  jne r0 k0 2
+  ret r1 1
+  const r2 k2
+  prim 𐑟 r2 r1,r2
+  prim 𐑟 r2 r1,r2
+  prim 𐑡 r1 r2 at 7:7
+  const r3 k1
+  prim 𐑚 r0 r0,r3
+  tail 𐑛𐑳𐑚 r0 2
+end
+fn 𐑥𐑱𐑯 params 0 results 1 registers 2
+  const k0 {n}
+  const k1 «𐑩»
+  const r0 k0
+  const r1 k1
+  call 𐑛𐑳𐑚 r0 2 r0
+  ret r0 1
+end
+main 𐑥𐑱𐑯
+"
+        );
+        assemble(&src).unwrap()
+    }
+
+    #[test]
+    fn a_growing_text_stops_at_the_heap_limit() {
+        // 32 letters, while the 16 before them and two list cells are alive.
+        assert!(execute(&double(5), SMALL_HEAP).is_ok());
+        let err = execute(&double(7), SMALL_HEAP).unwrap_err();
+        assert_eq!((err.code, err.at), ("R008", Pos::new(7, 7)));
+        // Under the real limit, 2^60 letters stop at 2^23 without being built.
+        let err = run(&double(60)).unwrap_err();
+        assert_eq!((err.code, err.at), ("R008", Pos::new(7, 7)));
+    }
+
+    #[test]
+    fn freed_texts_count_down() {
+        // A thousand 64-letter texts, each dropped as soon as the next is made.
+        let src = "
+fn 𐑤𐑵𐑐 params 1 results 1 registers 3
+  const k0 0
+  const k1 1
+  const k2 «0123456789012345678901234567890123456789012345678901234567890123»
+  jne r0 k0 2
+  ret r0 1
+  const r1 k2
+  prim 𐑗 r1 r1
+  prim 𐑡 r1 r1
+  const r2 k1
+  prim 𐑚 r0 r0,r2
+  tail 𐑤𐑵𐑐 r0 1
+end
+fn 𐑥𐑱𐑯 params 0 results 1 registers 1
+  const k0 1000
+  const r0 k0
+  call 𐑤𐑵𐑐 r0 1 r0
+  ret r0 1
+end
+main 𐑥𐑱𐑯
+";
+        let limits = Limits { cells: 200, ..Limits::SPEC };
+        assert!(execute(&assemble(src).unwrap(), limits).is_ok());
     }
 }

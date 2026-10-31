@@ -1,7 +1,7 @@
 //! What the derived impls in `bytecode.rs` can't give a million-element list
 //! or a value whose cells are shared: a drop, a structural equality and a
 //! printed length that never recurse on the host stack, plus the count of
-//! live cells behind the heap limit (SPEC §10).
+//! live cells and text letters behind the heap limit (SPEC §10).
 
 use std::cell::Cell;
 use std::collections::{HashMap, HashSet};
@@ -12,10 +12,12 @@ use crate::bytecode::Value;
 
 impl Drop for Value {
     fn drop(&mut self) {
-        if let Value::Pair(cell) | Value::List(Some(cell)) = self
-            && Rc::strong_count(cell) == 1
-        {
-            heap::freed();
+        match self {
+            Value::Pair(cell) | Value::List(Some(cell)) if Rc::strong_count(cell) == 1 => {
+                heap::freed(1);
+            }
+            Value::Text(t) if Rc::strong_count(t) == 1 => heap::freed(t.chars().count()),
+            _ => {}
         }
         // The default drop recurses once per list cell; instead, detach the
         // children of every uniquely owned cell and drop them from a worklist.
@@ -42,13 +44,14 @@ fn detach(v: &mut Value, pending: &mut Vec<Value>) {
     }
 }
 
-/// The number of pairs and list cells alive during a run.
+/// The number of pairs, list cells and text letters alive during a run.
 ///
-/// A run starts the count at zero; the VM counts each cell it makes, and every
-/// cell freed while the run lasts counts down. Only the run's own cells can be
-/// freed during it: the module's constants outlive it, and nothing from an
-/// earlier run can be dropped until it returns. Outside a run nothing counts,
-/// so values that outlive one never skew the next.
+/// A run starts the count at zero; the VM counts each cell it makes and each
+/// letter of each text it makes, and every cell or text freed while the run
+/// lasts counts down. Only the run's own values can be freed during it: the
+/// module's constants outlive it, and nothing from an earlier run can be
+/// dropped until it returns. Outside a run nothing counts, so values that
+/// outlive one never skew the next.
 pub(crate) mod heap {
     use super::*;
 
@@ -76,15 +79,25 @@ pub(crate) mod heap {
 
     /// A new cell, counted.
     pub(crate) fn cell(a: Value, b: Value) -> Rc<(Value, Value)> {
-        if let Some(n) = LIVE.get() {
-            LIVE.set(Some(n + 1));
-        }
+        made(1);
         Rc::new((a, b))
     }
 
-    pub(super) fn freed() {
+    /// A new text of `letters` letters, each counted.
+    pub(crate) fn text(t: &str, letters: usize) -> Rc<str> {
+        made(letters);
+        t.into()
+    }
+
+    fn made(count: usize) {
         if let Some(n) = LIVE.get() {
-            LIVE.set(Some(n.saturating_sub(1)));
+            LIVE.set(Some(n + count));
+        }
+    }
+
+    pub(super) fn freed(count: usize) {
+        if let Some(n) = LIVE.get() {
+            LIVE.set(Some(n.saturating_sub(count)));
         }
     }
 }

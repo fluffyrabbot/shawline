@@ -107,10 +107,12 @@ pub enum Prim {
     Max,
     Show,
     Read,
+    Chop,
+    Join,
 }
 
 impl Prim {
-    pub const ALL: [Prim; 16] = [
+    pub const ALL: [Prim; 18] = [
         Prim::Add,
         Prim::Sub,
         Prim::Mul,
@@ -127,6 +129,8 @@ impl Prim {
         Prim::Max,
         Prim::Show,
         Prim::Read,
+        Prim::Chop,
+        Prim::Join,
     ];
 
     /// The single Shavian letter that names this primitive.
@@ -148,6 +152,8 @@ impl Prim {
             Prim::Max => '𐑯',
             Prim::Show => '𐑖',
             Prim::Read => '𐑠',
+            Prim::Chop => '𐑗',
+            Prim::Join => '𐑡',
         }
     }
 
@@ -175,6 +181,8 @@ impl Prim {
             Prim::Max => "max",
             Prim::Show => "show",
             Prim::Read => "read",
+            Prim::Chop => "chop",
+            Prim::Join => "join",
         }
     }
 
@@ -197,6 +205,8 @@ impl Prim {
             Prim::Max => "maximum",
             Prim::Show => "show (Int → Text)",
             Prim::Read => "read (Text → Int)",
+            Prim::Chop => "chop (Text → list of its letters, each a Text)",
+            Prim::Join => "join (list of Texts → one Text)",
         }
     }
 
@@ -204,7 +214,7 @@ impl Prim {
     pub const fn arity(self) -> (u8, u8) {
         match self {
             Prim::Unpair | Prim::Split => (1, 2),
-            Prim::Show | Prim::Read => (1, 1),
+            Prim::Show | Prim::Read | Prim::Chop | Prim::Join => (1, 1),
             _ => (2, 1),
         }
     }

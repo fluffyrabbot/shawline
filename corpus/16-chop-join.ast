@@ -1,0 +1,26 @@
+def ·𐑥𐑱𐑯 at 2:3 box 2:0-13:38
+  result 0 𐑢𐑳𐑯 at 4:40 arrow 4:38
+  result 1 𐑑𐑵 at 6:40 arrow 6:38
+  result 2 𐑔𐑮𐑰 at 9:40 arrow 9:38
+  node 0 const «𐑖𐑷𐑤𐑲𐑯» cells 4:3-4:9 out 4:11
+  node 1 inline 𐑗 at 4:15 cells 4:15-4:15 in 4:13 out 4:17
+  node 2 const «𐑖𐑷𐑤𐑲𐑯» cells 6:3-6:9 out 6:11
+  node 3 inline 𐑗 at 6:15 cells 6:15-6:15 in 6:13 out 6:17
+  node 4 inline 𐑡 at 6:21 cells 6:21-6:21 in 6:19 out 6:23
+  node 5 call 𐑟 at 9:12 box 8:10-11:14 in 9:10 10:10 out 9:14
+  node 6 call 𐑟 at 9:27 box 8:25-11:29 in 9:25 10:25 out 9:29
+  node 7 const «𐑤𐑲𐑯» cells 9:2-9:6 out 9:8
+  node 8 const «𐑖𐑷» cells 9:18-9:21 out 9:23
+  node 9 inline 𐑡 at 9:33 cells 9:33-9:33 in 9:31 out 9:35
+  node 10 const 𐑯𐑦𐑤 cells 10:4-10:6 out 10:8
+  edge wire 0: node 0 out 0 -> node 1 in 0
+  edge wire 1: node 1 out 0 -> result 0
+  edge wire 2: node 2 out 0 -> node 3 in 0
+  edge wire 3: node 3 out 0 -> node 4 in 0
+  edge wire 4: node 4 out 0 -> result 1
+  edge wire 5: node 7 out 0 -> node 5 in 0
+  edge wire 6: node 5 out 0 -> node 6 in 1
+  edge wire 7: node 8 out 0 -> node 6 in 0
+  edge wire 8: node 6 out 0 -> node 9 in 0
+  edge wire 9: node 9 out 0 -> result 2
+  edge wire 10: node 10 out 0 -> node 5 in 1
