@@ -217,7 +217,7 @@ Checking is dynamic in v1, so a type mismatch is a runtime error.
 | Pair | `(a b)` |
 | List | `[a b c]`; the empty list is `[]` |
 
-A runtime error prints nothing on stdout. It prints `error ROW:COL CODE: message` on stderr and exits with status 1. The position is the failing node's word (or the switch's selector), zero-based as in every dump. The corpus `.out` files hold stdout, or, for a program that fails, the single line `error ROW:COL CODE`.
+A runtime error prints nothing on stdout. It prints `FILE:ROW:COL: CODE message` on stderr, with the source line and a caret, as `check` prints a diagnostic, and exits with status 1. The position is the failing node's word (or the switch's selector), one-based as in all of the CLI's messages. The corpus `.out` files hold stdout, or, for a program that fails, the single line `error ROW:COL CODE`, zero-based as in every dump.
 
 **Primitives.** Each mirrored pair names a pair of duals. The short name is the primitive's English gloss (§13, Reading): the drawing's gloss strip and the Studio palette show it, and each pair of duals is named as a pair.
 

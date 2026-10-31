@@ -65,9 +65,12 @@ fn main() -> ExitCode {
     };
     let plain = flag("--plain");
     let message = |m: &str| if plain { m.to_owned() } else { shawline_word::annotate(m) };
+    // Split once, not per diagnostic: a broken sheet can report thousands.
+    // A byte-order mark is not a cell (SPEC §2), so it can't shift row 0.
+    let lines: Vec<&str> = src.strip_prefix('\u{feff}').unwrap_or(&src).lines().collect();
     let report_all = |diagnostics: &[Diagnostic]| {
         for d in diagnostics {
-            report(path, &src, d, &message(&d.message));
+            report(path, &lines, d, &message(&d.message));
         }
         ExitCode::FAILURE
     };
@@ -113,8 +116,8 @@ fn main() -> ExitCode {
                 match shawline_vm::run(module) {
                     Ok(values) => values.iter().for_each(|v| println!("{v}")),
                     Err(e) => {
-                        // SPEC §9: zero-based position, nothing on stdout.
-                        eprintln!("error {} {}: {}", e.at, e.code, message(&e.message));
+                        // SPEC §9: nothing on stdout, and the same form as `check`.
+                        report(path, &lines, &e, &message(&e.message));
                         return ExitCode::FAILURE;
                     }
                 }
@@ -144,9 +147,9 @@ fn replace(path: &str, text: &str) -> std::io::Result<()> {
 
 /// Prints `d` with `message`, its source line and a caret. Every repertoire
 /// character is one cell wide, so the caret lines up in Shawline Mono.
-fn report(path: &str, src: &str, d: &Diagnostic, message: &str) {
+fn report(path: &str, lines: &[&str], d: &Diagnostic, message: &str) {
     eprintln!("{path}:{}:{}: {} {message}", d.at.row + 1, d.at.col + 1, d.code);
-    if let Some(line) = src.lines().nth(d.at.row) {
+    if let Some(line) = lines.get(d.at.row) {
         eprintln!("  {line}\n  {}^", " ".repeat(d.at.col));
     }
 }
