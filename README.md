@@ -48,6 +48,8 @@ cargo run --bin shawline -- run corpus/08-factorial.shaw
 
 `shawline --help` lists the commands: `check`, `run`, `fmt`, `render`, `diagram`, `ast` and `asm`.
 
+`examples/` holds longer sheets outside the corpus. [gray-code.shaw](examples/gray-code.shaw) builds the reflected binary Gray code: `·𐑒𐑪𐑐𐑦` (copy) prefixes 0 to the shorter code, keeping its order, and `·𐑥𐑦𐑮𐑼` (mirror) prefixes 1 to the reversed shorter code.
+
 To read `.shaw` files in a terminal or another editor, the boxes only line up in a font that draws Shavian at the same width as box drawing. Build Shawline Mono with `cargo run -p shawline-font --example build -- ShawlineMono.ttf`, install it, and use it at line height 1.0.
 
 ### VS Code
