@@ -17,6 +17,7 @@ import {
 import { Choices, offer, placing } from "./palette.js";
 import {
   ZOOM_STEP, clampZoom, defaultZoom, fitZoom, zoomAbout, cellUnder, sheetExtent, sheetBox, undrawable,
+  edgeScrollStep,
 } from "./view.js";
 
 const $ = (id) => document.getElementById(id);
@@ -423,6 +424,9 @@ function drawSheet(src) {
   const sheet = docs.get(src);
   const svg = sheet.render(document.documentElement.dataset.theme === "dark", layer.shown);
   if (svg === undefined) return false;
+  // A new text has the room it needs past itself; what a drag reached
+  // stays only while the text it reached over does.
+  if (src !== drawn && !drag) reach = null;
   const kept = [...drawing.querySelectorAll(":scope > .keep")];
   drawing.innerHTML = svg;
   drawing.append(...kept);
@@ -443,6 +447,8 @@ function drawSheet(src) {
  * next box in, which hit-tests like any other.
  */
 let sheet = { width: 0, height: 0 };
+/** The farthest row and column a drag has reached, so the sheet grows ahead of it; null until one has. */
+let reach = null;
 /** Stretches the pane's scrolling to the sheet's width; its height is the pane's own. */
 const sheetEnd = el("div", "sheet-end keep");
 sheetEnd.setAttribute("aria-hidden", "true");
@@ -458,16 +464,23 @@ function sizeDrawing() {
   geo = docs.get(drawn).geometry(layer.shown, zoom);
   const size = geo.size();
   Object.assign(svg.style, { width: `${size.width}px`, height: `${size.height}px` });
-  // At least the pane on show: its width, and down to the window's foot.
-  const top = drawing.getBoundingClientRect().top + scrollY;
-  const pane = { width: drawing.clientWidth, height: Math.max(PANE_MIN_PX, innerHeight - top - 16) };
-  sheet = sheetExtent(size, geo.cell_rect(0, 0, 0, 0, true, false), pane);
-  drawing.style.minHeight = `${sheet.height}px`;
-  sheetEnd.style.width = `${sheet.width}px`;
+  fitSheet();
   $("zoom-level").textContent = `${Math.round(zoom * 100)}%`;
   if (menu) placeMenu();
   if (inline) placeInline();
   showArmHandle();
+}
+
+/** Stretches the pane to the sheet: the drawing at the zoom, out to what a drag reached, and room past both. */
+function fitSheet() {
+  // At least the pane on show: its width, and down to the window's foot.
+  const top = drawing.getBoundingClientRect().top + scrollY;
+  const pane = { width: drawing.clientWidth, height: Math.max(PANE_MIN_PX, innerHeight - top - 16) };
+  const far = reach && geo.cell_rect(reach.row, reach.col, reach.row, reach.col, true, false);
+  const reached = far && { width: far.x + far.width, height: far.y + far.height };
+  sheet = sheetExtent(geo.size(), geo.cell_rect(0, 0, 0, 0, true, false), pane, reached);
+  drawing.style.minHeight = `${sheet.height}px`;
+  sheetEnd.style.width = `${sheet.width}px`;
 }
 
 /** Zooms to `next`, keeping the drawing's point under `pointer` (client pixels) still. */
@@ -933,8 +946,10 @@ function endDrag() {
 }
 
 /** Shows a refusal's reason by the cell it is about, for a moment, and in
- * the status line until the next action. */
-function refuse({ row, col, reason }) {
+ * the status line until the next action. `under` is what is offered by
+ * that cell (the Make room button), which the reason goes below rather
+ * than over. */
+function refuse({ row, col, reason }, under = null) {
   showStatus(reason, "refused");
   const svg = drawing.querySelector("svg");
   if (!svg) return;
@@ -942,6 +957,7 @@ function refuse({ row, col, reason }) {
   svg.append(cell);
   const tip = layer.say(el("div", "refusal"), reason);
   place(tip, { row: row + 1, col });
+  if (under) tip.style.top = `${under.offsetTop + under.offsetHeight}px`;
   drawing.append(tip);
   setTimeout(() => (tip.remove(), cell.remove()), 2800);
 }
@@ -955,12 +971,16 @@ let room = null;
 
 /** A refused edit: said by its cell, and Make room offered when it would help. `then` is the gesture's follow-up. */
 function refused(refusal, edit, then = null) {
-  refuse(refusal);
-  if (refusal.remedy !== "make-room" || !edit || studio.held || drag) return;
+  refuse(refusal, offerRoom(refusal, edit, then));
+}
+
+/** Offers Make room by a refused edit's cell when it would help, and returns its button, or null. */
+function offerRoom(refusal, edit, then) {
+  if (refusal.remedy !== "make-room" || !edit || studio.held || drag) return null;
   withdrawRoom();
   const base = studio.text;
   const roomed = applyEdit(docs.get(base), { kind: "make_room", edit });
-  if (!roomed.ok) return;
+  if (!roomed.ok) return null;
   const ghost = sheetGhost(roomed.doc);
   const button = el("button", "make-room keep", "Make room");
   button.type = "button";
@@ -984,6 +1004,7 @@ function refused(refusal, edit, then = null) {
   place(button, { row: refusal.row + 1, col: refusal.col });
   drawing.append(ghost, button);
   room = { base, result: roomed, ghost, button, then };
+  return button;
 }
 
 /**
@@ -1063,6 +1084,9 @@ drawing.addEventListener("pointerdown", (e) => {
   // A drag isn't always followed by a click, so its flag mustn't outlive
   // it and swallow the next real click.
   dragged = false;
+  lastMove = null;
+  cancelAnimationFrame(edging);
+  edging = 0;
   closeMenu();
   closeInline();
   withdrawRoom();
@@ -1216,7 +1240,60 @@ function showPath() {
   svg.append(drag.path);
 }
 
-drawing.addEventListener("pointermove", (e) => {
+// A drag held near the edge of the pane on show scrolls it, the page down
+// and up and the pane across, and the sheet grows ahead of the drag, so a
+// box, a wire or a marquee reaches past what the pane shows (PLAN P10,
+// wave 2's gate). As the pane scrolls under a still pointer, the drag's
+// last move is replayed, since the cell under it changed.
+
+/** The drag's last pointer move, replayed as the pane scrolls under it. */
+let lastMove = null;
+/** The frame the edge scroll waits for, or 0 while it is still. */
+let edging = 0;
+
+/** Notes a drag's move: its reach, which grows the sheet, and the edge scroll it may start. */
+function follow(e) {
+  lastMove = { clientX: e.clientX, clientY: e.clientY, pointerId: e.pointerId, shiftKey: e.shiftKey };
+  const at = cellAt(e);
+  if (at && (!reach || at.row > reach.row || at.col > reach.col)) {
+    reach = { row: Math.max(at.row, reach?.row ?? 0), col: Math.max(at.col, reach?.col ?? 0) };
+    fitSheet();
+  }
+  if (!edging) edging = requestAnimationFrame(edgeScroll);
+}
+
+/** One frame of the edge scroll: while the pointer is in an edge's band and the pane can still scroll that way. */
+function edgeScroll() {
+  edging = 0;
+  if (!drag || !lastMove || drag.kind === "pan" || drag.kind === "scrub") return;
+  const r = drawing.getBoundingClientRect();
+  const shown = {
+    left: r.left + drawing.clientLeft,
+    right: r.left + drawing.clientLeft + drawing.clientWidth,
+    top: Math.max(r.top, 0),
+    bottom: Math.min(r.bottom, innerHeight),
+  };
+  const { dx, dy } = edgeScrollStep({ x: lastMove.clientX, y: lastMove.clientY }, shown);
+  const before = { x: drawing.scrollLeft, y: scrollY };
+  if (dx) drawing.scrollLeft += dx;
+  if (dy) scrollBy(0, dy);
+  if (drawing.scrollLeft === before.x && scrollY === before.y) return;
+  edging = requestAnimationFrame(edgeScroll);
+  moved(lastMove);
+}
+
+// A scroll of the page or the pane during a drag, by the edge or the wheel,
+// moves the sheet under the pointer.
+for (const target of [window, drawing]) {
+  target.addEventListener("scroll", () => {
+    if (lastMove && drag && drag.kind !== "pan" && drag.kind !== "scrub") moved(lastMove);
+  }, { passive: true });
+}
+
+drawing.addEventListener("pointermove", moved);
+
+/** A pointer move over the drawing: a drag under way follows it, and otherwise the cursor says what a press would do. */
+function moved(e) {
   if (drag?.kind === "pan") {
     drawing.scrollLeft = drag.left - (e.clientX - drag.x);
     drawing.scrollTop = drag.top - (e.clientY - drag.y);
@@ -1229,6 +1306,7 @@ drawing.addEventListener("pointermove", (e) => {
     }
     return;
   }
+  if (drag && e.pointerId === drag.pointerId) follow(e);
   if (drag?.kind === "tool") {
     if (boxTool.move(e)) showRect();
     return;
@@ -1279,7 +1357,7 @@ drawing.addEventListener("pointermove", (e) => {
   } else {
     showPath();
   }
-});
+}
 
 drawing.addEventListener("pointerup", (e) => {
   if (!drag || e.pointerId !== drag.pointerId) return;

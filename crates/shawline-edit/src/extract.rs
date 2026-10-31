@@ -7,9 +7,15 @@
 //! wired with [`crate::connect`], one branch at a time, each checked. At
 //! the call, a lone node box is redrawn for the new word and ports, and its
 //! wires are re-routed as a move re-routes them. Any other pick is cleared,
-//! the call placed in its corner, and the call's wires connected afresh,
-//! since there is no one box for its wires to follow. The whole is checked:
-//! canonical, with the input's codes, and every part found again.
+//! the call placed, and the call's wires connected afresh, since there is
+//! no one box for its wires to follow. A lone inline node or constant is
+//! first given way to in its own row: its call is drawn over it, ports on
+//! that row, and its wires kept. That is the only way past an inline node
+//! it feeds, whose arrowhead can't be left without its wire. Otherwise the
+//! call goes in the pick's corner when it fits there, and then in the
+//! nearest clear spot of the pick's scope, since a constant or an inline
+//! node is narrower than a call. The whole is checked: canonical, with the
+//! input's codes, and every part found again.
 
 use std::collections::{HashMap, HashSet};
 
@@ -33,6 +39,9 @@ use crate::{BoxKind, Blockage, Edited, Extracted, PORT_NAMES, Refusal, RefusalKi
 /// and the outputs: room for a fan-out's tee and its bends.
 const LEAD: usize = 4;
 
+/// The most spots a cleared pick's call is tried in, its corner included.
+const CALL_SPOTS: usize = 12;
+
 pub(crate) fn extract(doc: &Doc, picks: &[Pos], name: &str) -> Result<Extracted, Refusal> {
     let at = picks.first().copied().unwrap_or(Pos::new(0, 0));
     let refuse = |kind, why: &str| Refusal::new(at, kind, why);
@@ -54,36 +63,51 @@ pub(crate) fn extract(doc: &Doc, picks: &[Pos], name: &str) -> Result<Extracted,
     let names = Names::of(&model, &flows).ok_or_else(|| refuse(RefusalKind::Target, "that's more ports than a definition can name"))?;
 
     // The call first, where the pick was; then the definition below it all.
-    let corner = pick.corner(&model);
+    let finish = |called: Edited, call: Pos| -> Result<Extracted, Refusal> {
+        let defined = Definition::lay_out(&model, &pick, &flows, &names, name, mapped::read(&called.doc))
+            .map_err(|why| refuse(RefusalKind::Blocked(Blockage::NoRoom), why))?;
+        let done = defined.draw(&called.doc, &model, &pick, &flows, &names, at)?;
+
+        let changed = |why: &str| refuse(RefusalKind::Changed, &format!("the definition can't be made: {why}"));
+        if done.formatted() != Some(done.text()) {
+            return Err(changed("the sheet wouldn't stay tidy"));
+        }
+        if codes(&done) != codes(sheets.doc()) {
+            return Err(changed("it would change what the program means"));
+        }
+        let map = defined.map(sheets.canon(), &called, mapped::read(&done), &pick);
+        if !map.is_total() {
+            return Err(changed("a part wouldn't keep its place"));
+        }
+        let edited = Edited { doc: done, map, tidied: sheets.tidied() };
+        Ok(Extracted { edited, definition: Pos::new(defined.top, 0), call })
+    };
     let lone = match pick.boxes[..] {
         [b] if pick.texts.is_empty() && model.kind(b) == BoxKind::Node => Some(b),
         _ => None,
     };
-    let called = match lone {
-        Some(b) => rebox(&sheets, &model, b, name, &flows, at)?,
-        None => clear_and_call(&sheets, &model, &pick, name, &flows, corner, at)?,
-    };
-    let call = match lone {
-        Some(b) => sheets.corner(b),
-        None => corner,
-    };
-    let defined = Definition::lay_out(&model, &pick, &flows, &names, name, mapped::read(&called.doc))
-        .map_err(|why| refuse(RefusalKind::Blocked(Blockage::NoRoom), why))?;
-    let done = defined.draw(&called.doc, &model, &pick, &flows, &names, at)?;
-
-    let changed = |why: &str| refuse(RefusalKind::Changed, &format!("the definition can't be made: {why}"));
-    if done.formatted() != Some(done.text()) {
-        return Err(changed("the sheet wouldn't stay tidy"));
+    if let Some(b) = lone {
+        return finish(rebox(&sheets, &model, b, name, &flows, at)?, sheets.corner(b));
     }
-    if codes(&done) != codes(sheets.doc()) {
-        return Err(changed("it would change what the program means"));
+    // In the pick's row, then each spot in turn. A refusal is the first
+    // one tried, whose room is the one `landing` tells Make room of.
+    let mut refused = None;
+    if let Some(row) = InRow::of(&model, &pick, name, &flows) {
+        match row.draw(&sheets, &model, name, at).and_then(|called| finish(called, row.corner)) {
+            Ok(done) => return Ok(done),
+            Err(r) => refused = Some(r),
+        }
     }
-    let map = defined.map(sheets.canon(), &called, mapped::read(&done), &pick);
-    if !map.is_total() {
-        return Err(changed("a part wouldn't keep its place"));
+    let cleared = clear(&sheets, &model, &pick, &flows, at)?;
+    for corner in call_spots(&cleared, &model, &pick, name, &flows) {
+        match call(&sheets, &cleared, name, &flows, corner, at).and_then(|called| finish(called, corner)) {
+            Ok(done) => return Ok(done),
+            Err(r) => {
+                refused.get_or_insert(r);
+            }
+        }
     }
-    let edited = Edited { doc: done, map, tidied: sheets.tidied() };
-    Ok(Extracted { edited, definition: Pos::new(defined.top, 0), call })
+    Err(refused.unwrap_or_else(|| refuse(RefusalKind::Blocked(Blockage::NoRoom), "there's no room for the call")))
 }
 
 /// Where [`extract`] on canonical `doc` would put the call, for
@@ -99,15 +123,26 @@ pub(crate) fn landing(doc: &Doc, picks: &[Pos], name: &str) -> Option<(usize, Re
         [b] if pick.texts.is_empty() && model.kind(b) == BoxKind::Node => Some(b),
         _ => None,
     };
-    let corner = lone.map_or_else(|| pick.corner(&model), |b| sheets.corner(b));
+    let in_row = lone.is_none().then(|| InRow::of(&model, &pick, name, &flows)).flatten();
+    let corner = match (lone, &in_row) {
+        (Some(b), _) => sheets.corner(b),
+        (None, Some(row)) => row.corner,
+        (None, None) => pick.corner(&model),
+    };
     let call = node_rect(corner, name, flows.inputs.len() as u16, flows.outputs.len() as u16);
     let cells = pick.cells(diagram);
-    let span = Rect {
+    let mut span = Rect {
         top: cells.iter().map(|p| p.row).min()?,
         left: cells.iter().map(|p| p.col).min()?,
         bottom: cells.iter().map(|p| p.row).max()?,
         right: cells.iter().map(|p| p.col).max()?,
     };
+    // Room for a call in the row goes inside its output wire, which a
+    // column there stretches; a column between a text and its wire would
+    // part them.
+    if let Some(row) = in_row {
+        span.right = span.right.max(row.wire);
+    }
     Some((pick.scope.0, call, span))
 }
 
@@ -370,22 +405,107 @@ fn rebox(sheets: &Sheets, model: &Model, b: usize, name: &str, flows: &Flows, at
         .map_err(|r| Refusal { at, ..r })
 }
 
-/// Any other pick: its wires across the edge are cut, its parts and the
-/// wires among them cleared, and the call placed at `corner` and wired
-/// from each input's source and to each output's sinks.
-fn clear_and_call(
-    sheets: &Sheets,
-    model: &Model,
-    pick: &Pick,
-    name: &str,
-    flows: &Flows,
+/// A lone inline node or constant's call drawn over it in its row: the
+/// inline node's arrowhead becomes the call's input, and its output wire,
+/// straight along the row where the call would cover it, runs on from the
+/// call's tee.
+struct InRow {
+    /// The call's top-left corner, a row above the pick.
     corner: Pos,
-    at: Pos,
-) -> Result<Edited, Refusal> {
-    let here = |r: Refusal| Refusal { at, ..r };
+    /// The call's right border's column.
+    right: usize,
+    /// The pick's row, and the column of its output wire's first cell
+    /// on it past the pick.
+    row: usize,
+    wire: usize,
+    /// The picked text.
+    text: usize,
+    /// Whether the pick is an inline node, which has an input.
+    inline: bool,
+}
+
+impl InRow {
+    /// Where the call would go, for a pick of one inline node or constant
+    /// whose output wire leaves along its row; None for any other pick.
+    fn of(model: &Model, pick: &Pick, name: &str, flows: &Flows) -> Option<Self> {
+        let ([t], [], [output]) = (&pick.texts[..], &pick.boxes[..], &flows.outputs[..]) else { return None };
+        if flows.inputs.len() > 1 || !flows.internal.is_empty() {
+            return None;
+        }
+        let text = &model.diagram.texts[*t];
+        let start = pick.corner(model);
+        let row = text.pos.row;
+        let corner = Pos::new(row.checked_sub(1)?, start.col);
+        let right = start.col + name.chars().count() + 3;
+        let w = model.source(output.source).ok().and_then(|s| model.wire_of(s.term))?;
+        let end = text.pos.col + text.width;
+        let wire = model.diagram.wires[w].cells.iter().filter(|p| p.row == row && p.col >= end).map(|p| p.col).min()?;
+        Some(InRow { corner, right, row, wire, text: *t, inline: !pick.inline.is_empty() })
+    }
+
+    /// The call drawn, or refused for want of room: blank sheet above and
+    /// below it, and in its row only the pick, blank cells and the output
+    /// wire's straight line, which goes on past its tee.
+    fn draw(&self, sheets: &Sheets, model: &Model, name: &str, at: Pos) -> Result<Edited, Refusal> {
+        let grid = model.grid;
+        let (top, left, right, row) = (self.corner.row, self.corner.col, self.right, self.row);
+        let blank = |p: Pos| grid.get(p) == ' ';
+        let fits = (left..=right).all(|col| blank(Pos::new(top, col)) && blank(Pos::new(row + 1, col)))
+            && (self.wire..=right + 1).all(|col| grid.get(Pos::new(row, col)) == '─')
+            && (left..self.wire).all(|col| {
+                let p = Pos::new(row, col);
+                blank(p) || model.text_at(p) == Some(self.text) || (col == left && self.inline)
+            });
+        if !fits {
+            let why = "the call has no room in this row; try Make room";
+            return Err(Refusal::new(at, RefusalKind::Blocked(Blockage::NoRoom), why));
+        }
+        let mut lines = rows(grid);
+        let width = right - left + 1;
+        write(&mut lines, self.corner, &rule('┌', '─', None, '┐', width));
+        write(&mut lines, Pos::new(row + 1, left), &rule('└', '─', None, '┘', width));
+        for col in left..=right {
+            put(&mut lines, Pos::new(row, col), ' ');
+        }
+        put(&mut lines, Pos::new(row, left), if self.inline { '▶' } else { '│' });
+        write(&mut lines, Pos::new(row, left + 2), name);
+        put(&mut lines, Pos::new(row, right), '├');
+        for col in right + 1..self.wire {
+            put(&mut lines, Pos::new(row, col), '─');
+        }
+        let changed = |why: &str| Refusal::new(at, RefusalKind::Changed, format!("the call can't be drawn here: {why}"));
+        let drawn = tidy(Doc::new(render(&lines))).map_err(changed)?;
+        let map = mapped::map(sheets.canon(), mapped::read(&drawn), Some);
+        Ok(Edited { doc: drawn, map, tidied: false })
+    }
+}
+
+/// Any other pick, cleared for its call: its wires across the edge cut,
+/// and its parts and the wires among them erased.
+fn clear(sheets: &Sheets, model: &Model, pick: &Pick, flows: &Flows, at: Pos) -> Result<Doc, Refusal> {
     let diagram = model.diagram;
     let mut current = Doc::new(sheets.doc().text());
     // One cut at a time, each read off the sheet the one before it left.
+    // Outputs go first: an inline node with its input cut is a stray word,
+    // which feeds no wire to find.
+    for flow in &flows.outputs {
+        let (g, d) = read(&current);
+        let m = Model::new(g, d);
+        let Some(w) = m.source(flow.source).ok().and_then(|s| m.wire_of(s.term)) else { continue };
+        let mut canvas = Canvas::new(g);
+        erase_wire(&mut canvas, &m, w);
+        // An inline node's arrowhead is its wire's end, and stays for the
+        // call's wire to reach, with the line cell before it: a bare
+        // arrowhead is a slip, which formatting would join to whatever
+        // is left of it on the row.
+        for &p in flow.outside.iter().filter(|&&p| model.port(p).is_none()) {
+            canvas.set(p, model.grid.get(p));
+            if let Some(before) = p.step(Dir::W) {
+                canvas.set(before, model.grid.get(before));
+            }
+        }
+        current = Doc::new(canvas.render());
+    }
     for &sink in flows.inputs.iter().flat_map(|f| &f.inside) {
         let (g, d) = read(&current);
         let m = Model::new(g, d);
@@ -393,14 +513,6 @@ fn clear_and_call(
         let Some(w) = m.wire_of(sink.term()) else { continue };
         let mut canvas = Canvas::new(g);
         cut_branch(&mut canvas, &m, w, &sink);
-        current = Doc::new(canvas.render());
-    }
-    for flow in &flows.outputs {
-        let (g, d) = read(&current);
-        let m = Model::new(g, d);
-        let Some(w) = m.source(flow.source).ok().and_then(|s| m.wire_of(s.term)) else { continue };
-        let mut canvas = Canvas::new(g);
-        erase_wire(&mut canvas, &m, w);
         current = Doc::new(canvas.render());
     }
     let (g, d) = read(&current);
@@ -415,9 +527,48 @@ fn clear_and_call(
         canvas.set(p, ' ');
     }
     let changed = |why: &str| Refusal::new(at, RefusalKind::Changed, format!("the pick can't be cleared: {why}"));
-    let cleared = tidy(Doc::new(canvas.render())).map_err(changed)?;
+    tidy(Doc::new(canvas.render())).map_err(changed)
+}
+
+/// Where a cleared pick's call is tried, best first, at most
+/// [`CALL_SPOTS`]: the pick's corner, then the spots in its scope with
+/// clear sheet all round the call, nearest first to where the call's first
+/// port would be on the pick's top row, so its wires run as the pick's did.
+fn call_spots(cleared: &Doc, model: &Model, pick: &Pick, name: &str, flows: &Flows) -> Vec<Pos> {
+    let corner = pick.corner(model);
+    let (grid, _) = read(cleared);
     let (inputs, outputs) = (flows.inputs.len() as u16, flows.outputs.len() as u16);
-    let placed = place_node(&cleared, corner, name, inputs, outputs).map_err(here)?;
+    let scope = &model.diagram.boxes[pick.scope.0];
+    let inner = scope.rect;
+    let clear = |at: Pos| {
+        let r = node_rect(at, name, inputs, outputs);
+        let rows = r.top..=r.bottom;
+        r.top > inner.top
+            && r.left > inner.left + 1
+            && r.bottom < inner.bottom
+            && r.right + 1 < inner.right
+            && model.arm(pick.scope.0, r.top) == pick.scope.1
+            && model.arm(pick.scope.0, r.bottom) == pick.scope.1
+            && !model.diagram.boxes.iter().any(|b| b.rect != inner && inner.encloses(&b.rect) && b.rect.contains(at))
+            && rows.into_iter().all(|row| (r.left - 1..=r.right + 1).all(|col| grid.get(Pos::new(row, col)) == ' '))
+    };
+    let aim = Pos::new(corner.row.saturating_sub(1), corner.col);
+    let mut spots: Vec<Pos> = (inner.top + 1..inner.bottom)
+        .flat_map(|row| (inner.left + 2..inner.right).map(move |col| Pos::new(row, col)))
+        .filter(|&p| p != corner && clear(p))
+        .collect();
+    spots.sort_by_key(|p| (2 * p.row.abs_diff(aim.row) + p.col.abs_diff(aim.col), *p));
+    spots.truncate(CALL_SPOTS - 1);
+    spots.insert(0, corner);
+    spots
+}
+
+/// The call placed at `corner` on the cleared sheet, and wired from each
+/// input's source and to each output's sinks.
+fn call(sheets: &Sheets, cleared: &Doc, name: &str, flows: &Flows, corner: Pos, at: Pos) -> Result<Edited, Refusal> {
+    let here = |r: Refusal| Refusal { at, ..r };
+    let (inputs, outputs) = (flows.inputs.len() as u16, flows.outputs.len() as u16);
+    let placed = place_node(cleared, corner, name, inputs, outputs).map_err(here)?;
     let mut current = placed.doc;
     for (flow, &to) in flows.inputs.iter().zip(&placed.inputs) {
         current = connect(&current, flow.source, to).map_err(here)?.doc;

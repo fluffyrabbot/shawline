@@ -1646,7 +1646,7 @@ pendingE2("04-abs builds from an empty sheet through the page's own gestures", (
 // drawn <svg> ends.
 
 const { BoxTool } = await import("./studio.js");
-const { sheetExtent, sheetBox, ROOM_ROWS, ROOM_COLUMNS } = await import("./view.js");
+const { sheetExtent, sheetBox, ROOM_ROWS, ROOM_COLUMNS, edgeScrollStep, EDGE_PX, EDGE_STEP_PX } = await import("./view.js");
 
 /**
  * A Box tool on `text`, hit-tested as app.js does: the drawn <svg> at a
@@ -1691,6 +1691,27 @@ test("the sheet past the text is the pane at least, and room past the text's las
   const below = g.cell_centre(20, 30);
   assert.deepEqual({ ...cellUnder(g, below.x, below.y, box) }, { row: 20, col: 30 });
   assert.equal(cellUnder(g, small.width + 1, 5, box), null);
+  // A drag that reached a cell past that has the room taken past it, so
+  // the sheet grows ahead of the drag.
+  const far = g.cell_rect(40, 50, 40, 50, true, false);
+  const reached = { width: far.x + far.width, height: far.y + far.height };
+  const grown = sheetExtent(g.size(), cell, { width: 10, height: 10 }, reached);
+  assert.ok(Math.abs(grown.width - (reached.width + ROOM_COLUMNS * cell.width)) < 1e-6);
+  assert.ok(Math.abs(grown.height - (reached.height + ROOM_ROWS * cell.height)) < 1e-6);
+  assert.deepEqual(sheetExtent(g.size(), cell, { width: 10, height: 10 }, { width: 1, height: 1 }), small, "a reach inside the text adds nothing");
+});
+
+test("a drag held in an edge's band scrolls towards that edge, faster nearer it", () => {
+  const shown = { left: 100, right: 700, top: 0, bottom: 500 };
+  assert.deepEqual(edgeScrollStep({ x: 400, y: 250 }, shown), { dx: 0, dy: 0 }, "the middle is still");
+  assert.deepEqual(edgeScrollStep({ x: 400, y: 500 - EDGE_PX }, shown), { dx: 0, dy: 0 }, "the band's inner edge is still");
+  const near = edgeScrollStep({ x: 400, y: 495 }, shown).dy;
+  const nearer = edgeScrollStep({ x: 400, y: 499 }, shown).dy;
+  assert.ok(near > 0 && nearer > near, `${near} then ${nearer}`);
+  assert.equal(edgeScrollStep({ x: 400, y: 900 }, shown).dy, EDGE_STEP_PX, "past the edge, at the most");
+  assert.ok(edgeScrollStep({ x: 105, y: 250 }, shown).dx < 0, "the left band scrolls back");
+  const corner = edgeScrollStep({ x: 690, y: 10 }, shown);
+  assert.ok(corner.dx > 0 && corner.dy < 0, "a corner scrolls both ways");
 });
 
 test("on an empty sheet, a Box tool drag outside the one-cell <svg> places a definition", () => {

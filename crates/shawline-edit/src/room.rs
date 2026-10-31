@@ -130,6 +130,16 @@ fn candidates(canon: &Doc, diagram: &Diagram, edit: &Edit, at: Pos) -> Vec<Vec<I
         if taller > 0 {
             out.push(vec![Insertion { axis: Axis::Row, at: below, count: taller }]);
         }
+        // A call wider and taller than what it replaces needs both, and
+        // clear sheet round it.
+        if matches!(edit, Edit::Extract { .. }) && wider > 0 && taller > 0 {
+            for more in 0..=2 {
+                out.push(vec![
+                    Insertion { axis: Axis::Column, at: right, count: (wider + more).min(MAX_COUNT) },
+                    Insertion { axis: Axis::Row, at: below, count: (taller + more).min(MAX_COUNT) },
+                ]);
+            }
+        }
     }
     let moved = match *edit {
         Edit::Move { corner, dr, dc } => diagram

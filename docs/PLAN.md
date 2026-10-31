@@ -1196,6 +1196,26 @@ Five read-only audits (interaction mechanics, product legibility, conceptual int
   - a constant that grows leftwards can end up against a border (`│21`). That is canonical, but tight.
 - **Still to do:** the user's by-hand pass of the same four items.
 
+**Before the user's pass: three found faults fixed** ✅. The user chose to fix the faults that lie in the path of the four by-hand checks first. The router's tight wires stay, since changing them would rewrite many corpus files.
+- **A drag reaches past the pane** (wave 2's gate: blank sheet only 8 rows past the text, and a drag that doesn't scroll):
+  - a drag held in the 40 px band along an edge of the pane on show scrolls it, up to 20 px a frame and faster nearer the edge: the page down and up, and the pane across (`view.js`'s `edgeScrollStep`);
+  - the sheet's room is taken past the farthest cell a drag has reached as well as past the text (`sheetExtent`'s `reach`), so it grows ahead of the drag;
+  - as the pane scrolls under a still pointer, by the edge or the wheel, the drag's last move is replayed, so the Box tool's rectangle, a marquee, a wire's path and a moved box's ghost follow the sheet.
+- **The refusal tip no longer covers Make room** (wave 1's gate): when Make room is offered, the reason goes below its button rather than over it, and the button stays by the refused cell.
+- **Extracting an inline node or a constant** (wave 3's gate: usually refused `NoRoom`). Of the 66 constants and inline nodes in the valid corpus programs, 3 extracted before, and 20 more with Make room. Now 25 do, and the other 41 with Make room:
+  - a lone inline node or constant first gives way to its call in its own row. The call is drawn over it, with its ports on that row, the inline node's arrowhead becoming the call's input and the output wire running on from its tee. That is the only way past an inline node it feeds, whose arrowhead can't lose its wire (`disconnect` refuses it, and formatting joins a bare one to whatever is left of it on the row);
+  - otherwise the call goes in the pick's corner when it fits, as before, and then in the nearest clear spot of the pick's scope, at most 12 tried, nearest first to where its first port would be on the pick's top row;
+  - clearing a pick erases its outputs' wires before cutting its inputs, since an inline node with its input cut is a stray word, whose wire can't be found;
+  - Make room is told of the call in the row, with its output wire's first cell in the span, so its columns go inside that wire and stretch it. For an extract it also tries the columns and rows together, the call being both wider and taller than its pick.
+- **Checks:**
+  - 415 workspace tests: new unit tests for the call in the row, the nearest clear spot, and every constant and inline node of `02-arith`, `04-abs`, `05-inline` and `11-even-odd` extracted at most after Make room, keeping its codes and output;
+  - clippy is clean on host and wasm, and 113 Node checks pass with none skipped;
+  - no corpus file changed: `.studio`'s `extract` section picks node boxes only.
+- **By hand, in the browser pane at 1024×768:**
+  - with the Box tool, a drag held at the window's foot drew a definition 33 rows tall. The page scrolled 18 px a frame, and the sheet grew ahead of the drag. A marquee held at the pane's right edge scrolled it across. The pane was hidden, so the browser ran no animation frames, and they were stepped by hand;
+  - dragging `03-double`'s 𐑐 node 9 columns right put the Make room button at 460–488 px and the reason below it from 490 px;
+  - in `05-inline`, Make definition on 𐑖 was refused for room, Make room offered "Insert 1 column", and one click made `·𐑯𐑿` with its call in the chain's row. It prints 40, as `05-inline.out` does. No console errors.
+
 **Then Phase 3**, the toy layer, with step-through runs.
 
 ## Risks

@@ -203,6 +203,58 @@ fn make_room_widens_the_sheet_for_a_wider_call() {
     assert_eq!(outputs(&roomed.edited.doc), outputs(&doc), "{}", roomed.edited.doc.text());
 }
 
+#[test]
+fn an_inline_node_gives_way_to_its_call_in_its_row() {
+    // 𐑖 feeds 𐑠's arrowhead, which can't be left without its wire, so the
+    // call is drawn over 𐑖, ports on its row, once Make room has stretched
+    // the output wire for it.
+    let doc = Doc::new(corpus("05-inline"));
+    let edit = Edit::Extract { picks: vec![p(4, 28)], name: "𐑐𐑸𐑑".to_owned() };
+    assert_eq!(apply(&doc, &edit).unwrap_err().kind, RefusalKind::Blocked(crate::Blockage::NoRoom));
+    let edited = ok(make_room(&doc, &edit).map(|r| r.edited));
+    let text = edited.doc.text();
+    assert_eq!(line(&edited, 3), "│                         ┌─────┐                   │", "{text}");
+    assert_eq!(line(&edited, 4), "│ 5 ──▶ 𐑛𐑳𐑚𐑩𐑤 ──▶ 𐑛𐑳𐑚𐑩𐑤 ──▶ 𐑐𐑸𐑑 ├─▶ 𐑠 ──▶ 𐑛𐑳𐑚𐑩𐑤 ────▶ 𐑬", "{text}");
+    assert_eq!(codes(&edited.doc), [], "{text}");
+    assert_eq!(outputs(&edited.doc), outputs(&doc), "{text}");
+    // A constant feeding an inline node goes the same way.
+    let edit = Edit::Extract { picks: vec![p(4, 2)], name: "𐑐𐑸𐑑".to_owned() };
+    let edited = ok(make_room(&doc, &edit).map(|r| r.edited));
+    assert!(line(&edited, 4).starts_with("│ │ 𐑐𐑸𐑑 ├─▶ 𐑛𐑳𐑚𐑩𐑤 ──▶"), "{}", edited.doc.text());
+    assert_eq!(outputs(&edited.doc), outputs(&doc));
+}
+
+#[test]
+fn a_call_with_no_room_at_its_pick_goes_to_the_nearest_clear_spot() {
+    // 04-abs's 0 sits against the 𐑤 node it feeds, so its call can't take
+    // its corner; there is clear sheet in the definition to put it in.
+    let doc = Doc::new(corpus("04-abs"));
+    let extracted = extract(&doc, &[p(6, 11)], "𐑐𐑸𐑑").unwrap();
+    assert_ne!(extracted.call, p(6, 11));
+    let edited = ok(Ok(extracted.edited));
+    assert_eq!(codes(&edited.doc), [], "{}", edited.doc.text());
+    assert_eq!(outputs(&edited.doc), outputs(&doc), "{}", edited.doc.text());
+}
+
+#[test]
+fn every_inline_node_and_constant_extracts_at_most_after_make_room() {
+    for name in ["02-arith", "04-abs", "05-inline", "11-even-odd"] {
+        let doc = Doc::new(corpus(name));
+        let diagram = doc.diagram().unwrap();
+        for t in diagram.texts.iter().map(|t| t.pos) {
+            let edit = Edit::Extract { picks: vec![t], name: "𐑐𐑸𐑑".to_owned() };
+            let edited = match apply(&doc, &edit) {
+                Err(r) if r.kind == RefusalKind::Target => continue,
+                Err(_) => make_room(&doc, &edit).map(|r| r.edited).unwrap_or_else(|r| panic!("{name} {t:?}: {r:?}")),
+                Ok(edited) => edited,
+            };
+            let text = edited.doc.text();
+            assert_eq!(codes(&edited.doc), codes(&doc), "{name} {t:?}\n{text}");
+            assert_eq!(outputs(&edited.doc), outputs(&doc), "{name} {t:?}\n{text}");
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Repairs.
 

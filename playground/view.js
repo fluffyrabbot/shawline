@@ -50,12 +50,37 @@ export const ROOM_COLUMNS = 16;
  * `<svg>`'s top-left corner: the drawing (`size`, at the zoom) with
  * `ROOM_ROWS` rows and `ROOM_COLUMNS` columns of blank sheet past it, and
  * never less than `pane`, the part of the pane on show. `cell` is one
- * cell's area at the zoom, its strip included.
+ * cell's area at the zoom, its strip included. `reach`, when a drag has
+ * gone past the text, is the extent out to the farthest cell it reached,
+ * and the room is taken past that instead, so the sheet grows ahead of
+ * the drag.
  */
-export function sheetExtent(size, cell, pane) {
+export function sheetExtent(size, cell, pane, reach = null) {
+  const width = Math.max(size.width, reach?.width ?? 0);
+  const height = Math.max(size.height, reach?.height ?? 0);
   return {
-    width: Math.max(size.width + ROOM_COLUMNS * cell.width, pane.width),
-    height: Math.max(size.height + ROOM_ROWS * cell.height, pane.height),
+    width: Math.max(width + ROOM_COLUMNS * cell.width, pane.width),
+    height: Math.max(height + ROOM_ROWS * cell.height, pane.height),
+  };
+}
+
+/** The band along each edge of the pane on show, in CSS pixels, in which a held drag scrolls the pane. */
+export const EDGE_PX = 40;
+/** The most a held drag scrolls the pane in one frame, in CSS pixels, with the pointer at or past an edge. */
+export const EDGE_STEP_PX = 20;
+
+/**
+ * How far a drag held at `pointer` (client pixels) scrolls the pane in one
+ * frame, `{ dx, dy }` in CSS pixels: towards the edge of `shown` (the
+ * client rectangle of the pane on show) whose band it is in, the faster
+ * the nearer the edge, and at the most past it. Zero outside the bands.
+ */
+export function edgeScrollStep(pointer, shown) {
+  const speed = (inside) =>
+    inside < EDGE_PX ? Math.ceil(((EDGE_PX - Math.max(0, inside)) / EDGE_PX) * EDGE_STEP_PX) : 0;
+  return {
+    dx: speed(shown.right - pointer.x) - speed(pointer.x - shown.left),
+    dy: speed(shown.bottom - pointer.y) - speed(pointer.y - shown.top),
   };
 }
 
