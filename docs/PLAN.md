@@ -60,6 +60,7 @@ Grid ──► shawline-render (SVG) ◄── shawline-glyph (stroke skeletons)
 | `shawline-doc` | One revision of a sheet, each stage read once (`Doc`) | P8 (lead) | the whole crate |
 | `shawline-edit` | Studio's checked edits, repairs and descriptions | P6 → P7 → P8 → P10 | the signatures in `src/lib.rs` |
 | `shawline-wasm` | Studio's bindings: one `apply` for every edit, maps as queries, geometry | C3 → P10 | — |
+| `shawline-share` | Links: a sheet's text to a URL fragment and back (SPEC §17) | P12 | the signatures in `src/lib.rs` (P12) |
 | `shawline-corpus` | The oracle: stage registry and runner | P0 ✅ → lead | the whole crate |
 
 ### Entry points
@@ -148,28 +149,67 @@ P0 to P11 are finished, P10 included: it closed on the lead's gate record, and t
 - **Repository:** `main` only, level with `origin/main`. No other branches or worktrees.
 
 ```
-P0–P11 ✅ ─► P12 Sharing ─► P13 the toy layer
+P0–P11 ✅ ─► P12 Sharing (designed; contracts next) ─► P13 the toy layer
 ```
 
 ## Next
 
 ### P12: Sharing, how a drawing travels
 
-**Goal:** a reader draws a sheet in Studio, sends it as a link or prints it as a poster, and whoever opens the link sees the same drawing, ready to edit. The parts come from the [Shawline Studio doc](https://claude.ai/code/artifact/923d6730-3f54-4722-8a46-ea15abf1dd1f)'s Phase 3 roadmap, copied here so this plan is the one place that schedules them.
+**Goal:** a reader draws a sheet in Studio, sends it as a link or prints it as a poster, and whoever opens the link sees the same drawing, ready to edit. The parts come from the [Shawline Studio doc](https://claude.ai/code/artifact/923d6730-3f54-4722-8a46-ea15abf1dd1f)'s Phase 3 roadmap: share as a link, posters, and a remix gallery.
 
-- **Share as a link.** The sheet's text, compressed into the URL fragment. No server is needed, and pasting the text anywhere still works. Today the fragment names a corpus example (`app.js`), and both kinds of link have to keep working.
-- **Posters.** Export any sheet as a print-ready SVG or PDF in the renderer's hand, light or dark, titled with its definition names and their readings.
-- **A remix gallery.** The valid corpus programs and `examples/`, each with a one-line explanation, open with one click as starting points.
+**What exists today** (`61e9ff0`):
+- **Links name examples.** `#03-double` opens that example's slot (`app.js`: `enter` and the `hashchange` listener). The slots are the 19 corpus examples and the tour, each with a draft in browser storage (`drafts.js`). There is no blank sheet, and no way to open text that isn't an example except by pasting it over one.
+- **Studio isn't hosted.** The repository is public and has no Pages site, so any link today points at localhost.
+- **Drawings export, posters don't.** `shawline render` and `Doc.render` make a standalone SVG at 15 × 30 px per cell with a margin, readings optional. It has no title and no paper size.
+- **`examples/` isn't in Studio.** `build.sh` copies corpus programs only, so `gray-code.shaw` can't be opened there.
+- **Measured links** (raw DEFLATE, then base64url): 248 characters for the median corpus program, 454 for the largest (`09-length`), and 1,048 for `gray-code`. Unencoded, `gray-code`'s text is 31,824 characters percent-encoded.
+- **Measured posters** (A4, 15 mm margins, a title band, no readings): a cell is 10.4 mm wide for `01-hello`, 2.4 mm for `11-even-odd` and 1.2 mm for `gray-code`.
 
-**How it starts.** A design pass by the lead, in P10's shape: a decisions table, then the oracle first, then waves with disjoint crates. The design pass decides the fragment's encoding and version marker (the text round-trips byte for byte, which a Node check can test), where the poster is made (the renderer, so the CLI can make the same poster), and where each gallery entry's explanation lives.
+**Decisions.**
 
-**Gate:** the lead's usual checks, then the user's pass, which is also the first playtest of everything since P10:
+| Decision | Choice | Rationale |
+|---|---|---|
+| Hosting | GitHub Pages at `https://fluffyrabbot.github.io/shawline/`, from a `gh-pages` branch that `scripts/publish-pages` writes from a local `playground/build.sh` and pushes. No GitHub Actions. `gh-pages` holds only the published build and is never developed on (project CLAUDE.md) | Chosen by the user. Free and static, and a link lives as long as the repository does. |
+| Link format | `v1.` and then the base64url (no padding) of the raw DEFLATE of the sheet's UTF-8 bytes, byte-order mark included, at most 1 MiB decoded. SPEC §17 | Measured above: short enough to paste anywhere. Byte for byte, so the drawing arrives as the author placed it, errors included. The version lets a later format sit beside this one. The limit keeps a hostile link from inflating to gigabytes. |
+| One implementation | A new crate, `shawline-share`: `encode(&str) -> String` and `decode(&str) -> Result<String, LinkError>`, with `miniz_oxide` for DEFLATE and base64url written out. Studio reaches it through wasm, and the CLI through `shawline link <file>`, which prints the Pages URL with the fragment | One encoder for every surface, checked by one corpus stage. The browser's `CompressionStream` would be JavaScript only, and asynchronous. A reader who stays in the CLI or VS Code can share too. |
+| A link that can't be read | Opens nothing and overwrites nothing. The note names the cause and a next step: a newer version ("This link was made by a newer Studio (v2). Open it at fluffyrabbot.github.io/shawline."), a damaged payload ("This link is damaged: part of it is missing. Ask for the link again, or for the sheet's text."), or one too large | Every refusal names its rule and a next step (Decisions, Reader). |
+| Your sheets | A new kind of slot beside the examples. **New sheet** in the picker opens an empty one. An opened link becomes a sheet of its own, named by a hash of its text, so the same link opened again reopens it, edits included. The picker lists them under **Yours**, each labelled by its first definition's name and reading (`·𐑛𐑳𐑚𐑩𐑤 dubəl`), or "Untitled sheet". **Remove sheet**, with a confirmation, takes Reset's place for them. Example slots don't change | Chosen by the user. Sharing your own drawing needs a place for it that isn't an edited example. |
+| The link and the address bar | **Share** copies the link and says how long it is. The address bar keeps naming the open slot (`#03-double`, `#yours-…`), so a reload returns to it. Once a `#v1.` link has opened, the address becomes its sheet's slot | Sharing is a deliberate act, and a reload keeps the draft model it has today. An address that tracked every edit would also mean a 1,000-character address bar while drawing. |
+| Clipboard refused | The link shows in a selected field, with "Copy it from here" | Clipboard access can be refused, and the link is still the thing being shared. |
+| Poster | `shawline_render::poster(&Grid, &Poster) -> String`: an SVG whose width and height are in mm, for A4, A3 or Letter, in whichever orientation gives the larger cell. 15 mm margins. A title band at the top holds each definition's name drawn by the glyph pen with its reading beneath, and a colophon at the foot says "drawn in Shawline". The drawing is scaled to fit, at most 8 mm per cell width, in the given theme, with readings or without | Chosen by the user. The glyph pen keeps the poster font-free and in the renderer's hand. The cap keeps `01-hello` from turning into a billboard. |
+| The poster's title | The caller passes the words: `Doc::definition_names()` (lead, `shawline-doc`) in sheet order, each read by `shawline_word::reading` | The renderer stays independent of syntax, as it is today. |
+| PDF | No PDF library. Studio's **Print** opens the poster alone with a matching `@page` size, and the browser's dialog saves a PDF. The CLI writes SVG only | Chosen by the user with the paper page. An SVG sized in mm prints exactly. |
+| Too small to read | Below 2 mm per cell, the Poster dialog says the letters will be hard to read and suggests A3. It still exports | `gray-code` comes out at 1.2 mm on A4. |
+| Gallery | **Gallery** opens a grid of cards. Each shows its drawing, rendered when the gallery opens in the current theme and Readings setting, its label, and one line on what it does. One click opens it as the picker would. The picker stays | Chosen by the user. |
+| Gallery content | `playground/gallery.json`, in teaching order: each valid corpus program by number, then `examples/`, as `{ "sheet": "03-double", "line": "…" }`. The lead writes the lines. `build.sh` copies `examples/*.shaw` beside the corpus programs | The corpus is lead-owned, and a comment row in a corpus sheet would move every position in every stage. The lines are reader-facing writing, which is the lead's. |
+| Words | SPEC §16 gains **link**, **poster**, **gallery** and **your sheets** | One word per concept on every surface. |
+
+**The oracle, written first by the lead:**
+- SPEC §17, the link format, and the §16 words (landed with this design);
+- `shawline-share` with its signatures, `LinkError` and doc comments, and its bodies left `todo!()`;
+- `corpus/links/`: fixed links for `01-hello`, `09-length`, `11-even-odd` and `gray-code`, encoded independently of `shawline-share` (Python's `zlib`). A corpus stage `link` checks that each decodes to its sheet byte for byte, and that every valid program and every `examples/` sheet survives `decode(encode(text))`. A link made today must open in every later version;
+- `shawline-render/src/poster.rs` with `Poster`, `Paper` and the signature of `poster`. A `poster.svg` stage for `01-hello` and `11-even-odd`, whose files start empty and are blessed at the wave 1 gate, after the user has looked at them (Principle 6);
+- `Doc::definition_names()`;
+- `playground/gallery.json`, with every line written.
+
+**Wave 1: the pieces** (three agents at once):
+- **S** owns `shawline-share`: the codec, its errors and their messages, and unit tests for damaged, truncated, oversized and unknown-version links. Oracle: `cargo test -p shawline-share` and stage `link`.
+- **R** owns `shawline-render`: `poster`. Unit tests check page sizes, orientation, the cell cap, and that the title band, the drawing and the colophon don't overlap. `resvg` previews of the two corpus posters, light and dark, go into the report for the gate.
+- **W1** owns `shawline-wasm` and `playground/`: your sheets (New sheet, the Yours group, labels, Remove sheet, storage in `drafts.js`), the gallery from `gallery.json`, and `examples/` in `build.sh`. Node checks: every gallery entry opens, your sheets survive a reload, and removing one leaves the examples' drafts alone.
+
+**Wave 1 gate** (lead): merge; `shawline link` and `shawline poster [--dark] [--plain] [--paper a4|a3|letter]` in the CLI; the user looks at the two posters before `poster.svg` is blessed; `scripts/publish-pages` written and dry-run into a scratch directory.
+
+**Wave 2: Studio shares** (one agent):
+- **W2** owns `shawline-wasm` and `playground/`: wasm exports for `encode`, `decode`, `poster` and `definition_names`; Share and its clipboard fallback; opening a `#v1.` link into your sheets, with the three refusals; the Poster dialog (paper, the too-small warning, Download SVG and Print). Node checks: every `corpus/links/` fixture opens as a sheet of yours, and the same link twice gives one sheet.
+
+**Gate** (P12's): workspace tests and clippy on host and wasm, the Node checks, and Studio at 320 px and 1,024 px for every new control. Then the lead publishes to Pages, opens the live Studio in the browser pane, and opens there a link made by the local CLI. Then the user's pass, which is also the first playtest of everything since P10:
 1. build `03-double` with the keyboard alone, and it runs 42;
 2. repair each of the 18 codes in the repair table, twelve in one click and six through "Fix…";
 3. extract a node and its constant from `11-even-odd`'s default arm, and the output stays 0 and 1;
 4. draw a definition with the Box tool;
 5. in VS Code, point at `{ } Shawline` in the status bar and read the server's state, then apply the quick fix on `unused-input.shaw`'s warning, and the warning goes;
-6. share a drawing of your own as a link, open it in a fresh window, and print it as a poster.
+6. draw a sheet of your own, share it as a link, open the link in another browser, and print it as a poster.
 
 Faults found in 1 to 5 are fixed in P12 if they're small, and otherwise go to the backlog with their steps.
 
@@ -207,8 +247,9 @@ Not scheduled. Each was found or set aside at a gate. HISTORY.md has the context
 | Editor line spacing leaves gaps in box drawing | The font has no line gap, with ascender + descender equal to the cell height; the docs recommend line-height 1.0. The SVG renderer is unaffected. |
 | Terminals and editors fall back to other fonts for Shavian, breaking the grid | The closed repertoire means Shawline Mono covers everything; setup docs say to set it for `.shaw` files. |
 | ASCII joints (`+ . '`) join an unrelated neighbouring stroke | SPEC §3: keep ASCII joints one cell from strokes they shouldn't meet. Canonical glyphs can't mis-join, and the formatter converts sketches to canonical form. |
-| A large sheet makes a link too long for some places it's pasted | The text is compressed, and pasting the text itself always works. P12's design pass measures the corpus's largest sheet. |
-| An old share link stops opening after the text format changes | The fragment carries a version marker, and a link Studio can't read still shows its text. |
+| A large sheet makes a link too long for some places it's pasted | Measured: 1,048 characters for `gray-code`, the largest sheet there is. Share says each link's length, and pasting the text itself always works. |
+| An old link stops opening | The fragment carries its version, a new version is added beside `v1` and never replaces it (SPEC §17), and the `link` stage's fixed links must keep decoding. |
+| A published Studio goes stale behind `main` | `scripts/publish-pages` is run at each gate that changes Studio, and the gate's smoke test opens the live site. |
 | `write-fonts` API churn | Pin the version. Fallback: emit a UFO and build it with `fontmake`. |
 | Glosses crowd the drawing | Readings in glyphs half a cell wide are usually narrower than their word. A gloss that doesn't fit is dropped rather than squeezed in (P9), and the layer turns off with one switch. |
 | No suitably licensed English → Shavian lexicon | v1 transliteration needs no dictionary (SPEC §13). |

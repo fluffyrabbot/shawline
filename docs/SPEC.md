@@ -1,6 +1,6 @@
 # Shawline language specification
 
-Status: **v1, frozen at Gate P1.** Changes since go through the lead only (see [PLAN.md](PLAN.md)), and each is recorded with its phase in [HISTORY.md](HISTORY.md). The contracts that implement it are `shawline-shape/src/wire.rs`, `shawline-syntax/src/ast.rs`, `shawline-ir/src/ir.rs` and `shawline-vm/src/bytecode.rs`.
+Status: **v1, frozen at Gate P1.** Changes since go through the lead only (see [PLAN.md](PLAN.md)), and each is recorded with its phase in [HISTORY.md](HISTORY.md). The contracts that implement it are `shawline-shape/src/wire.rs`, `shawline-syntax/src/ast.rs`, `shawline-ir/src/ir.rs` and `shawline-vm/src/bytecode.rs`, and for links (§17, P12) `shawline-share/src/lib.rs`.
 
 Shawline is a dataflow language whose source is a drawing. Definitions are rounded boxes, calls are square boxes, values travel along wires, and every name is written in the Shavian alphabet.
 
@@ -437,6 +437,10 @@ Every surface (Studio, the CLI, the language server and the VS Code extension) u
 | What types a word | **keys** | spelling, code, ASCII | keys (§13) |
 | A rounded box, a square box | **definition**, **node** | function, block, call box | definition (§5), node (§6) |
 | One file | **sheet** | program, file, page | sheet (§5) |
+| A sheet the reader made in Studio or opened from a link, as against an example | **your sheets**, listed under **Yours** | my files, documents, projects | — |
+| An address that carries a whole sheet's text (§17) | **link** | share URL, permalink, code | link (§17) |
+| A sheet drawn on a paper page with its definitions' names as the title | **poster** | print, export, image | — |
+| Studio's grid of example sheets to open and change | **gallery** | showcase, templates, samples | — |
 
 | Part of a switch | Word | Not | What it is |
 |---|---|---|---|
@@ -446,3 +450,15 @@ Every surface (Studio, the CLI, the language server and the VS Code extension) u
 | Where the same-ordinal right through-ports of every arm join outside the switch | **merged output** | switch output, join, merge | One source to every wire leaving it, however many arms feed it (§7, §8) |
 
 `tee` stays the name of the stroke shape (§3). A surface says source when it means the place a wire starts, whatever stroke draws it.
+
+## 17. Links
+
+A link carries a sheet's whole text in a URL's fragment, so opening one needs no server, and the drawing arrives exactly as it was drawn.
+
+The fragment is `v1.` followed by the base64url encoding (RFC 4648 §5, without `=` padding) of the raw DEFLATE stream (RFC 1951, with no zlib or gzip wrapper) of the sheet's UTF-8 bytes, byte-order mark and line endings included. Decoding reverses each step and gives back the same bytes. Nothing is formatted or checked on the way, so a sheet with errors travels too, and opens with them.
+
+A decoded text is at most 1 MiB (1,048,576 bytes). A reader stops inflating there rather than after.
+
+`v1` is the format's version. A reader that meets a version it doesn't know, a payload that isn't valid base64url or DEFLATE, a text over the limit, or bytes that aren't UTF-8, opens nothing and says which. A later version is added beside `v1` and never replaces it, so a link made today keeps opening.
+
+A fragment that names an example, such as `#03-double`, isn't a link in this sense. Studio opens that example.
