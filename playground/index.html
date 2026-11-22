@@ -93,17 +93,20 @@
         <button type="button" id="box-tool" class="quiet" aria-pressed="false"
           title="Box tool: drag on blank sheet to draw a box, a definition at top level or a switch inside one, and click a box's border to add a port. B draws a box from the cursor.">Box</button>
         <button type="button" id="help" class="quiet" aria-label="Keys" title="Every key the drawing takes (?)">?</button>
-        <span id="trace-status" class="meta trace-status" role="status"></span>
-        <label class="switch" title="Show the value each wire carried during the first call of its definition">
-          <input type="checkbox" id="values" checked>
-          <span class="track" aria-hidden="true"></span>
-          <span class="label">Values</span>
-        </label>
+        <div id="run-state" class="run-state">
+          <span id="trace-status" class="meta trace-status" role="status"></span>
+          <label class="switch" title="Show the value each wire carried during the first call of its definition">
+            <input type="checkbox" id="values" checked>
+            <span class="track" aria-hidden="true"></span>
+            <span class="label">Values</span>
+          </label>
+        </div>
       </div>
       <div id="drawing" tabindex="0" role="application" aria-roledescription="drawing" aria-label="Drawing"
         aria-describedby="drawing-status"
         title="Drag from a source to wire it, drag an arrowhead off to unwire it, drag a node or a definition's border to move it, double-click (or long-press) space for a node or a wire to splice one in. Drag on blank sheet or Shift-click to select several, then Make definition. The Box tool draws boxes and ports. Press ? for the keys."></div>
       <p id="drawing-status" class="drawing-status" role="status"></p>
+      <div id="run-foot" class="pane-foot"></div>
       <p id="drawing-live" class="visually-hidden" aria-live="polite"></p>
       <div id="keys-help" class="keys-help" role="dialog" aria-label="Keys in the drawing" hidden></div>
       <aside id="inspector" class="inspector" aria-label="Inspector"></aside>

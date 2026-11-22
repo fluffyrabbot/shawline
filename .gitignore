@@ -1,3 +1,4 @@
 /target
 /.claude/worktrees
 /review
+.DS_Store

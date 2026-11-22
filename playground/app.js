@@ -33,6 +33,9 @@ const examples = $("examples");
 const values = $("values");
 const traceState = $("trace-status");
 const statusLine = $("drawing-status");
+const runState = $("run-state");
+const drawingHead = runState.parentElement;
+const runFoot = $("run-foot");
 const resetButton = $("reset");
 const tour = new Tour($("tour"), () => showOverlays(), (text) => layer.message(text));
 const RUN_LIMIT_MS = 10_000;
@@ -1952,13 +1955,29 @@ function showTraced({ failed, error, stopped }) {
 function showTrace(state, detail = "", at = null) {
   const title = [FIRST_CALL, detail].filter(Boolean).join(" ");
   layer.say(traceState, title, { title: true });
-  if (!at) return void traceState.replaceChildren(state);
-  // One-based, like the diagnostics.
-  const jump = el("button", "link", `runtime error ${at.row + 1}:${at.col + 1}`);
-  jump.type = "button";
-  layer.say(jump, `${title} Click to show where it failed.`, { title: true });
-  jump.addEventListener("click", () => jumpTo(at));
-  traceState.replaceChildren(jump);
+  if (at) {
+    // One-based, like the diagnostics.
+    const jump = el("button", "link", `runtime error ${at.row + 1}:${at.col + 1}`);
+    jump.type = "button";
+    layer.say(jump, `${title} Click to show where it failed.`, { title: true });
+    jump.addEventListener("click", () => jumpTo(at));
+    traceState.replaceChildren(jump);
+  } else {
+    traceState.replaceChildren(state);
+  }
+  placeRunState();
+}
+
+/** Puts the trace status and the Values switch in the drawing pane's head
+ *  while it has room for them, and under the drawing when it hasn't, so no
+ *  control lies past the pane's edge. The head keeps one row, level with the
+ *  text pane's. */
+function placeRunState() {
+  // Moving a node drops its focus, so a switch being used stays put.
+  if (runState.contains(document.activeElement)) return;
+  const inHead = runState.parentElement === drawingHead;
+  if (!inHead) drawingHead.append(runState);
+  if (drawingHead.scrollWidth > drawingHead.clientWidth) runFoot.append(runState);
 }
 
 const untraceable = () => !values.checked || shown.some((d) => d.severity === "error");
@@ -2388,6 +2407,10 @@ async function main() {
   );
   translit.checked = store.get("translit") !== "false";
   values.checked = store.get("values") !== "false";
+  // The head's width follows the window's; the run state doesn't change it.
+  new ResizeObserver(placeRunState).observe(drawingHead);
+  // A placement skipped while the switch had focus happens when focus leaves.
+  runState.addEventListener("focusout", () => setTimeout(placeRunState));
   runner.warm();
 
   let names = [];
