@@ -729,7 +729,7 @@ Five read-only audits (interaction mechanics, product legibility, conceptual int
   - SPEC lists the four changed letters in a table of their own, not in a mostly empty column of the key table;
   - the key panel needed each letter's name in code, so `shawline_word::letter_name` exists, and wasm's `table()` returns `[keys, letter, name]`.
 
-### P10: Studio Phase 2, forgiving
+### P10: Studio Phase 2, forgiving ✅
 
 **Goal.** Studio forgives. When there's no room, the editor can make room. Every corpus program can be built from an empty sheet with the mouse or the keyboard alone. Every diagnostic with a known fix offers that fix in one click.
 - This makes P7's gate honest: constants and switches are still typed today.
@@ -1083,6 +1083,8 @@ Five read-only audits (interaction mechanics, product legibility, conceptual int
   - dragging `03-double`'s 𐑐 node 9 columns right put the Make room button at 460–488 px and the reason below it from 490 px;
   - in `05-inline`, Make definition on 𐑖 was refused for room, Make room offered "Insert 1 column", and one click made `·𐑯𐑿` with its call in the chain's row. It prints 40, as `05-inline.out` does. No console errors.
 
+**Closed** (2026-11-22, by the user's choice): P10 closes on the lead's wave 3 gate record, which ran the same four by-hand checks. The user's own pass, with the VS Code check P11 left, moved to P12's gate as its first playtest (PLAN.md), so it no longer holds the next phase back.
+
 **After P10: `𐑗` chop and `𐑡` join** ✅. The first new mirror pair since v1 (SPEC §9). `𐑗` turns a text into the list of its one-letter texts, and `𐑡` joins a list of texts into one. Every text made while running counts one per letter toward `R008`, and both primitives check the limit before they allocate, so a loop that doubles a text stops instead of exhausting memory. `16-chop-join` is their corpus case. `examples/gray-code.shaw`, the first sheet outside the corpus, builds the reflected binary Gray code and spells each code as one word with `𐑡`.
 
 **After P10: fan-out near the source** ✅. `build` couldn't rebuild a branch that carries inline nodes when the source's wire already ran on past it (`16-chop-join`'s first drawing, `17-inline-fanout`). The router teed a new branch off next to the sink, which left it no straight run for the nodes.
@@ -1127,7 +1129,7 @@ Five read-only audits (interaction mechanics, product legibility, conceptual int
   - none of the 20 examples made the page wider than 320 px, with Reset shown or hidden;
 - at 1024 px, a mouse double-click opened the same palette.
 
-**In VS Code** (1.139, after the gate, with the user's go-ahead): `shawline-lsp` was installed with `cargo install` and the `.vsix` with `code --install-extension`. Two sheets copied to the git-ignored `review/vscode-check` were opened there, and the user agreed to trust that folder, since in Restricted Mode VS Code turns the extension off (Backlog).
+**In VS Code** (1.139, after the gate, with the user's go-ahead): `shawline-lsp` was installed with `cargo install` and the `.vsix` with `code --install-extension`. Two sheets copied to the git-ignored `review/vscode-check` were opened there, and the user agreed to trust that folder, since in Restricted Mode VS Code turned the extension off (fixed after P11, below).
 - semantic colouring came on, so the server was running;
 - `unused-input.shaw` showed one warning, whose message carries its reading ("the second input of ·𐑒𐑰𐑐 (keep), 𐑚 (b), is unused"), and its row in Problems offered fixes. The fix menu is a native pop-up, which background control closes at once, so it wasn't read or applied there;
 - the status item and the hover open on hover, which click-only control can't do. The installed binary was driven over stdio instead, with the requests VS Code sends: the hover on `·𐑛𐑳𐑚𐑩𐑤` gives its arity, ports, `Reading: dubəl · Type: =dub@l`; the quick fix is "Remove the unused input 𐑚", preferred; and `shutdown` then `exit` ends the server with status 0.
@@ -1136,7 +1138,7 @@ Five read-only audits (interaction mechanics, product legibility, conceptual int
 - the status item's text, and applying the quick fix in the editor (left to the user's pass);
 - a real finger on a real device. Synthetic touch events can't reach the browser's own gestures, such as the callout `-webkit-touch-callout` suppresses.
 
-**Found, not fixed:** at 1024 px the drawing pane's head needs about 580 px in a 440 px pane, so the Values switch lies past the window's right edge on every example. This was already true before P11. Wrapping that head would put the two panes out of line, so it waits for a layout decision (Backlog).
+**Found, not fixed:** at 1024 px the drawing pane's head needs about 580 px in a 440 px pane, so the Values switch lies past the window's right edge on every example. This was already true before P11. Wrapping that head would put the two panes out of line, so it waits for a layout decision. Fixed in the consolidation after P11, below.
 
 **After P11: the extension in untrusted folders** ✅. VS Code turned the whole extension off in a folder the user hadn't trusted, because `package.json` declared no `untrustedWorkspaces` capability, so a downloaded sheet opened as Plain Text with no hint why.
 - **Decisions:**
@@ -1145,3 +1147,26 @@ Five read-only audits (interaction mechanics, product legibility, conceptual int
   - relative `PATH` entries are skipped everywhere, since they would be looked up from wherever the editor started;
   - granting trust restarts the server, so the folder's own settings then apply.
 - **Checks:** the extension's `tsc` build is green, and the `.vsix` was rebuilt and reinstalled. In VS Code, a copy of `static/12-unused-input` in a new, untrusted `/tmp` folder opened as Shawline in Restricted Mode, with the server's colouring and its one warning. The relative-path refusal wasn't exercised, since that would mean changing the user's own VS Code settings.
+
+### Consolidation after P11 (lead) ✅
+
+**Goal.** One direction and no loose threads before the next phase, three weeks after P11 (2026-11-22, on `2c684da`).
+
+| Decision | Choice | Rationale |
+|---|---|---|
+| P10's by-hand pass | Close P10 on the lead's wave 3 gate record. The user's pass becomes the first playtest at P12's gate | Chosen by the user. The lead ran the same four checks at the gate, and the pass had held P12 back since 2026-10-31. |
+| What comes next | P12 is sharing: a share link holding the sheet's own text, posters and a remix gallery. P13 is the toy: challenges, mirror unlocks and step-through runs. Sound goes to the backlog | Chosen by the user. A share link could only name a corpus example, so nobody could send a drawing of their own, and how a drawing travels is a feature for this reader (PLAN.md, Decisions). Sharing needs no new oracle format, while challenges need a design pass. |
+| The drawing pane's head with no room | The trace status and the Values switch move under the drawing whenever the head overflows, and back when it has room | Chosen by the user, after a measurement showed the first choice, hiding the hint line, would save nothing: the hint already shrank to 0 px. Both controls describe the last run, and the head keeps one row level with the text pane's. |
+| Leftover branches | The 12 `claude/*` branches and their one worktree are deleted | Chosen by the user. Eleven were merged; the twelfth (`angry-murdock`, batch 6) had landed in another form as `4dbaa61` and `a9b22ec`. |
+
+**Landed** (`db04614`, then this record and PLAN.md's new direction):
+- **The run state:** the measured range was 901 to about 1,315 px wide, not 900 to 1,150 as recorded: the head needs 581 px and had 440 at 1,024 px and 557 at 1,280 px. A `ResizeObserver` on the head, and each new trace state, re-place the run state. A switch with focus isn't moved, since moving a node drops its focus; the placement happens when focus leaves. At 900 px and below the head wraps as before, and the run state stays in it.
+- `.DS_Store` is ignored.
+- PLAN.md's mechanics name `codex-call` for delegating a brief to Codex, in place of two skills that no longer exist, and the lead now deletes each landed agent's branch and worktree after its gate.
+
+**Checks:**
+- 422 workspace tests pass with none ignored, and clippy is clean on host;
+- the playground builds (869,148-byte wasm) and passes its 113 Node checks;
+- in the browser pane: at 1,024, 1,280 and 1,440 px the head doesn't overflow and stays level with the text pane's, with the run state under the drawing at the first two and in the head at the third, and it moves both ways on resizing. At 320 px the page stays 320 px wide. Values still toggles its badges from under the drawing. No console errors.
+
+**Not checked:** the move on focus leaving was checked by dispatching `focusout`, since the browser pane's page never has window focus (`document.hasFocus()` is false), so the browser sends it no focus events.
