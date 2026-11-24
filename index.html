@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Shawline Studio</title>
+  <meta name="description" content="A dataflow programming language you draw.">
+  <link rel="preload" href="ShawlineMono.ttf" as="font" type="font/ttf" crossorigin>
+  <link rel="stylesheet" href="style.css">
+  <script>
+    // Set the theme before first paint so the page never flashes. Reading
+    // storage throws where it is disabled.
+    {
+      let theme = null;
+      try { theme = localStorage.getItem("shawline.theme"); } catch {}
+      document.documentElement.dataset.theme =
+        theme ?? (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+    }
+  </script>
+  <script type="module" src="app.js"></script>
+</head>
+<body>
+  <header>
+    <div class="title">
+      <h1>Shawline</h1>
+      <span class="shavian" lang="en-Shaw" aria-hidden="true" data-plain="·𐑖𐑷𐑤𐑲𐑯">·𐑖𐑷𐑤𐑲𐑯</span>
+      <p>A dataflow language you draw.</p>
+    </div>
+    <nav class="controls" aria-label="Studio settings">
+      <div class="example">
+        <label class="picker">
+          <span class="label">Example</span>
+          <select id="examples"></select>
+        </label>
+        <button type="button" id="reset" class="quiet" hidden
+          title="Your edits to each example are kept as a draft. Reset loads this one’s original; undo brings your edits back.">Reset</button>
+      </div>
+      <label class="switch" title="Type a word’s keys and get Shavian: t h → 𐑔"
+        data-plain-title="Type a word’s keys and get Shavian: t h → 𐑔">
+        <input type="checkbox" id="translit" checked>
+        <span class="track" aria-hidden="true"></span>
+        <span class="label">Transliterate</span>
+      </label>
+      <label class="switch"
+        title="Show each word’s reading, how it sounds, under its row and in messages. Hover a word for the keys that type it. Hold Alt by itself to flip the readings for a moment.">
+        <input type="checkbox" id="readings" checked>
+        <span class="track" aria-hidden="true"></span>
+        <span class="label">Readings</span>
+      </label>
+      <button type="button" id="tour-start" class="quiet" title="Why the alphabet is Shavian and how to read the sheet, then six moves that show the drawing is an editor">Tour</button>
+      <button type="button" id="theme" class="quiet" aria-label="Switch theme">
+        <span class="when-light">Dark</span><span class="when-dark">Light</span>
+      </button>
+    </nav>
+  </header>
+
+  <aside id="tour" class="tour" hidden aria-label="Guided tour">
+    <span class="tour-count meta"></span>
+    <p class="tour-text" aria-live="polite"></p>
+    <button type="button" class="tour-next quiet"></button>
+    <button type="button" class="tour-close quiet" aria-label="End the tour">×</button>
+  </aside>
+
+  <main>
+    <section class="pane source" aria-labelledby="source-label">
+      <div class="pane-head">
+        <h2 id="source-label">Text</h2>
+        <span id="cursor" class="meta" aria-live="off">1:1</span>
+        <span class="spacer"></span>
+        <span id="note" class="meta" role="status"></span>
+        <button type="button" id="format" class="quiet" title="Redraw in canonical form">Format</button>
+        <button type="button" id="run" class="primary" title="Run ·𐑥𐑱𐑯, the main definition (Ctrl+Enter)"
+          data-plain-title="Run ·𐑥𐑱𐑯, the main definition (Ctrl+Enter)">Run</button>
+      </div>
+      <div class="editor">
+        <div id="marks" aria-hidden="true"></div>
+        <textarea id="editor" spellcheck="false" autocomplete="off" autocapitalize="off"
+          wrap="off" aria-label="Shawline text"></textarea>
+      </div>
+    </section>
+
+    <section class="pane drawing" aria-labelledby="drawing-label">
+      <div class="pane-head">
+        <h2 id="drawing-label">Drawing</h2>
+        <span class="meta hint-line">Drag from a source to wire it · ? lists the keys</span>
+        <span class="spacer"></span>
+        <div class="zoom" role="group" aria-label="Zoom">
+          <button type="button" id="zoom-out" class="quiet" aria-label="Zoom out" title="Zoom out (−)">−</button>
+          <span id="zoom-level" class="meta" aria-live="off">100%</span>
+          <button type="button" id="zoom-in" class="quiet" aria-label="Zoom in" title="Zoom in (+)">+</button>
+          <button type="button" id="zoom-fit" class="quiet" title="Fit the sheet in the pane (0)">Fit</button>
+        </div>
+        <button type="button" id="box-tool" class="quiet" aria-pressed="false"
+          title="Box tool: drag on blank sheet to draw a box, a definition at top level or a switch inside one, and click a box's border to add a port. B draws a box from the cursor.">Box</button>
+        <button type="button" id="help" class="quiet" aria-label="Keys" title="Every key the drawing takes (?)">?</button>
+        <div id="run-state" class="run-state">
+          <span id="trace-status" class="meta trace-status" role="status"></span>
+          <label class="switch" title="Show the value each wire carried during the first call of its definition">
+            <input type="checkbox" id="values" checked>
+            <span class="track" aria-hidden="true"></span>
+            <span class="label">Values</span>
+          </label>
+        </div>
+      </div>
+      <div id="drawing" tabindex="0" role="application" aria-roledescription="drawing" aria-label="Drawing"
+        aria-describedby="drawing-status"
+        title="Drag from a source to wire it, drag an arrowhead off to unwire it, drag a node or a definition's border to move it, double-click (or long-press) space for a node or a wire to splice one in. Drag on blank sheet or Shift-click to select several, then Make definition. The Box tool draws boxes and ports. Press ? for the keys."></div>
+      <p id="drawing-status" class="drawing-status" role="status"></p>
+      <div id="run-foot" class="pane-foot"></div>
+      <p id="drawing-live" class="visually-hidden" aria-live="polite"></p>
+      <div id="keys-help" class="keys-help" role="dialog" aria-label="Keys in the drawing" hidden></div>
+      <aside id="inspector" class="inspector" aria-label="Inspector"></aside>
+    </section>
+
+    <section class="pane problems" aria-labelledby="problems-label">
+      <div class="pane-head">
+        <h2 id="problems-label">Diagnostics</h2>
+        <span id="problem-count" class="meta"></span>
+      </div>
+      <ul id="problems"></ul>
+    </section>
+
+    <section class="pane output" aria-labelledby="output-label">
+      <div class="pane-head">
+        <h2 id="output-label">Output</h2>
+        <span id="output-meta" class="meta"></span>
+      </div>
+      <pre id="output" aria-live="polite"><span class="hint" data-plain="Run the program to see what ·𐑥𐑱𐑯 returns.">Run the program to see what ·𐑥𐑱𐑯 returns.</span></pre>
+    </section>
+  </main>
+
+  <footer>
+    <details>
+      <summary>Typing Shavian</summary>
+      <p>
+        With <em>Transliterate</em> on, each letter has short keys that spell its sound, and the longest
+        match wins: <kbd>t</kbd><kbd>h</kbd> is <span data-plain="𐑔">𐑔</span>. Type <kbd>/</kbd> between keys to keep them
+        apart, <kbd>=</kbd> for the namer dot, and <kbd>v</kbd> outside a word for the ▼
+        arrowhead. Readings spell the schwa <kbd>@</kbd> as ə. Each letter is listed with its keys
+        and a word it sounds in.
+      </p>
+      <ol id="keys"></ol>
+    </details>
+    <p class="colophon">
+      Rounded boxes are definitions, square boxes are nodes that call them, and wires carry values from sources to arrowheads.
+      The drawing is the program.
+    </p>
+  </footer>
+</body>
+</html>
