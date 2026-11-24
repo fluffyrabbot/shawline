@@ -2472,11 +2472,15 @@ async function main() {
   const above = new ResizeObserver(placeMain);
   for (const node of [document.querySelector("header"), $("tour")]) above.observe(node);
   // Before the first drawing there is no geometry to fit.
-  // A resized pane can hide the tour's rings, so they're brought back.
+  // A resized pane can hide the tour's rings, so they're brought back; the
+  // first report is the pane's opening size, not a resize.
+  let paneHeight = null;
   new ResizeObserver(() => {
+    const resized = paneHeight !== null && paneHeight !== drawing.clientHeight;
+    paneHeight = drawing.clientHeight;
     if (!fitted.matches || !geo) return;
     fitSheet();
-    if (ringsShown === undefined) return;
+    if (!resized || ringsShown === undefined) return;
     ringsShown = null;
     showOverlays();
   }).observe(drawing);
