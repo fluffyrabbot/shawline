@@ -516,6 +516,7 @@ button[aria-pressed="true"] { background: var(--wash); border-color: var(--wire)
 }
 #drawing svg:not(:hover) .badge { opacity: 0.92; }
 .hint-line { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.hint-line.cut { visibility: hidden; }
 .run-state { display: flex; align-items: center; gap: 14px; }
 /* Where the run state goes when the drawing pane's head has no room. */
 .pane-foot { display: flex; justify-content: flex-end; margin-top: 8px; }

@@ -257,7 +257,7 @@ impl<'a> Model<'a> {
             return Err(Refusal::new(
                 text.pos,
                 RefusalKind::Blocked(Blockage::NoRoom),
-                format!("{} needs a space after it before a wire can start; try Make room", text.content),
+                format!("{} needs a space after it before a wire can start; move what's beside it", text.content),
             ));
         }
         Ok(Source {

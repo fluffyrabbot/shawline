@@ -27,7 +27,7 @@ pub(crate) fn draw(grid: &Grid, model: &Model, source: &Source) -> Result<Doc, R
     let border = first.col;
     let region = model.region(source.scope);
     let no_room = || {
-        let why = "there's no room right of the switch to join its arms' outputs; try Make room";
+        let why = "there's no room right of the switch to join its arms' outputs; move what's right of it";
         Refusal::new(first, RefusalKind::Blocked(Blockage::NoRoom), why)
     };
     // The nearest run whose cells, and the stubs to it, are all blank.
@@ -57,7 +57,7 @@ pub(crate) fn draw(grid: &Grid, model: &Model, source: &Source) -> Result<Doc, R
         canvas.set(p, ch);
     }
     let changed = |why: &str| {
-        let why = format!("the switch's output can't be joined here: {why}; try Make room");
+        let why = format!("the switch's output can't be joined here: {why}");
         Refusal::new(first, RefusalKind::Changed, why)
     };
     let doc = tidy(Doc::new(canvas.render())).map_err(changed)?;

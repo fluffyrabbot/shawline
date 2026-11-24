@@ -191,7 +191,7 @@ pub(crate) fn set_text(doc: &Doc, at: Pos, content: &str) -> Result<Edited, Refu
     let at_row = |c: usize| Pos::new(row, c);
     let mut lines = rows(grid);
     let no_room = |what: &str| {
-        let why = format!("there's no room for {what} here; try Make room or move what's beside it");
+        let why = format!("there's no room for {what} here; move what's beside it");
         Refusal::new(at, RefusalKind::Blocked(Blockage::NoRoom), why)
     };
     let new_start = if role == Role::Constant {
@@ -296,7 +296,7 @@ fn name_port(sheets: &Sheets, at: Pos, content: &str) -> Option<Result<Edited, R
     let clear = (start - 1..=start + n).all(|col| grid.get(Pos::new(row, col)) == ' ');
     let inside = port.side == Dir::E || start + n < rect.right;
     if !clear || !inside {
-        let why = "there's no room for the port's name here; try Make room or move what's beside it";
+        let why = "there's no room for the port's name here; move what's beside it";
         return Some(Err(refuse(RefusalKind::Blocked(Blockage::NoRoom), why)));
     }
     let mut lines = rows(grid);

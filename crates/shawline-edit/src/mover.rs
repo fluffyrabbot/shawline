@@ -337,7 +337,7 @@ impl<'a> Mover<'a> {
                         let why = format!("the box is at the edge of its {what}; it can't go further this way");
                         return Err(refuse(RefusalKind::Blocked(Blockage::Edge), &why));
                     }
-                    let why = format!("the box would leave its {what}; try Make room to grow it");
+                    let why = format!("the box would leave its {what}; try a shorter move");
                     return Err(refuse(RefusalKind::Blocked(Blockage::NoRoom), &why));
                 }
                 let r = parent.rect;
@@ -351,7 +351,7 @@ impl<'a> Mover<'a> {
                     return Err(refuse(RefusalKind::Blocked(Blockage::Edge), why));
                 }
                 if new_rect.bottom > bottom {
-                    let why = "the box would cross into the next arm; try Make room to grow its arm";
+                    let why = "the box would cross into the next arm; try a shorter moves arm";
                     return Err(refuse(RefusalKind::Blocked(Blockage::NoRoom), why));
                 }
                 Rect { top, left: r.left + 1, bottom, right: r.right - 1 }
@@ -452,7 +452,7 @@ impl<'a> Mover<'a> {
                     let why = format!("the box would land on {what}; move that out of the way first");
                     return Err(refuse(RefusalKind::Blocked(Blockage::Edge), &why));
                 }
-                let why = format!("the box would land on {what}; try Make room or another spot");
+                let why = format!("the box would land on {what}; try another spot");
                 return Err(refuse(RefusalKind::Blocked(Blockage::NoRoom), &why));
             }
             footprint.insert(q);
@@ -537,14 +537,14 @@ impl<'a> Mover<'a> {
             return Err(Refusal::new(at, RefusalKind::Target, "only a box inside a definition is redrawn this way"));
         };
         if !parent.rect.encloses(&new_rect) {
-            return Err(no_room("the box would leave its definition; try Make room to grow it"));
+            return Err(no_room("the box would leave its definition; try a shorter move"));
         }
         let r = parent.rect;
         let above = parent.dividers.iter().map(|d| d.row).filter(|&d| d < rect.top).max();
         let below = parent.dividers.iter().map(|d| d.row).filter(|&d| d > rect.bottom).min();
         let (top, bottom) = (above.unwrap_or(r.top) + 1, below.unwrap_or(r.bottom) - 1);
         if new_rect.top < top || new_rect.bottom > bottom {
-            return Err(no_room("the box would cross into the next arm; try Make room to grow its arm"));
+            return Err(no_room("the box would cross into the next arm; try a shorter moves arm"));
         }
         let region = Rect { top, left: r.left + 1, bottom, right: r.right - 1 };
 
@@ -609,7 +609,7 @@ impl<'a> Mover<'a> {
         let mut footprint = HashSet::new();
         for &(q, ch) in cells {
             if work.ch(q) != ' ' {
-                return Err(no_room("the redrawn box would land on something; try Make room"));
+                return Err(no_room("the redrawn box would land on something; move what's beside it"));
             }
             footprint.insert(q);
             if ch != ' ' {
@@ -699,7 +699,7 @@ impl<'a> Mover<'a> {
                 return Err(Refusal::new(
                     corner,
                     RefusalKind::Blocked(Blockage::NoRoom),
-                    "no free path for a wire; try Make room or a shorter move",
+                    "no free path for a wire; try a shorter move",
                 ));
             };
             let reason = match (miss, &end.chain.open) {
@@ -707,11 +707,11 @@ impl<'a> Mover<'a> {
                     "the search for a path for the wire at this port gave up; try a shorter move".to_owned()
                 }
                 (Miss::NoPath, Some(open)) => format!(
-                    "no room for the wire from {}; move {} or try Make room",
+                    "no room for the wire from {}; move {}",
                     open.text, open.text
                 ),
                 (Miss::NoPath, None) => {
-                    "no free path for the wire at this port; try Make room or a shorter move"
+                    "no free path for the wire at this port; try a shorter move"
                         .to_owned()
                 }
             };

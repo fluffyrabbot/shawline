@@ -457,7 +457,7 @@ impl InRow {
                 blank(p) || model.text_at(p) == Some(self.text) || (col == left && self.inline)
             });
         if !fits {
-            let why = "the call has no room in this row; try Make room";
+            let why = "the call has no room in this row; move what's beside the selection";
             return Err(Refusal::new(at, RefusalKind::Blocked(Blockage::NoRoom), why));
         }
         let mut lines = rows(grid);

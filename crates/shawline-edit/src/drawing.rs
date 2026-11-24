@@ -235,7 +235,7 @@ fn room_for(model: &Model, rect: Rect, what: &str, at: Pos) -> Result<usize, Ref
     let refuse = |kind, why: String| Refusal::new(at, kind, why);
     let diagram = model.diagram;
     let Some(holder) = holder(diagram, rect) else {
-        let why = format!("the {what} would stick out of its definition; try Make room or a spot further in");
+        let why = format!("the {what} would stick out of its definition; try a spot further in");
         return Err(refuse(RefusalKind::Blocked(Blockage::NoRoom), why));
     };
     match model.kind(holder) {
@@ -245,7 +245,7 @@ fn room_for(model: &Model, rect: Rect, what: &str, at: Pos) -> Result<usize, Ref
         BoxKind::Definition => {}
         _ => {
             if diagram.boxes[holder].dividers.iter().any(|d| (rect.top..=rect.bottom).contains(&d.row)) {
-                let why = format!("the {what} would cross from one arm of the switch into another; try Make room");
+                let why = format!("the {what} would cross from one arm of the switch into another; try a spot inside one arm");
                 return Err(refuse(RefusalKind::Blocked(Blockage::NoRoom), why));
             }
         }
@@ -410,7 +410,7 @@ pub(crate) fn add_port(doc: &Doc, at: Pos, name: Option<&str>) -> Result<Edited,
             let clear = (start.col - 1..=start.col + n).all(|col| grid.get(Pos::new(cell.row, col)) == ' ');
             let inside = side == Dir::E || start.col + n < rect.right;
             if !clear || !inside {
-                let why = "there's no room for the port's name here; try Make room or another row";
+                let why = "there's no room for the port's name here; try another row";
                 return Err(refuse(RefusalKind::Blocked(Blockage::NoRoom), why));
             }
             write(&mut lines, start, name);
@@ -479,16 +479,16 @@ pub(crate) fn add_arm(doc: &Doc, at: Pos, guard: Option<&str>) -> Result<Edited,
     let right = Pos::new(cell.row, rect.right);
     let inside_blank = (rect.left + 1..rect.right).all(|col| grid.get(Pos::new(cell.row, col)) == ' ');
     if !inside_blank || !plain_border(grid, diagram, b, Dir::E, right) {
-        return no_room("the row isn't blank across the switch; try Make room or another row");
+        return no_room("the row isn't blank across the switch; try another row");
     }
     let above = shape.dividers.iter().map(|d| d.row).filter(|&d| d < cell.row).max().unwrap_or(rect.top);
     let below = shape.dividers.iter().map(|d| d.row).filter(|&d| d > cell.row).min().unwrap_or(rect.bottom);
     if cell.row < above + 2 || below < cell.row + 2 {
-        return no_room("each arm needs a row of its own; try Make room");
+        return no_room("each arm needs a row of its own; try a row between two arms");
     }
     let width = rect.right - rect.left + 1;
     if guard.is_some_and(|g| width < g.chars().count() + 6) {
-        return no_room("the switch is too narrow for this guard; try Make room");
+        return no_room("the switch is too narrow for this guard; widen the switch");
     }
     let mut lines = rows(grid);
     write(&mut lines, cell, &rule('├', '┄', guard, '┤', width));

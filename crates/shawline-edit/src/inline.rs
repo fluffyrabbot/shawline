@@ -44,7 +44,7 @@ pub(crate) fn place_inline(doc: &Doc, at: Pos, word: &str) -> Result<Edited, Ref
         grid.get(p) == '─' && model.links(w, p) == E | W && !diagram.wires.iter().any(|v| v.crossings.contains(&p))
     };
     let Some(stretch) = stretch.filter(|s| s.clone().all(plain)) else {
-        let why = "the straight stretch of wire here is too short for the node; try Make room or a longer stretch";
+        let why = "the straight stretch of wire here is too short for the node; try a longer stretch";
         return Err(refuse(RefusalKind::Blocked(Blockage::NoRoom), why));
     };
     let mut lines = rows(grid);

@@ -79,7 +79,7 @@ pub(crate) fn add_default_arm(doc: &Doc, corner: Pos) -> Result<Edited, Refusal>
         let stub = Sink { at: port, dir: Dir::W, scope: source.scope, free: false };
         let mut canvas = Canvas::new(g2);
         join(&mut canvas, &m2, &source, &stub).map_err(|r| {
-            let why = "the switch's output has no room for another arm's stub; try Make room";
+            let why = "the switch's output has no room for another arm's stub; move what's right of it";
             Refusal { at: corner, reason: why.to_owned(), ..r }
         })?;
         current = Doc::new(canvas.render());

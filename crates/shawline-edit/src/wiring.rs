@@ -427,7 +427,7 @@ pub(crate) fn place_node(
     // The corner is in a box, so the node reaches past a definition's
     // border.
     let Some(holder) = holder else {
-        let why = "the node would stick out of its definition; try Make room or a spot further in";
+        let why = "the node would stick out of its definition; try a spot further in";
         return Err(refuse(RefusalKind::Blocked(Blockage::NoRoom), why));
     };
     match model.kind(holder) {
@@ -437,7 +437,7 @@ pub(crate) fn place_node(
         BoxKind::Switch => {
             let dividers = &diagram.boxes[holder].dividers;
             if dividers.iter().any(|d| (rect.top..=rect.bottom).contains(&d.row)) {
-                let why = "the node would cross from one arm of the switch into another; try Make room";
+                let why = "the node would cross from one arm of the switch into another; try a spot inside one arm";
                 return Err(refuse(RefusalKind::Blocked(Blockage::NoRoom), why));
             }
         }
@@ -754,14 +754,14 @@ pub(crate) fn connect(doc: &Doc, from: Pos, to: Pos) -> Result<Doc, Refusal> {
         return connect(&merged, source.goal, sink.at).map_err(here(to));
     }
     if sink.target().is_none_or(|t| grid.get(t) != ' ') {
-        let why = "the cell before this arrowhead is taken; move what's there or try Make room";
+        let why = "the cell before this arrowhead is taken; move what's there";
         return Err(Refusal::new(to, RefusalKind::Blocked(Blockage::NoRoom), why));
     }
     let wiring = Wiring::new(&model, &source, Some(&sink));
     let found = search_from_sink(&wiring, &sink).map_err(|miss| {
         let name = &source.name;
         let why = match miss {
-            Miss::NoPath => format!("no free path for a wire from {name}; try Make room or move them closer"),
+            Miss::NoPath => format!("no free path for a wire from {name}; move them closer"),
             Miss::GaveUp => format!("the search for a wire from {name} gave up; move them closer"),
         };
         Refusal::new(to, miss.kind(), why)
@@ -847,7 +847,7 @@ fn extend(sheets: &Sheets, from: Pos, to: Pos) -> Option<Result<Doc, Refusal>> {
         let terrain = Extension { wiring, end: end.pos, facing: end.facing };
         let start = Start { pos: sink.at, heading: Some(sink.dir.opposite()), straight: true };
         let found = router::search(&terrain, start, &mut { BUDGET }).map_err(|miss| {
-            Refusal::new(to, miss.kind(), "no free path from this end to the arrowhead; try Make room")
+            Refusal::new(to, miss.kind(), "no free path from this end to the arrowhead; move what's in the way")
         })?;
         let mut canvas = Canvas::new(grid);
         draw(&mut canvas, &terrain.wiring, &found.path);
@@ -882,7 +882,7 @@ pub(crate) fn join(canvas: &mut Canvas, model: &Model, source: &Source, sink: &S
     }
     let wiring = Wiring::new(model, source, Some(sink));
     let found = search_from_sink(&wiring, sink).map_err(|miss| {
-        let why = format!("no free path to {}; try Make room", source.name);
+        let why = format!("no free path to {}; move what's in the way", source.name);
         Refusal::new(sink.at, miss.kind(), why)
     })?;
     draw(canvas, &wiring, &found.path);

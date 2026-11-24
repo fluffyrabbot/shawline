@@ -157,7 +157,7 @@ pub(crate) fn feed(doc: &Doc, to: Pos, source: &NewSource) -> Result<Edited, Ref
             Refusal { at: to, reason, ..r }
         }
         None => {
-            let why = "there's no room left of this arrowhead for a new source; try Make room or move what's there";
+            let why = "there's no room left of this arrowhead for a new source; move what's there";
             Refusal::new(to, RefusalKind::Blocked(Blockage::NoRoom), why)
         }
     })

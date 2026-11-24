@@ -1007,7 +1007,14 @@ let room = null;
 
 /** A refused edit: said by its cell, and Make room offered when it would help. `then` is the gesture's follow-up. */
 function refused(refusal, edit, then = null) {
-  refuse(refusal, offerRoom(refusal, edit, then));
+  const button = offerRoom(refusal, edit, then);
+  refuse(button ? { ...refusal, reason: withRoom(refusal.reason) } : refusal, button);
+}
+
+/** A reason with Make room added as its last remedy. Reasons never name
+ * Make room themselves (PLAN P12.0): only the page knows it is offered. */
+function withRoom(reason) {
+  return reason.includes("; ") ? `${reason}, or Make room` : `${reason}; try Make room`;
 }
 
 /** Offers Make room by a refused edit's cell when it would help, and returns its button, or null. */
@@ -1968,6 +1975,14 @@ function showTrace(state, detail = "", at = null) {
   placeRunState();
 }
 
+/** Hides the drawing pane's hint whenever it would be cut: a hint cut to
+ * "Dra…" teaches nothing (PLAN P12.0). Hidden by visibility, so it keeps
+ * its width and can be measured again. */
+function placeHint() {
+  const hint = drawingHead.querySelector(".hint-line");
+  if (hint) hint.classList.toggle("cut", hint.scrollWidth > hint.clientWidth + 1);
+}
+
 /** Puts the trace status and the Values switch in the drawing pane's head
  *  while it has room for them, and under the drawing when it hasn't, so no
  *  control lies past the pane's edge. The head keeps one row, level with the
@@ -2408,7 +2423,7 @@ async function main() {
   translit.checked = store.get("translit") !== "false";
   values.checked = store.get("values") !== "false";
   // The head's width follows the window's; the run state doesn't change it.
-  new ResizeObserver(placeRunState).observe(drawingHead);
+  new ResizeObserver(() => (placeRunState(), placeHint())).observe(drawingHead);
   // A placement skipped while the switch had focus happens when focus leaves.
   runState.addEventListener("focusout", () => setTimeout(placeRunState));
   runner.warm();
