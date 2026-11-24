@@ -2,7 +2,23 @@
 
 A dataflow programming language you draw. Definitions are rounded boxes, nodes that call them are square boxes, values flow along wires from sources to arrowheads, and every name is written in the [Shavian alphabet](https://en.wikipedia.org/wiki/Shavian_alphabet). The name in Shavian is `·𐑖𐑷𐑤𐑲𐑯` (shawlien).
 
+**[Try it in your browser](https://fluffyrabbot.github.io/shawline/)**: Studio, the editor, opens with a tour. Nothing to install.
+
+<p align="center">
+  <a href="https://fluffyrabbot.github.io/shawline/#03-double">
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="docs/images/double-dark.svg">
+      <img src="docs/images/double-light.svg" width="320" alt="A Shawline sheet: a rounded box named ·𐑛𐑳𐑚𐑩𐑤 (dubəl) feeds its input 𐑯 (n) into both inputs of a square 𐑐 (add) box and sends the sum out at 𐑬 (ow); below it, ·𐑥𐑱𐑯 (mayn) feeds 21 into ·𐑛𐑳𐑚𐑩𐑤.">
+    </picture>
+  </a>
+</p>
+
+<details>
+<summary>The same sheet as text</summary>
+
 ```
+※ 𐑛𐑳𐑚𐑩𐑤
+
 ╭─ ·𐑛𐑳𐑚𐑩𐑤 ────────────╮
 │                     │
 │         ┌───┐       │
@@ -11,9 +27,19 @@ A dataflow programming language you draw. Definitions are rounded boxes, nodes t
 │         └───┘       │
 │                     │
 ╰─────────────────────╯
+
+╭─ ·𐑥𐑱𐑯 ──────────────╮
+│                     │
+│       ┌───────┐     │
+│ 21 ───▶ 𐑛𐑳𐑚𐑩𐑤 ├─────▶ 𐑬
+│       └───────┘     │
+│                     │
+╰─────────────────────╯
 ```
 
-The definition above, `·𐑛𐑳𐑚𐑩𐑤` (dubəl), doubles a number: it feeds its input `𐑯` (n) into both inputs of `𐑐` (p, add) and sends the sum out at `𐑬` (ow). Rough ASCII sketches (`+--+`, `-->`) parse to the same program, and the formatter redraws them in canonical form.
+</details>
+
+The sheet above defines `·𐑛𐑳𐑚𐑩𐑤` (dubəl), which doubles a number: it feeds its input `𐑯` (n) into both inputs of `𐑐` (p, add) and sends the sum out at `𐑬` (ow). Rough ASCII sketches (`+--+`, `-->`) parse to the same program, and the formatter redraws them in canonical form.
 
 **Who it's for.** Programmers who take Shawline as an art piece or a medium for drawing, don't read Shavian, and want to learn it as a hobby. You need no Shavian to start: every word carries its reading, how it sounds, spelled in letters you already know. The readings are meant to fade as you learn, and a switch turns them off.
 
@@ -30,6 +56,8 @@ The definition above, `·𐑛𐑳𐑚𐑩𐑤` (dubəl), doubles a number: it fe
 ## Ways in
 
 ### Studio
+
+Studio is published at <https://fluffyrabbot.github.io/shawline/>. To build and serve it yourself:
 
 ```bash
 rustup target add wasm32-unknown-unknown
@@ -55,3 +83,7 @@ To read `.shaw` files in a terminal or another editor, the boxes only line up in
 ### VS Code
 
 `cargo install --path crates/shawline-lsp`, then `npm install && npm run package` in `editors/vscode/`, and install the `.vsix`. The extension ships Shawline Mono and offers to install it. See [editors/vscode/README.md](editors/vscode/README.md).
+
+## License
+
+The code is licensed under either of [MIT](LICENSE-MIT) or [Apache-2.0](LICENSE-APACHE), at your option. Shawline Mono is licensed under the [SIL Open Font License 1.1](crates/shawline-font/OFL.txt). The sheets in `corpus/` and `examples/` are licensed under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/): remix them, and credit The Shawline authors.
