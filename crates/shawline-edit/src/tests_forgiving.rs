@@ -370,6 +370,24 @@ fn place_connected_places_and_wires_one_node() {
     assert_eq!(none.kind, RefusalKind::Target);
 }
 
+#[test]
+fn a_node_placed_flush_against_an_arrowhead_moves_left_so_it_can_be_wired() {
+    // The tour's steps 5 to 7: ·𐑥𐑱𐑯's node is taken out, a wire from 21 is
+    // dropped where the new ·𐑛𐑳𐑚𐑩𐑤 would end flush against 𐑬's arrowhead,
+    // and then its output is wired to that arrowhead.
+    let taken = ok(crate::remove_node(&Doc::new(DOUBLE), Pos::new(13, 8)));
+    assert_eq!(line(taken.doc.text(), 14), "│ 21                  ▶ 𐑬");
+    let placed = ok(place_connected(&taken.doc, Pos::new(14, 13), "𐑛𐑳𐑚𐑩𐑤", 1, 1, Pos::new(14, 3)));
+    let row = line(placed.doc.text(), 14);
+    assert!(row.ends_with("├ ▶ 𐑬"), "{row}");
+    let tee = Pos::new(14, row.chars().position(|c| c == '├').unwrap());
+    let wired = ok(connect(&placed.doc, tee, Pos::new(14, 22)));
+    assert_eq!(wired.doc.run().unwrap().unwrap().iter().map(ToString::to_string).collect::<Vec<_>>(), ["42"]);
+    // With room already, the node goes where it was dropped.
+    let roomy = ok(place_connected(&taken.doc, Pos::new(14, 9), "𐑛𐑳𐑚𐑩𐑤", 1, 1, Pos::new(14, 3)));
+    assert_eq!(line(roomy.doc.text(), 14).chars().position(|c| c == '▶'), Some(9));
+}
+
 // ---------------------------------------------------------------------------
 // Maps.
 

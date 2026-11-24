@@ -15,7 +15,7 @@ use crate::mapped::{self, compose};
 use crate::model::{Model, NIL, no_sink, no_source};
 use crate::retext::token;
 use crate::wiring::node_rect;
-use crate::{Blockage, Edited, NewSource, Refusal, RefusalKind, connect, disconnect, place_node};
+use crate::{Blockage, Edited, NewSource, Placed, Refusal, RefusalKind, connect, disconnect, place_node};
 
 pub(crate) fn rewire(doc: &Doc, from: Pos, to: Pos) -> Result<Edited, Refusal> {
     let sheets = Sheets::read(doc, to)?;
@@ -51,18 +51,35 @@ pub(crate) fn place_connected(
     let mut unplaced: Option<Refusal> = None;
     for row in rows {
         let corner = Pos::new(row.saturating_sub(1), at.col);
-        match place_node(doc, corner, word, inputs, outputs) {
-            Ok(placed) => match connect(&placed.doc, source, placed.inputs[0]) {
-                Ok(wired) => {
-                    let map = compose(&placed.map, &wired.map);
-                    return Ok(Edited { doc: wired.doc, map, tidied: placed.tidied });
-                }
-                Err(refusal) => {
-                    unwired.get_or_insert(refusal);
-                }
-            },
+        let placed = match place_node(doc, corner, word, inputs, outputs) {
+            Ok(placed) => placed,
             // The drop row is tried last; its refusal is the one to show.
-            Err(refusal) => unplaced = Some(refusal),
+            Err(refusal) => {
+                unplaced = Some(refusal);
+                continue;
+            }
+        };
+        // A node flush against what lies right of it leaves its outputs no
+        // cell for a wire, so the next gesture would be refused (the tour's
+        // step 7 was). One column left is tried first; the flush placement
+        // stays the fallback.
+        let roomy = (!has_room(&placed) && corner.col > 0)
+            .then(|| place_node(doc, Pos::new(corner.row, corner.col - 1), word, inputs, outputs).ok())
+            .flatten()
+            .filter(has_room)
+            .and_then(|left| connect(&left.doc, source, left.inputs[0]).ok().map(|wired| (left, wired)));
+        if let Some((left, wired)) = roomy {
+            let map = compose(&left.map, &wired.map);
+            return Ok(Edited { doc: wired.doc, map, tidied: left.tidied });
+        }
+        match connect(&placed.doc, source, placed.inputs[0]) {
+            Ok(wired) => {
+                let map = compose(&placed.map, &wired.map);
+                return Ok(Edited { doc: wired.doc, map, tidied: placed.tidied });
+            }
+            Err(refusal) => {
+                unwired.get_or_insert(refusal);
+            }
         }
     }
     match unwired {
@@ -72,6 +89,13 @@ pub(crate) fn place_connected(
         }
         None => Err(unplaced.expect("every row was tried and refused")),
     }
+}
+
+/// Whether every output of a placed node has a blank cell to its right,
+/// where a wire from it can start.
+fn has_room(placed: &Placed) -> bool {
+    let Ok(grid) = placed.doc.grid() else { return false };
+    placed.outputs.iter().all(|&tee| grid.get(Pos::new(tee.row, tee.col + 1)) == ' ')
 }
 
 /// How many strokes a fed source's wire runs before the arrowhead, in the
