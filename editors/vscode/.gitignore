@@ -2,3 +2,4 @@ node_modules/
 out/
 fonts/*.ttf
 *.vsix
+LICENSE

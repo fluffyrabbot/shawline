@@ -89,6 +89,8 @@ fn the_font_is_marked_monospaced_and_named() {
         assert_eq!(font.hhea().unwrap().number_of_h_metrics(), 1);
         let family = font.localized_strings(StringId::FAMILY_NAME).english_or_first().unwrap();
         assert_eq!(family.to_string(), FAMILY);
+        let license = font.localized_strings(StringId::LICENSE_DESCRIPTION).english_or_first().unwrap();
+        assert!(license.to_string().contains("SIL Open Font License"), "{license}");
     });
 }
 

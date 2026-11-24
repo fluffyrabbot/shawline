@@ -30,6 +30,9 @@ use write_fonts::types::{FWord, Fixed, GlyphId, LongDateTime, NameId, Tag, UfWor
 /// The family name in the `name` table.
 pub const FAMILY: &str = "Shawline Mono";
 
+/// The license the font carries in its name table.
+pub const LICENSE: &str = "This Font Software is licensed under the SIL Open Font License, Version 1.1.";
+
 /// Font units per em: the cell height, so one em is one row. CSS and editor
 /// line heights are multiples of the em, and at 1.0 a row is then exactly a
 /// cell. Keeping glyph units as font units also means no scaling, so every
@@ -201,14 +204,19 @@ pub fn build() -> Vec<u8> {
     post.is_fixed_pitch = 1;
 
     let version = format!("Version {}", env!("CARGO_PKG_VERSION"));
+    // The font travels on its own (Studio, the extension), so it names its
+    // license itself: OFL.txt beside this crate.
     let name = Name::new(
         [
+            (NameId::COPYRIGHT_NOTICE, "Copyright 2026 The Shawline authors.".to_string()),
             (NameId::FAMILY_NAME, FAMILY.to_string()),
             (NameId::SUBFAMILY_NAME, "Regular".into()),
             (NameId::UNIQUE_ID, format!("{FAMILY} Regular {version}")),
             (NameId::FULL_NAME, FAMILY.into()),
             (NameId::VERSION_STRING, version.clone()),
             (NameId::POSTSCRIPT_NAME, "ShawlineMono-Regular".into()),
+            (NameId::LICENSE_DESCRIPTION, LICENSE.into()),
+            (NameId::LICENSE_URL, "https://openfontlicense.org".into()),
         ]
         .into_iter()
         // Windows, Unicode BMP, US English: the one platform every OS reads.
