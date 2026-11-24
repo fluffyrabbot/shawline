@@ -18,6 +18,7 @@ import { Choices, offer, placing } from "./palette.js";
 import {
   ZOOM_STEP, clampZoom, defaultZoom, fitZoom, zoomAbout, cellUnder, sheetExtent, sheetBox, undrawable,
   edgeScrollStep,
+  EDGE_PX,
 } from "./view.js";
 
 const $ = (id) => document.getElementById(id);
@@ -841,6 +842,31 @@ function runs(cells) {
   return out;
 }
 
+/** Whether `node` lies wholly in the drawing pane's view and the window's,
+ * clear of the bands where a held drag scrolls the pane. */
+function inView(node) {
+  const r = node.getBoundingClientRect();
+  const pane = drawing.getBoundingClientRect();
+  const top = Math.max(pane.top, 0) + EDGE_PX;
+  const bottom = Math.min(pane.top + drawing.clientHeight, innerHeight) - EDGE_PX;
+  return r.top >= top && r.bottom <= bottom && r.left >= pane.left + EDGE_PX && r.right <= pane.left + drawing.clientWidth - EDGE_PX;
+}
+
+/** Scrolls `node` to the middle of the drawing's height, the pane's when
+ * fitted and the window's when stacked, and sideways only as far as clears
+ * the edge bands. Nothing else on the page moves. */
+function bringIntoView(node) {
+  const r = node.getBoundingClientRect();
+  const pane = drawing.getBoundingClientRect();
+  const middle = (r.top + r.bottom) / 2;
+  if (fitted.matches) drawing.scrollTop += middle - (pane.top + drawing.clientHeight / 2);
+  else scrollBy(0, middle - innerHeight / 2);
+  const left = pane.left + EDGE_PX;
+  const right = pane.left + drawing.clientWidth - EDGE_PX;
+  if (r.left < left) drawing.scrollLeft -= left - r.left;
+  else if (r.right > right) drawing.scrollLeft += r.right - right;
+}
+
 /** The tour's rings last brought into view, as JSON: undefined until the
  * first are drawn, which are left where the page opens. */
 let ringsShown;
@@ -860,7 +886,10 @@ function showOverlays() {
     // never points at cells scrolled out of sight.
     const key = JSON.stringify(rings);
     if (key !== ringsShown) {
-      if (ringsShown !== undefined) beacons[0]?.scrollIntoView({ block: "nearest", inline: "nearest" });
+      // Centred rather than nearest: a ring left at the pane's edge sits in
+      // the band where a drag scrolls the pane, so the drag the step asks
+      // for would slide the sheet from under it.
+      if (ringsShown !== undefined && beacons[0] && !inView(beacons[0])) bringIntoView(beacons[0]);
       ringsShown = key;
     }
   }
