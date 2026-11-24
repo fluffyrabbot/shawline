@@ -39,6 +39,10 @@ const runFoot = $("run-foot");
 const resetButton = $("reset");
 const tour = new Tour($("tour"), () => showOverlays(), (text) => layer.message(text));
 const RUN_LIMIT_MS = 10_000;
+/** Wide enough for the panes side by side, each scrolling inside itself and
+ * fitted to the window (style.css, PLAN P12.0). Narrower, they stack and
+ * the page scrolls. */
+const fitted = matchMedia("(min-width: 901px)");
 
 /** The gloss layer (layer.js), made once the wasm package has loaded. */
 let layer;
@@ -76,10 +80,16 @@ function jumpTo({ row, col }, select = true) {
   const cell = parseFloat(getComputedStyle(editor).fontSize);
   const box = editor.parentElement;
   box.scrollLeft = Math.max(0, (col * cell) / 2 - box.clientWidth / 2);
-  const top = editor.getBoundingClientRect().top + row * cell;
-  if (top < 0 || top > innerHeight - cell) {
-    scrollBy({ top: top - innerHeight / 3, behavior: reducedMotion.matches ? "auto" : "smooth" });
+  const behavior = reducedMotion.matches ? "auto" : "smooth";
+  if (fitted.matches) {
+    const top = row * cell;
+    if (top < box.scrollTop || top > box.scrollTop + box.clientHeight - cell) {
+      box.scrollTo({ top: Math.max(0, top - box.clientHeight / 3), behavior });
+    }
+    return;
   }
+  const top = editor.getBoundingClientRect().top + row * cell;
+  if (top < 0 || top > innerHeight - cell) scrollBy({ top: top - innerHeight / 3, behavior });
 }
 
 /** Replaces the selection, keeping the browser's undo history where it can. */
@@ -476,13 +486,19 @@ function sizeDrawing() {
 
 /** Stretches the pane to the sheet: the drawing at the zoom, out to what a drag reached, and room past both. */
 function fitSheet() {
-  // At least the pane on show: its width, and down to the window's foot.
+  // At least the pane on show: its width, and its height when fitted to the
+  // window, or down to the window's foot when the page scrolls instead.
   const top = drawing.getBoundingClientRect().top + scrollY;
-  const pane = { width: drawing.clientWidth, height: Math.max(PANE_MIN_PX, innerHeight - top - 16) };
+  const pane = fitted.matches
+    ? { width: drawing.clientWidth, height: drawing.clientHeight }
+    : { width: drawing.clientWidth, height: Math.max(PANE_MIN_PX, innerHeight - top - 16) };
   const far = reach && geo.cell_rect(reach.row, reach.col, reach.row, reach.col, true, false);
   const reached = far && { width: far.x + far.width, height: far.y + far.height };
   sheet = sheetExtent(geo.size(), geo.cell_rect(0, 0, 0, 0, true, false), pane, reached);
-  drawing.style.minHeight = `${sheet.height}px`;
+  // Fitted, the pane keeps its height and scrolls; otherwise it grows and
+  // the page scrolls.
+  drawing.style.minHeight = fitted.matches ? "" : `${sheet.height}px`;
+  sheetEnd.style.height = fitted.matches ? `${sheet.height}px` : "";
   sheetEnd.style.width = `${sheet.width}px`;
 }
 
@@ -825,6 +841,10 @@ function runs(cells) {
   return out;
 }
 
+/** The tour's rings last brought into view, as JSON: undefined until the
+ * first are drawn, which are left where the page opens. */
+let ringsShown;
+
 /** The tour's rings, the cursor, the selection, `W`'s glowing ends and the
  * value badges, drawn again over every fresh drawing. */
 function showOverlays() {
@@ -832,7 +852,18 @@ function showOverlays() {
   // A detached branch is being dragged over a sheet that isn't the text yet.
   if (!svg || drag?.view || !unit) return;
   svg.querySelectorAll(".overlay").forEach((n) => n.remove());
-  if (!studio?.held) svg.append(...tour.rings().map((r) => svgRect("overlay beacon", r)));
+  if (!studio?.held) {
+    const rings = tour.rings();
+    const beacons = rings.map((r) => svgRect("overlay beacon", r));
+    svg.append(...beacons);
+    // A step's rings come into view once, when they change, so a step
+    // never points at cells scrolled out of sight.
+    const key = JSON.stringify(rings);
+    if (key !== ringsShown) {
+      if (ringsShown !== undefined) beacons[0]?.scrollIntoView({ block: "nearest", inline: "nearest" });
+      ringsShown = key;
+    }
+  }
   const selected = studio?.selection;
   if (studio?.cursor && drawing.matches(":focus") && !selected) svg.append(cellRect("overlay cursor", studio.cursor));
   if (selected?.kind === "box") svg.append(svgRect("overlay selected", selected.box));
@@ -1101,11 +1132,14 @@ function place(node, at) {
  */
 function replaceText(text, caret) {
   const scroll = { x: scrollX, y: scrollY };
+  const pane = editor.parentElement;
+  const inPane = { left: pane.scrollLeft, top: pane.scrollTop };
   replaceAll(text);
   settle();
   const at = offset_of_cell(editor.value, caret.row, caret.col);
   editor.setSelectionRange(at, at);
   scrollTo(scroll.x, scroll.y);
+  pane.scrollTo(inPane);
   clearTimeout(refreshTimer);
   refresh();
 }
@@ -1325,10 +1359,11 @@ function edgeScroll() {
     bottom: Math.min(r.bottom, innerHeight),
   };
   const { dx, dy } = edgeScrollStep({ x: lastMove.clientX, y: lastMove.clientY }, shown);
-  const before = { x: drawing.scrollLeft, y: scrollY };
+  const vertical = fitted.matches ? drawing : document.scrollingElement;
+  const before = { x: drawing.scrollLeft, y: vertical.scrollTop };
   if (dx) drawing.scrollLeft += dx;
-  if (dy) scrollBy(0, dy);
-  if (drawing.scrollLeft === before.x && scrollY === before.y) return;
+  if (dy) vertical.scrollTop += dy;
+  if (drawing.scrollLeft === before.x && vertical.scrollTop === before.y) return;
   edging = requestAnimationFrame(edgeScroll);
   moved(lastMove);
 }
@@ -1975,6 +2010,12 @@ function showTrace(state, detail = "", at = null) {
   placeRunState();
 }
 
+/** Sets `--above`, main's top on the page, which style.css fits main under. */
+function placeMain() {
+  const top = document.querySelector("main").getBoundingClientRect().top + scrollY;
+  document.documentElement.style.setProperty("--above", `${Math.round(top)}px`);
+}
+
 /** Hides the drawing pane's hint whenever it would be cut: a hint cut to
  * "Dra…" teaches nothing (PLAN P12.0). Hidden by visibility, so it keeps
  * its width and can be measured again. */
@@ -2133,6 +2174,8 @@ function runProgram() {
   if (runner.busy) return stop("Stopped.");
   runner.request({ kind: "run", src: editor.value, rev });
   setRunning(true);
+  // Stacked, Output is under the drawing; fitted, it is always on screen.
+  if (!fitted.matches) output.closest(".pane").scrollIntoView({ block: "nearest", behavior: reducedMotion.matches ? "auto" : "smooth" });
 }
 
 function finish(job, result) {
@@ -2424,6 +2467,20 @@ async function main() {
   values.checked = store.get("values") !== "false";
   // The head's width follows the window's; the run state doesn't change it.
   new ResizeObserver(() => (placeRunState(), placeHint())).observe(drawingHead);
+  // Fitted, main fills the window under what is above it: the header and
+  // the tour, which come and go and wrap.
+  const above = new ResizeObserver(placeMain);
+  for (const node of [document.querySelector("header"), $("tour")]) above.observe(node);
+  // Before the first drawing there is no geometry to fit.
+  // A resized pane can hide the tour's rings, so they're brought back.
+  new ResizeObserver(() => {
+    if (!fitted.matches || !geo) return;
+    fitSheet();
+    if (ringsShown === undefined) return;
+    ringsShown = null;
+    showOverlays();
+  }).observe(drawing);
+  fitted.addEventListener("change", () => (placeMain(), geo && fitSheet()));
   // A placement skipped while the switch had focus happens when focus leaves.
   runState.addEventListener("focusout", () => setTimeout(placeRunState));
   runner.warm();

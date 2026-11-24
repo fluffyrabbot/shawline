@@ -647,6 +647,29 @@ kbd {
 
 .colophon { font: italic 15px/1.6 var(--serif); margin-top: 8px; }
 
+/* Fit to the window (PLAN P12.0): beside each other, the Text and Drawing
+   panes fill the height left under the header and scroll inside
+   themselves, and Diagnostics and Output dock under them, so a Run's
+   result is always on screen. `--above` is main's top, set by app.js. */
+@media (min-width: 901px) {
+  /* Height is what the panes are short of, so the chrome above is tighter. */
+  body { padding-top: 24px; }
+  header { margin-bottom: 24px; }
+  .tour { margin: -8px 0 20px; }
+  main {
+    height: max(400px, calc(100dvh - var(--above, 200px) - 24px));
+    grid-template-rows: minmax(0, 1fr) fit-content(28%);
+    row-gap: 20px;
+  }
+  .pane { display: flex; flex-direction: column; min-height: 0; }
+  .pane > * { flex: none; }
+  .pane > .editor, .pane > #drawing { flex: 1 1 0; min-height: 0; }
+  .pane > #problems, .pane > #output { flex: 0 1 auto; min-height: 0; overflow: auto; }
+  .pane.problems .pane-head, .pane.output .pane-head { height: auto; padding-bottom: 6px; margin-bottom: 8px; }
+  /* A row's hover wash reaches 10px past the text, inside the scroller. */
+  .pane > #problems { padding: 0 10px; margin: 0 -10px; }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
     animation: none !important;
@@ -666,4 +689,9 @@ kbd {
   .trace-status { white-space: normal; }
   :root { --cell: 18px; }
   #keys { grid-template-columns: repeat(5, minmax(0, 72px)); }
+  /* The step's words get a row of their own rather than a column a few
+     words wide between the count and the buttons. */
+  .tour { flex-wrap: wrap; row-gap: 6px; }
+  .tour-text { flex-basis: 100%; order: 1; }
+  .tour-next, .tour-close { order: 2; }
 }

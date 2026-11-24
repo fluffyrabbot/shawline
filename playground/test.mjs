@@ -354,6 +354,25 @@ pendingE1("place_connected is one edit: a refused connect places nothing", () =>
   assert.equal(gone.text, before, "the sheet is still the Doc it started from");
 });
 
+test("the tour's node, dropped anywhere right of 21, leaves its output room for the wire to 𐑬", () => {
+  // Tour steps 5 to 7 (PLAN P12.0): the node out, a wire from 21 dropped on
+  // each blank cell up to 𐑬's arrowhead, then that arrowhead wired.
+  const gone = sheet(edits.remove_node(double, 13, 8).text);
+  const row = [...gone.text.split("\n")[14]];
+  const arrowhead = row.indexOf("▶");
+  let placed = 0;
+  for (let col = 5; col < arrowhead; col++) {
+    const fed = shawline.apply(gone, { kind: "place_connected", at: cell(14, col), word: "𐑛𐑳𐑚𐑩𐑤", inputs: 1, outputs: 1, from: cell(14, 2) });
+    if (!fed.ok) continue;
+    placed++;
+    const tee = [...fed.doc.text.split("\n")[14]].indexOf("├");
+    const wired = edits.connect(fed.doc.text, 14, tee, 14, arrowhead);
+    assert.equal(wired.ok, true, `dropped at 14:${col}: ${wired.reason}`);
+    assert.deepEqual(outputsOf(wired.text), ["42"], `dropped at 14:${col}`);
+  }
+  assert.ok(placed >= 8, `only ${placed} drops placed a node`);
+});
+
 // The page's Docs: at most two, by text, each freed when it is dropped.
 
 const { Docs } = await import("./docs.js");
