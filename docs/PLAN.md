@@ -139,50 +139,20 @@ Do not edit corpus expectations, add harness crates, or review other crates.
 Done = tests + clippy green for your crate, committed on your branch, ≤200-word report.
 ```
 
-## Where it stands (2026-11-22)
+## Where it stands (2026-11-24)
 
-P0 to P11 are finished, P10 included: it closed on the lead's gate record, and the user's by-hand pass moved to P12's gate. Every finished phase, with its decisions and gate record, is in [HISTORY.md](HISTORY.md); the last entry, "Consolidation after P11", records how this plan's direction was chosen.
+P0 to P11 are finished, P10 included: it closed on the lead's gate record, and the user's by-hand pass moved to P12's gate. P12.0, the front door, is finished too: licenses, a README that draws its sheet, Studio fitted to the window and published at <https://fluffyrabbot.github.io/shawline/>. Every finished phase, with its decisions and gate record, is in [HISTORY.md](HISTORY.md); "Consolidation after P11" records how this plan's direction was chosen, and the last entry is P12.0.
 
 - **The language** works end to end: recognition, checking, the VM, the formatter, the SVG renderer, Shawline Mono, the language server and the VS Code extension, which also runs in untrusted folders. `𐑗` chop and `𐑡` join are the first mirror pair added since v1.
 - **Studio**'s edits rebuild every valid corpus program from an empty sheet (`studio_build`), and the whole language can be drawn by mouse, keyboard or finger. Studio makes room on request, places constants and switches, extracts definitions, and offers a repair for each of the 18 codes that has one.
-- **Checks on `db04614`:** 422 workspace tests pass with none ignored, clippy is clean on host, and the playground passes its 113 Node checks.
-- **Repository:** `main` only, level with `origin/main`. No other branches or worktrees.
+- **Checks on `22c25e5`:** 424 workspace tests pass, and the four in `tests/links.rs` fail until wave 1's codec lands, as expected. Clippy is clean on host and wasm, and the playground passes its 114 Node checks.
+- **Repository:** `main`, level with `origin/main`, and `gh-pages`, which only `scripts/publish-pages` writes. No other branches or worktrees.
 
 ```
-P0–P11 ✅ ─► P12.0 Front door ─► P12 Sharing (contracts landed; wave 1 after P12.0) ─► P13 the toy layer
+P0–P11 ✅ ─► P12.0 Front door ✅ ─► P12 Sharing (contracts landed; wave 1 next) ─► P13 the toy layer
 ```
 
 ## Next
-
-### P12.0: Front door (lead, before P12's wave 1)
-
-**Goal:** a stranger who lands on the README can try Studio in one click, may remix what they find, and sees the result of their first Run without scrolling. Sharing multiplies whatever a newcomer lands on, so this comes before wave 1.
-
-**Found by the polish audit** (2026-11-24, on `a7e0c9d`, Studio checked by hand in the browser pane):
-- **No way in without a toolchain.** Studio isn't hosted, so trying it takes a clone, rustup, the wasm target, `wasm-bindgen-cli` 0.2.126 built from source, `build.sh` and a local server.
-- **No license.** The repository is public with no `LICENSE`, and `editors/vscode/package.json` says `UNLICENSED`. The gallery would invite remixes nobody may make.
-- **The README's drawing breaks on GitHub.** Its code block is drawn in GitHub's font and line height, so the box drawing gaps and the node box doesn't join.
-- **Run shows nothing on screen.** The drawing pane is 1,280 px tall at any window size, so Output and Diagnostics start at about 1,750 px at both 1,024 × 768 and 1,440 × 900. "See Diagnostics" points two screens down.
-- **The tour can strand its reader.** At step 6, a node dropped mid-way into the blank space to the right of `21` was placed flush against `𐑬`'s arrowhead, so step 7's wire was refused: "the cell before this arrowhead is taken; move what's there or try Make room".
-- **A refusal names a button that isn't there.** That reason (`shawline-edit/src/wiring.rs`), and the other "try Make room" reasons in `retext.rs` and `drawing.rs`, always name Make room, while Studio offers it only when the retried `make_room` succeeds and no drag is held (`app.js`, `offerRoom`). No button showed in the case above.
-- **The drawing pane's hint** is cut to "Dra…" at 1,024 px and below.
-
-**Decisions.**
-
-| Decision | Choice | Rationale |
-|---|---|---|
-| Licenses | Code `MIT OR Apache-2.0` (`LICENSE-MIT`, `LICENSE-APACHE`, and `license` in the workspace and extension manifests). Shawline Mono under the SIL Open Font License 1.1 (`crates/shawline-font/OFL.txt`, named in the font's own name table). Corpus and example sheets, and sheets in the gallery, under CC BY 4.0 (`corpus/LICENSE`, `examples/LICENSE`) | Chosen by the user. The Rust norm for code, the font norm for a font, and an attribution license for art meant to be remixed. |
-| Studio's layout | Fit to the window: the Text and Drawing panes fill the height left under the header and scroll inside themselves, and Output and Diagnostics dock in a strip under them that is always visible. Below 900 px the panes stack as today, and Run scrolls Output into view | Chosen by the user. The result of a Run, or the reason it can't run, is the first thing a newcomer looks for. A link opened in P12 lands on this layout. |
-| Order | P12.0 lands, is published, and is checked before wave 1 starts. Wave 1's briefs are unchanged | Chosen by the user. Pages then exists before sharing needs it. |
-| Publishing | `scripts/publish-pages` is written now rather than at wave 1's gate, and publishes today's Studio to `https://fluffyrabbot.github.io/shawline/`. The README opens with a "Try it in your browser" link there | The hosting decision is already made (P12, Hosting). The script only moves earlier. |
-| The README's drawing | An SVG made by `shawline render` from `corpus/03-double.shaw`, light and dark through `<picture>` with `prefers-color-scheme`, kept in `docs/images/` and linking to Studio. The text form follows it in a collapsed `<details>` for readers who want to copy it | The renderer exists to draw the sheet faithfully, and the README is the first drawing a stranger sees. |
-| The tour's node | A node placed by feeding a source into blank space keeps at least one free cell before the next arrowhead or border to its right, shifting left within the box when the drop point leaves less. A Node check walks the tour with drops across the whole blank span | The tour's happy path must not end in a refusal. |
-| Naming Make room | A refusal's reason never names Make room. Studio adds "or Make room" to the shown reason only when it shows the button | The reason comes from `shawline-edit`, which can't know whether Studio's retry will succeed. |
-| The cut hint | Hidden whenever it wouldn't fit whole | A truncated hint teaches nothing. |
-| Favicon and link card | Not here: P12 adds them with Share, since they matter when a link travels | Keeps P12.0 to the front door. |
-| CLI messages | Not here: to the backlog (below) | The CLI serves readers who stay, and Studio is the front door. |
-
-**Gate:** workspace tests and clippy on host and wasm; the playground's Node checks, with the tour walk; Studio at 320, 1,024 × 768 and 1,440 × 900, where Run's result is on screen without scrolling at the two larger sizes; the README viewed on GitHub; the published Studio opened in the browser pane and its tour walked to the end.
 
 ### P12: Sharing, how a drawing travels
 
@@ -190,7 +160,7 @@ P0–P11 ✅ ─► P12.0 Front door ─► P12 Sharing (contracts landed; wave 
 
 **What exists today** (`61e9ff0`):
 - **Links name examples.** `#03-double` opens that example's slot (`app.js`: `enter` and the `hashchange` listener). The slots are the 19 corpus examples and the tour, each with a draft in browser storage (`drafts.js`). There is no blank sheet, and no way to open text that isn't an example except by pasting it over one.
-- **Studio isn't hosted.** The repository is public and has no Pages site, so any link today points at localhost.
+- **Studio is hosted** at <https://fluffyrabbot.github.io/shawline/> since P12.0, published by `scripts/publish-pages`.
 - **Drawings export, posters don't.** `shawline render` and `Doc.render` make a standalone SVG at 15 × 30 px per cell with a margin, readings optional. It has no title and no paper size.
 - **`examples/` isn't in Studio.** `build.sh` copies corpus programs only, so `gray-code.shaw` can't be opened there.
 - **Measured links** (raw DEFLATE, then base64url): 248 characters for the median corpus program, 454 for the largest (`09-length`), and 1,048 for `gray-code`. Unencoded, `gray-code`'s text is 31,824 characters percent-encoded.
@@ -230,7 +200,7 @@ P0–P11 ✅ ─► P12.0 Front door ─► P12 Sharing (contracts landed; wave 
 - **R** owns `shawline-render`: `poster`. Unit tests check page sizes, orientation, the cell cap, and that the title band, the drawing and the colophon don't overlap. `resvg` previews of the two corpus posters, light and dark, go into the report for the gate.
 - **W1** owns `shawline-wasm` and `playground/`: your sheets (New sheet, the Yours group, labels, Remove sheet, storage in `drafts.js`), the gallery from `gallery.json`, and `examples/` in `build.sh`. Node checks: every gallery entry opens, your sheets survive a reload, and removing one leaves the examples' drafts alone.
 
-**Wave 1 gate** (lead): merge; `shawline link` and `shawline poster [--dark] [--plain] [--paper a4|a3|letter]` in the CLI; the user looks at the two posters before `poster.svg` is blessed; `scripts/publish-pages` written and dry-run into a scratch directory.
+**Wave 1 gate** (lead): merge; `shawline link` and `shawline poster [--dark] [--plain] [--paper a4|a3|letter]` in the CLI; the user looks at the two posters before `poster.svg` is blessed; Studio republished with `scripts/publish-pages`.
 
 **Wave 2: Studio shares** (one agent):
 - **W2** owns `shawline-wasm` and `playground/`: wasm exports for `encode`, `decode`, `poster` and `definition_names`; Share and its clipboard fallback; opening a `#v1.` link into your sheets, with the three refusals; the Poster dialog (paper, the too-small warning, Download SVG and Print). Node checks: every `corpus/links/` fixture opens as a sheet of yours, and the same link twice gives one sheet.
@@ -269,9 +239,11 @@ Not scheduled. Each was found or set aside at a gate. HISTORY.md has the context
 | One position search in `shawline-edit` | `make_room`, `place_connected` (which retries rows) and `feed` (which retries wire lengths) each search positions in private. |
 | A constant that grows leftwards can end up against a border (`│21`) | Canonical, only tight. |
 | "An arm starts at a cell of a switch's left border" after a successful `+ arm` | Seen once at the wave 2 gate and never reproduced. Record the steps if it comes back. |
-| CLI messages that name a next step: one `G003` per run of Latin letters, saying to type the word's keys with transliteration, in place of one per letter; `C005` saying a run starts at a definition named `·𐑥𐑱𐑯`; `--version`; `--help` with an example and the dumps (`diagram`, `ast`, `asm`) listed apart | Found by the polish audit (P12.0). The CLI serves readers who stay, after the front door. |
-| Words that drift from SPEC §16: the extension's `shawline.gloss` setting (§16 says readings), three names for the typing switch across Studio, the extension and its status item, "program" where §16 says sheet | Found by the polish audit (P12.0). Renaming a setting needs a migration for anyone who set it. |
-| Releases: one version across the workspace (`0.0.1`) and the extension (`0.1.0`), tags, a changelog drawn from HISTORY.md, the extension on the Marketplace and Open VSX with the language server bundled per platform | Found by the polish audit (P12.0). Studio is the front door, and a published extension needs per-platform server builds. |
+| CLI messages that name a next step: one `G003` per run of Latin letters, saying to type the word's keys with transliteration, in place of one per letter; `C005` saying a run starts at a definition named `·𐑥𐑱𐑯`; `--version`; `--help` with an example and the dumps (`diagram`, `ast`, `asm`) listed apart | Found by the polish audit (P12.0, HISTORY.md). The CLI serves readers who stay, after the front door. |
+| Words that drift from SPEC §16: the extension's `shawline.gloss` setting (§16 says readings), three names for the typing switch across Studio, the extension and its status item, "program" where §16 says sheet | Found by the polish audit (P12.0, HISTORY.md). Renaming a setting needs a migration for anyone who set it. |
+| Releases: one version across the workspace (`0.0.1`) and the extension (`0.1.0`), tags, a changelog drawn from HISTORY.md, the extension on the Marketplace and Open VSX with the language server bundled per platform | Found by the polish audit (P12.0, HISTORY.md). Studio is the front door, and a published extension needs per-platform server builds. |
+| Room for the drawing at 1,024 × 768 with the tour open: the header and the tour take 270 px, and the run state and inspector line under the drawing another 70 px, leaving the drawing about 200 px | Found at P12.0's gate. Larger windows have room. A one-row header or a tour folded into the drawing pane's head is a layout decision of its own. |
+| Versioned file names in `scripts/publish-pages`, so a browser never runs a cached `app.js` beside a newer wasm | Found at P12.0's gate. GitHub Pages lets browsers cache each file for 10 minutes. It matters once a publish changes the wasm's bindings. |
 | More primitives | The remaining single letters are reserved, and each pair is assigned as a pair (SPEC §9). |
 | An English → Shavian dictionary | An optional extra beside the keys (Decisions). |
 

@@ -1170,3 +1170,75 @@ Five read-only audits (interaction mechanics, product legibility, conceptual int
 - in the browser pane: at 1,024, 1,280 and 1,440 px the head doesn't overflow and stays level with the text pane's, with the run state under the drawing at the first two and in the head at the third, and it moves both ways on resizing. At 320 px the page stays 320 px wide. Values still toggles its badges from under the drawing. No console errors.
 
 **Not checked:** the move on focus leaving was checked by dispatching `focusout`, since the browser pane's page never has window focus (`document.hasFocus()` is false), so the browser sends it no focus events.
+
+### P12.0: Front door (lead, before P12's wave 1) ✅
+
+**Goal:** a stranger who lands on the README can try Studio in one click, may remix what they find, and sees the result of their first Run without scrolling. Sharing multiplies whatever a newcomer lands on, so this comes before wave 1.
+
+**Found by the polish audit** (2026-11-24, on `a7e0c9d`, Studio checked by hand in the browser pane):
+- **No way in without a toolchain.** Studio isn't hosted, so trying it takes a clone, rustup, the wasm target, `wasm-bindgen-cli` 0.2.126 built from source, `build.sh` and a local server.
+- **No license.** The repository is public with no `LICENSE`, and `editors/vscode/package.json` says `UNLICENSED`. The gallery would invite remixes nobody may make.
+- **The README's drawing breaks on GitHub.** Its code block is drawn in GitHub's font and line height, so the box drawing gaps and the node box doesn't join.
+- **Run shows nothing on screen.** The drawing pane is 1,280 px tall at any window size, so Output and Diagnostics start at about 1,750 px at both 1,024 × 768 and 1,440 × 900. "See Diagnostics" points two screens down.
+- **The tour can strand its reader.** At step 6, a node dropped mid-way into the blank space to the right of `21` was placed flush against `𐑬`'s arrowhead, so step 7's wire was refused: "the cell before this arrowhead is taken; move what's there or try Make room".
+- **A refusal names a button that isn't there.** That reason (`shawline-edit/src/wiring.rs`), and the other "try Make room" reasons in `retext.rs` and `drawing.rs`, always name Make room, while Studio offers it only when the retried `make_room` succeeds and no drag is held (`app.js`, `offerRoom`). No button showed in the case above.
+- **The drawing pane's hint** is cut to "Dra…" at 1,024 px and below.
+
+**Decisions.**
+
+| Decision | Choice | Rationale |
+|---|---|---|
+| Licenses | Code `MIT OR Apache-2.0` (`LICENSE-MIT`, `LICENSE-APACHE`, and `license` in the workspace and extension manifests). Shawline Mono under the SIL Open Font License 1.1 (`crates/shawline-font/OFL.txt`, named in the font's own name table). Corpus and example sheets, and sheets in the gallery, under CC BY 4.0 (`corpus/LICENSE`, `examples/LICENSE`) | Chosen by the user. The Rust norm for code, the font norm for a font, and an attribution license for art meant to be remixed. |
+| Studio's layout | Fit to the window: the Text and Drawing panes fill the height left under the header and scroll inside themselves, and Output and Diagnostics dock in a strip under them that is always visible. Below 900 px the panes stack as today, and Run scrolls Output into view | Chosen by the user. The result of a Run, or the reason it can't run, is the first thing a newcomer looks for. A link opened in P12 lands on this layout. |
+| Order | P12.0 lands, is published, and is checked before wave 1 starts. Wave 1's briefs are unchanged | Chosen by the user. Pages then exists before sharing needs it. |
+| Publishing | `scripts/publish-pages` is written now rather than at wave 1's gate, and publishes today's Studio to `https://fluffyrabbot.github.io/shawline/`. The README opens with a "Try it in your browser" link there | The hosting decision is already made (P12, Hosting). The script only moves earlier. |
+| The README's drawing | An SVG made by `shawline render` from `corpus/03-double.shaw`, light and dark through `<picture>` with `prefers-color-scheme`, kept in `docs/images/` and linking to Studio. The text form follows it in a collapsed `<details>` for readers who want to copy it | The renderer exists to draw the sheet faithfully, and the README is the first drawing a stranger sees. |
+| The tour's node | A node placed by feeding a source into blank space keeps at least one free cell before the next arrowhead or border to its right, shifting left within the box when the drop point leaves less. A Node check walks the tour with drops across the whole blank span | The tour's happy path must not end in a refusal. |
+| Naming Make room | A refusal's reason never names Make room. Studio adds "or Make room" to the shown reason only when it shows the button | The reason comes from `shawline-edit`, which can't know whether Studio's retry will succeed. |
+| The cut hint | Hidden whenever it wouldn't fit whole | A truncated hint teaches nothing. |
+| Favicon and link card | Not here: P12 adds them with Share, since they matter when a link travels | Keeps P12.0 to the front door. |
+| CLI messages | Not here: to the backlog (below) | The CLI serves readers who stay, and Studio is the front door. |
+
+**Gate:** workspace tests and clippy on host and wasm; the playground's Node checks, with the tour walk; Studio at 320, 1,024 × 768 and 1,440 × 900, where Run's result is on screen without scrolling at the two larger sizes; the README viewed on GitHub; the published Studio opened in the browser pane and its tour walked to the end.
+
+**Landed** (2026-11-24, `7e34a2a`–`22c25e5`, one commit per item):
+- **Licenses** (`7e34a2a`): `LICENSE-MIT` and `LICENSE-APACHE` at the root, `license` and `repository` in the workspace and in every crate. `crates/shawline-font/OFL.txt`, and the font's name table carries its copyright, the OFL notice and the license's URL, checked by `readback.rs`. `corpus/LICENSE` and `examples/LICENSE` give CC BY 4.0; the corpus runner reads only `.shaw` files, so neither is a sheet. The extension's `npm run package` now writes the three texts into its `LICENSE` and drops `--skip-license`.
+- **README** (`54ff6fa`): "Try it in your browser" under the first paragraph, then `docs/images/double-light.svg` and `double-dark.svg` (`shawline render` of `03-double`) through `<picture>`, linking to `#03-double` in Studio. The whole sheet as text follows in `<details>`. A License section closes it.
+- **The tour's node** (`442092b`): `place_connected` checks that every output tee of the placed node has a blank cell to its right. When one hasn't, it tries the same node one column left, and keeps the flush placement only if that fails, so the cost is one extra placement at most. A test rebuilds tour steps 5 to 7 on `03-double` and fails without the change.
+- **Naming Make room** (`e188ec8`): the 30 refusal reasons in `shawline-edit` that named Make room now name a step that works anywhere ("try a spot further in", "move what's beside it", "try a shorter move"). Studio's `withRoom` adds ", or Make room" when it shows the button. The language server uses the same reasons, so VS Code no longer names a button it hasn't got. The drawing pane's hint gets `.cut`, hidden by visibility, when it would be truncated.
+- **Fit to the window** (`ec34e74`, then `8607058` and `22c25e5` from the gate):
+  - Above 900 px, `main` is as tall as the window under the header, through `--above`, which `placeMain` measures. Its rows are `minmax(0, 1fr) fit-content(28%)`. Each pane is a column, and the editor and the drawing scroll inside themselves.
+  - `fitSheet` keeps the drawing's height and stretches `.sheet-end` instead.
+  - The edge scroll moves the pane rather than the page.
+  - `jumpTo` scrolls the editor's own box, and `replaceText` keeps that box's scroll.
+  - At 900 px and below, nothing changes except that Run scrolls Output into view.
+  - The chrome above the panes is tighter there: body 24 px, header margin 24 px, tour margin −8 px and 20 px.
+  - A Node check drops the tour's node on every blank cell right of 21 and wires it to `𐑬`.
+- **Tour rings** (`ec34e74`, `8607058`, `22c25e5`): when a step's rings change, or the pane is resized during the tour, the first ring is brought to the middle of the pane, or of the window when stacked, unless it already lies clear of the edge bands (`EDGE_PX`). The rings drawn as the page opens stay where they are. On a phone, the step's words get a row of their own.
+- **Publishing** (`8a59b79`): `scripts/publish-pages` refuses a dirty tree and runs `build.sh`. It copies `dist/` without `node/`, adds `.nojekyll`, writes the tree with `git add -f` into a temporary index and `commit-tree` onto `origin/gh-pages`, and pushes. `gh-pages` is never checked out. `--dry-run DIR` writes the site only. Pushing the branch turned Pages on by itself (legacy build, from `gh-pages` at `/`).
+
+**Gate:**
+- **Tests:** 424 workspace tests pass. The only failures are the four in `shawline-corpus/tests/links.rs`, which wait for wave 1's codec, as P12's contracts expect.
+- **Clippy** is clean on host and on `wasm32-unknown-unknown`.
+- **The playground** builds (869,849-byte wasm) and passes 114 Node checks, the drop span among them.
+- **In the browser pane, against the local build:**
+  - at 1,024 × 768 the tour was walked to the end by mouse, step 6's drop included, and Run showed 42 at y = 708 with the page unscrolled;
+  - at 1,440 × 900, Output sits at 841 to 867;
+  - at 320 × 640 the page stays 320 px wide, Run scrolled to Output (42), and step 3's ring lands mid-window.
+- **The README on GitHub** shows the SVG and the link, and GitHub names both licenses in the README's tabs.
+- **The published Studio** (`https://fluffyrabbot.github.io/shawline/`, built from `22c25e5`) loads with no console errors and serves the wasm as `application/wasm`.
+
+  There, at 1,024 × 768, the tour was walked to the end by mouse: step 3's and step 6's rings landed mid-pane, step 6's drop left room for step 7's wire, and Run showed 42 with no scrolling.
+
+**Not checked:**
+- a real phone;
+- VS Code with the rewritten reasons. The reasons are the same strings the language server sends, and the edit crate's 97 tests pass.
+
+**Found:**
+- **Fixed in this phase:**
+  - the first resize report re-scrolled the drawing on opening, past the title (`8607058`);
+  - rings brought into view as "nearest" sat in the drag band, so step 6's drag slid the sheet away (`22c25e5`);
+  - an empty status line that collapsed made the drawing jump when a status appeared, so its room stays reserved.
+- **To the backlog:**
+  - At 1,024 × 768 with the tour open, the drawing pane is about 200 px tall. The header and the tour take 270 px, and the run state and inspector line under the drawing take 70 px.
+  - GitHub Pages lets browsers cache each file for 10 minutes, so a returning reader can run an old `app.js` for that long after a publish.
