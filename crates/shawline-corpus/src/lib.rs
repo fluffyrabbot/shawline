@@ -18,7 +18,7 @@ use std::path::{Path, PathBuf};
 
 use shawline_doc::Doc;
 use shawline_grid::Diagnostic;
-use shawline_render::Theme;
+use shawline_render::{Poster, Theme};
 use shawline_shape::Diagram;
 
 pub struct Stage {
@@ -73,6 +73,24 @@ pub const STAGES: &[Stage] = &[
         run: |src| match Doc::new(src).grid() {
             Ok(grid) => shawline_render::render(grid, Theme::LIGHT),
             Err(errors) => lines(errors),
+        },
+        fallback: None,
+        selective: true,
+    },
+    // A4, light, with readings, titled from the sheet (PLAN P12). Kept for
+    // `01-hello` and `11-even-odd` once the user has looked at them at the
+    // wave 1 gate; until then no file exists, so the stage doesn't run.
+    Stage {
+        name: "poster.svg",
+        run: |src| {
+            let doc = Doc::new(src);
+            match doc.grid() {
+                Ok(grid) => shawline_render::poster(
+                    grid,
+                    &Poster { gloss: true, names: doc.definition_names(), ..Poster::default() },
+                ),
+                Err(errors) => lines(errors),
+            }
         },
         fallback: None,
         selective: true,

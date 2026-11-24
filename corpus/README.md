@@ -13,10 +13,11 @@ The single oracle for every pipeline stage. Each `*.shaw` program may have expec
 | `.studio` | How each Studio edit ends: `ok` with a hash of the result, or `refused` with the refusal's kind and cell (`shawline_corpus::studio`) | P8 |
 | `.gloss` | The gloss layer: one line per Shavian word in row-major order, `ROW:COL WORD READING [GLOSS] shown\|dropped`, where `GLOSS` is a primitive's short name and the last field says whether the strip shows it (`shawline_render::glosses`) | P9 |
 | `.repair` | How each repair `shawline_edit::repairs` offers ends, one line per repair: `ROW:COL CODE EDIT ok DIGEST`, `… refused KIND AT`, or `ROW:COL CODE` for a repair that is all follow-up, each ending `then FOLLOWUP ROW:COL` when it has one (`shawline_corpus::repair`) | P10 wave 3 |
+| `.poster.svg` | The poster: A4, light, with readings, titled with the sheet's definition names (`shawline_render::poster`) | P12 wave 1 gate |
 
 A program with an empty `.check` and no `.fmt.shaw` is canonical: it must format to itself.
 
-`.fmt.shaw`, `.svg`, `.studio`, `.gloss` and `.repair` are selective; `.studio` and `.gloss` are kept for every valid program, and `.repair` for every program with static diagnostics. Blessing only rewrites the files that exist; to add one, create it empty, then bless.
+`.fmt.shaw`, `.svg`, `.poster.svg`, `.studio`, `.gloss` and `.repair` are selective; `.studio` and `.gloss` are kept for every valid program, and `.repair` for every program with static diagnostics. Blessing only rewrites the files that exist; to add one, create it empty, then bless.
 
 Numbering: `01`–`79` are valid programs, `80`–`89` fail at runtime, and `90`–`99` must be rejected statically. An ASCII twin of a canonical program has the same number and the suffix `-ascii`; its `.wires` and `.out` match the canonical program's, and its `.fmt.shaw` is the canonical program.
 
@@ -25,3 +26,5 @@ The lead writes and blesses expectations (`SHAWLINE_BLESS=<stage>`). Agents only
 `corpus/static/` holds statically rejected programs, numbered on their own. Each shows one diagnostic (with a lint, or a second diagnostic that the same repair clears), so that every code in PLAN P10's repairs table has a case.
 
 `corpus/fix/` holds inputs for `shawline fmt --fix`: near boxes with slipped border cells (SPEC §3). Each has a `.check` and a `.fix.shaw` (the repaired sheet, or the input unchanged where nothing qualifies as a slip). The `fix.shaw` stage is registered once `--fix` lands.
+
+`corpus/links/` holds links (SPEC §17), one fragment per file without its `#`, checked by `shawline-corpus/tests/links.rs` rather than as a stage. `<name>.link` must open as `corpus/<name>.shaw`, or `examples/<name>.shaw`, byte for byte; `edge/` holds texts no sheet has (empty, exactly 1 MiB, a byte-order mark with CRLF); and `refused/<kind>[-detail].link` must fail with that `LinkError`. They were encoded once with Python's `zlib` (raw DEFLATE, level 9) and `base64.urlsafe_b64encode`, not with `shawline-share`, and they never change: a link made today has to open in every later version.

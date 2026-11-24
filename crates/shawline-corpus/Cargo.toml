@@ -10,6 +10,7 @@ shawline-grid.workspace = true
 shawline-shape.workspace = true
 shawline-doc.workspace = true
 shawline-render.workspace = true
+shawline-share.workspace = true
 shawline-edit.workspace = true
 shawline-syntax.workspace = true
 
