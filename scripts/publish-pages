@@ -1,0 +1,61 @@
+#!/usr/bin/env bash
+# Publishes Studio to GitHub Pages (PLAN P12, Hosting): builds the
+# playground from the committed tree, writes the site as one commit on the
+# `gh-pages` branch, and pushes it. Pages serves that branch at
+# https://fluffyrabbot.github.io/shawline/.
+#
+#   scripts/publish-pages               build, commit to gh-pages, push
+#   scripts/publish-pages --dry-run DIR build and write the site into DIR only
+#
+# The branch is written with git's plumbing, so it is never checked out and
+# nothing in the working tree changes. It holds only the published build
+# (project CLAUDE.md); each commit names the main commit it was built from.
+set -euo pipefail
+
+root="$(cd "$(dirname "$0")/.." && pwd)"
+dry=""
+if [ "${1:-}" = "--dry-run" ]; then
+  dry="${2:?usage: scripts/publish-pages [--dry-run DIR]}"
+elif [ $# -gt 0 ]; then
+  echo "usage: scripts/publish-pages [--dry-run DIR]" >&2
+  exit 2
+fi
+
+cd "$root"
+# A published build names its commit, so it must be exactly that commit.
+if [ -z "$dry" ] && [ -n "$(git status --porcelain --untracked-files=no)" ]; then
+  echo "publish-pages: the working tree has uncommitted changes; commit them first" >&2
+  exit 1
+fi
+head="$(git rev-parse --short HEAD)"
+
+playground/build.sh
+
+site="${dry:-$(mktemp -d)}"
+mkdir -p "$site"
+# The Node package is for the playground's checks, not the page.
+rsync -a --delete --exclude node/ playground/dist/ "$site/"
+# Served as files, not run through Jekyll.
+touch "$site/.nojekyll"
+
+if [ -n "$dry" ]; then
+  echo "publish-pages: site for $head written to $site ($(du -sh "$site" | cut -f1)); nothing committed"
+  exit 0
+fi
+
+index="$(mktemp)"
+rm -f "$index"
+# Forced, so no ignore rule of the repository or the machine drops a file.
+tree="$(cd "$site" && export GIT_DIR="$root/.git" GIT_WORK_TREE="$site" GIT_INDEX_FILE="$index" &&
+  git add -A -f . && git write-tree)"
+rm -f "$index"
+git fetch --quiet origin gh-pages 2>/dev/null || true
+parent=()
+if git rev-parse --verify --quiet refs/remotes/origin/gh-pages >/dev/null; then
+  parent=(-p refs/remotes/origin/gh-pages)
+fi
+commit="$(git commit-tree "$tree" ${parent[@]+"${parent[@]}"} -m "Studio built from $head")"
+git update-ref refs/heads/gh-pages "$commit"
+git push --quiet origin refs/heads/gh-pages:refs/heads/gh-pages
+rm -rf "$site"
+echo "publish-pages: Studio built from $head pushed to gh-pages ($(git rev-parse --short "$commit"))"
