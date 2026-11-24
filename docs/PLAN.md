@@ -149,7 +149,7 @@ P0 to P11 are finished, P10 included: it closed on the lead's gate record, and t
 - **Repository:** `main` only, level with `origin/main`. No other branches or worktrees.
 
 ```
-P0–P11 ✅ ─► P12 Sharing (designed; contracts next) ─► P13 the toy layer
+P0–P11 ✅ ─► P12 Sharing (contracts landed; wave 1 next) ─► P13 the toy layer
 ```
 
 ## Next
@@ -178,7 +178,7 @@ P0–P11 ✅ ─► P12 Sharing (designed; contracts next) ─► P13 the toy la
 | The link and the address bar | **Share** copies the link and says how long it is. The address bar keeps naming the open slot (`#03-double`, `#yours-…`), so a reload returns to it. Once a `#v1.` link has opened, the address becomes its sheet's slot | Sharing is a deliberate act, and a reload keeps the draft model it has today. An address that tracked every edit would also mean a 1,000-character address bar while drawing. |
 | Clipboard refused | The link shows in a selected field, with "Copy it from here" | Clipboard access can be refused, and the link is still the thing being shared. |
 | Poster | `shawline_render::poster(&Grid, &Poster) -> String`: an SVG whose width and height are in mm, for A4, A3 or Letter, in whichever orientation gives the larger cell. 15 mm margins. A title band at the top holds each definition's name drawn by the glyph pen with its reading beneath, and a colophon at the foot says "drawn in Shawline". The drawing is scaled to fit, at most 8 mm per cell width, in the given theme, with readings or without | Chosen by the user. The glyph pen keeps the poster font-free and in the renderer's hand. The cap keeps `01-hello` from turning into a billboard. |
-| The poster's title | The caller passes the words: `Doc::definition_names()` (lead, `shawline-doc`) in sheet order, each read by `shawline_word::reading` | The renderer stays independent of syntax, as it is today. |
+| The poster's title | The caller passes the names, `Doc::definition_names()` (lead, `shawline-doc`), in sheet order. The poster draws each with its namer dot and its reading (`shawline_word::reading`) beneath, leaving out `𐑥𐑱𐑯` unless it is the only one | The sheet is parsed once, by `Doc`. `𐑥𐑱𐑯` is the harness on most sheets, not what the sheet is about. |
 | PDF | No PDF library. Studio's **Print** opens the poster alone with a matching `@page` size, and the browser's dialog saves a PDF. The CLI writes SVG only | Chosen by the user with the paper page. An SVG sized in mm prints exactly. |
 | Too small to read | Below 2 mm per cell, the Poster dialog says the letters will be hard to read and suggests A3. It still exports | `gray-code` comes out at 1.2 mm on A4. |
 | Gallery | **Gallery** opens a grid of cards. Each shows its drawing, rendered when the gallery opens in the current theme and Readings setting, its label, and one line on what it does. One click opens it as the picker would. The picker stays | Chosen by the user. |
@@ -188,13 +188,15 @@ P0–P11 ✅ ─► P12 Sharing (designed; contracts next) ─► P13 the toy la
 **The oracle, written first by the lead:**
 - SPEC §17, the link format, and the §16 words (landed with this design);
 - `shawline-share` with its signatures, `LinkError` and doc comments, and its bodies left `todo!()`;
-- `corpus/links/`: fixed links for `01-hello`, `09-length`, `11-even-odd` and `gray-code`, encoded independently of `shawline-share` (Python's `zlib`). A corpus stage `link` checks that each decodes to its sheet byte for byte, and that every valid program and every `examples/` sheet survives `decode(encode(text))`. A link made today must open in every later version;
-- `shawline-render/src/poster.rs` with `Poster`, `Paper` and the signature of `poster`. A `poster.svg` stage for `01-hello` and `11-even-odd`, whose files start empty and are blessed at the wave 1 gate, after the user has looked at them (Principle 6);
+- `corpus/links/`: fixed links for `01-hello`, `09-length`, `11-even-odd` and `gray-code`, three edge cases (empty, exactly 1 MiB, a byte-order mark with CRLF) and eleven refusals, encoded independently of `shawline-share` (Python's `zlib`). `shawline-corpus/tests/links.rs` checks that each opens as its sheet byte for byte or fails with the error its name gives, and that every corpus program and every `examples/` sheet survives `decode(encode(text))`. A link made today must open in every later version;
+- `shawline-render/src/poster.rs` with `Poster`, `Paper`, the three sizes in millimetres, and the signatures of `poster` and `cell_mm`. A `poster.svg` stage (A4, light, with readings), registered now. Its files for `01-hello` and `11-even-odd` are created and blessed at the wave 1 gate, after the user has looked at the posters (Principle 6). Until then no file exists, so the stage never runs an unwritten body;
 - `Doc::definition_names()`;
 - `playground/gallery.json`, with every line written.
 
+**Contracts landed** ✅ (2026-11-22). `shawline-share` and `poster.rs` hold signatures with `todo!()` bodies, and `Doc::definition_names` is written and tested. Every fixture was checked against a strict reference decoder written from SPEC §17. Until S lands, `tests/links.rs` is the one failing test in the workspace, as expected. S, R and W1 can start.
+
 **Wave 1: the pieces** (three agents at once):
-- **S** owns `shawline-share`: the codec, its errors and their messages, and unit tests for damaged, truncated, oversized and unknown-version links. Oracle: `cargo test -p shawline-share` and stage `link`.
+- **S** owns `shawline-share`: the codec, its errors and their messages, and unit tests for damaged, truncated, oversized and unknown-version links. Oracle: `cargo test -p shawline-share` and `cargo test -p shawline-corpus --test links`.
 - **R** owns `shawline-render`: `poster`. Unit tests check page sizes, orientation, the cell cap, and that the title band, the drawing and the colophon don't overlap. `resvg` previews of the two corpus posters, light and dark, go into the report for the gate.
 - **W1** owns `shawline-wasm` and `playground/`: your sheets (New sheet, the Yours group, labels, Remove sheet, storage in `drafts.js`), the gallery from `gallery.json`, and `examples/` in `build.sh`. Node checks: every gallery entry opens, your sheets survive a reload, and removing one leaves the examples' drafts alone.
 

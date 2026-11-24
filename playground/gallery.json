@@ -1,0 +1,22 @@
+[
+  { "sheet": "01-hello", "line": "The smallest sheet: ·𐑥𐑱𐑯 (mayn) sends the text «𐑣𐑧𐑤𐑴 𐑢𐑻𐑤𐑛» (heloh wurld) to its output." },
+  { "sheet": "02-arith", "line": "Four primitives on constants: 𐑑 multiplies and its mirror 𐑛 divides, 𐑚 subtracts, 𐑥 takes the smaller." },
+  { "sheet": "03-double", "line": "·𐑛𐑳𐑚𐑩𐑤 (dubəl) feeds its input into both arrowheads of 𐑐 (add), so 21 comes out 42." },
+  { "sheet": "03-double-ascii", "line": "03 · double sketched in ASCII with +--+ and -->. It means the same, and Format redraws it." },
+  { "sheet": "04-abs", "line": "·𐑨𐑚𐑕 (abs): 𐑤 asks whether a number is below 0, and a switch passes it on or subtracts it from 0." },
+  { "sheet": "05-inline", "line": "Nodes written inline, without boxes: 5 doubles twice, goes to text with 𐑖 and back with 𐑠, and doubles again." },
+  { "sheet": "06-pair", "line": "𐑒 makes a pair and its mirror 𐑜 takes one apart. Two crossing wires swap the halves." },
+  { "sheet": "07-list", "line": "Three 𐑟 nodes build [1 2 3] onto 𐑯𐑦𐑤 (nil), and the mirror 𐑕 splits it into head and tail." },
+  { "sheet": "08-factorial", "line": "·𐑓𐑨𐑒𐑑 (fakt) calls itself in a switch arm, multiplying down to 1: the factorials of 10 and 20." },
+  { "sheet": "08-factorial-ascii", "line": "08 · factorial sketched in ASCII, its switch and dotted divider included." },
+  { "sheet": "09-length", "line": "·𐑤𐑧𐑙𐑔 (length) splits off a list's head with 𐑕 and adds 1 to the length of the rest." },
+  { "sheet": "10-countdown", "line": "·𐑒𐑬𐑯𐑑 (kownt) calls itself 100,000 times. Each is a tail call, so it runs in constant space." },
+  { "sheet": "11-even-odd", "line": "·𐑰𐑝𐑩𐑯 (eevən) and ·𐑪𐑛 (od) call each other, each taking 1 away, until one reaches 0." },
+  { "sheet": "12-guards", "line": "·𐑯𐑱𐑥 (naym) names a number: a switch with a guard on each arm, and a default arm for the rest." },
+  { "sheet": "13-fanout", "line": "One source branches to five arrowheads: 𐑐 doubles 7, 𐑑 squares it, 𐑖 and 𐑠 turn it to text and back." },
+  { "sheet": "14-nil-box", "line": "𐑯𐑦𐑤 (nil), the empty list, drawn as a node box of its own." },
+  { "sheet": "15-fanout-cross", "line": "One wire branches twice, and the branches cross on their way to two outputs." },
+  { "sheet": "16-chop-join", "line": "The mirror pair 𐑗 and 𐑡: 𐑗 chops «𐑖𐑷𐑤𐑲𐑯» (shawlien) into letters, and 𐑡 joins them back." },
+  { "sheet": "17-inline-fanout", "line": "An inline node's output branches: 𐑖 shows 42 as text, and 𐑠 reads one branch back as a number." },
+  { "sheet": "gray-code", "line": "The reflected binary Gray code: ·𐑒𐑪𐑐𐑦 (kopi) puts «0» before each shorter code, ·𐑥𐑦𐑮𐑼 (mirər) «1» before them reversed." }
+]
