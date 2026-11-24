@@ -103,6 +103,15 @@ impl Doc {
         self.syntax().map(|(sheet, _)| sheet)
     }
 
+    /// Every definition's name in sheet order, without its namer dot: a
+    /// poster's title (PLAN P12). Empty when the text has grid errors; a
+    /// sheet with other errors still names the definitions it parsed.
+    pub fn definition_names(&self) -> Vec<String> {
+        self.sheet()
+            .map(|sheet| sheet.definitions.iter().map(|d| d.name.text.clone()).collect())
+            .unwrap_or_default()
+    }
+
     fn syntax(&self) -> Option<&(Sheet, Vec<Diagnostic>)> {
         let (grid, diagram) = (self.grid().ok()?, self.diagram()?);
         Some(self.syntax.get_or_init(|| shawline_syntax::parse(grid, diagram)))
@@ -252,6 +261,12 @@ mod tests {
         assert!(!std::ptr::eq(canonical, &doc));
         assert_eq!(canonical.text(), DOUBLE);
         assert!(std::ptr::eq(canonical.canonical().unwrap(), canonical));
+    }
+
+    #[test]
+    fn definition_names_are_in_sheet_order_without_dots() {
+        assert_eq!(Doc::new(DOUBLE).definition_names(), ["𐑛𐑳𐑚𐑩𐑤", "𐑥𐑱𐑯"]);
+        assert!(Doc::new("\t·𐑛\n").definition_names().is_empty());
     }
 
     #[test]

@@ -573,6 +573,7 @@ dependencies = [
  "shawline-grid",
  "shawline-render",
  "shawline-shape",
+ "shawline-share",
  "shawline-syntax",
 ]
 
@@ -679,6 +680,13 @@ name = "shawline-shape"
 version = "0.0.1"
 dependencies = [
  "shawline-grid",
+]
+
+[[package]]
+name = "shawline-share"
+version = "0.0.1"
+dependencies = [
+ "miniz_oxide 0.8.9",
 ]
 
 [[package]]

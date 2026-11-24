@@ -17,6 +17,7 @@ mod cells;
 mod chain;
 mod geometry;
 mod gloss;
+mod poster;
 mod strip;
 
 use std::fmt::{self, Write};
@@ -30,6 +31,7 @@ use chain::Chain;
 
 pub use geometry::{Area, Geometry};
 pub use gloss::{Gloss, Options};
+pub use poster::{LEGIBLE_CELL_MM, MARGIN_MM, MAX_CELL_MM, Paper, Poster, cell_mm, poster};
 
 /// Output pixels per glyph unit: a cell is 15 × 30 px.
 pub const SCALE: f64 = 0.025;

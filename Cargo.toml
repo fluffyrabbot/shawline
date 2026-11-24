@@ -21,6 +21,7 @@ shawline-render = { path = "crates/shawline-render" }
 shawline-font = { path = "crates/shawline-font" }
 shawline-doc = { path = "crates/shawline-doc" }
 shawline-edit = { path = "crates/shawline-edit" }
+shawline-share = { path = "crates/shawline-share" }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

@@ -1,0 +1,13 @@
+[package]
+name = "shawline-share"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+# Raw DEFLATE (RFC 1951) in pure Rust, so the same codec builds for wasm.
+miniz_oxide = "0.8"
+
+[lints]
+workspace = true
